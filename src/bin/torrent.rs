@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 pub struct BEString {
-    pub value: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 pub struct BEInteger {
@@ -36,17 +36,15 @@ impl BEValue {
             print!("    ");
         }
         match self {
-            BEValue::String(s) => {
-                match String::from_utf8(s.value.clone()) {
+            BEValue::String(be_string) => {
+                match String::from_utf8(be_string.data.clone()) {
                     Ok(s) => {
                         println!("{}", s);
                     }
                     Err(e) => {
-                        println!("<binary data>");
+                        println!("<{} bytes of binary data>", be_string.data.len());
                     }
                 }
-
-                // println!("{:?}", s.value);
             }
             BEValue::Integer(i) => {
                 println!("{}", i.value);
@@ -191,7 +189,7 @@ impl<'a> BEParser<'a> {
         let data_end = self.offset + size;
         let data: Vec<u8> = Vec::from(&self.data[data_start..data_end]);
         self.offset += size;
-        Ok(BEString { value: data })
+        Ok(BEString { data })
     }
 
     fn parse_list(&mut self, path: &String) -> Result<BEList, ParseError> {
@@ -228,7 +226,7 @@ impl<'a> BEParser<'a> {
                     }
                     let bekey_start = self.offset;
                     let bekey = self.parse_bytestring(path)?;
-                    let key = match String::from_utf8(bekey.value) {
+                    let key = match String::from_utf8(bekey.data) {
                         Err(e) => {
                             return Err(ParseError::new(bekey_start, path, "Invalid UTF-8 string"));
                         }
