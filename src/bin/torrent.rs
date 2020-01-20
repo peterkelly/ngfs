@@ -16,11 +16,11 @@ pub struct BEInteger {
 }
 
 pub struct BEList {
-    pub elements: Vec<BEValue>,
+    pub elements: Vec<BENode>,
 }
 
 pub struct BEDictionary {
-    pub elements: BTreeMap<String, BEValue>,
+    pub elements: BTreeMap<String, BENode>,
 }
 
 pub enum BEValue {
@@ -30,12 +30,18 @@ pub enum BEValue {
     Dictionary(Box<BEDictionary>),
 }
 
-impl BEValue {
+pub struct BENode {
+    start: usize,
+    end: usize,
+    value: BEValue,
+}
+
+impl BENode {
     fn dump(&self, indent: usize) {
         for i in 0..indent {
             print!("    ");
         }
-        match self {
+        match &self.value {
             BEValue::String(be_string) => {
                 match String::from_utf8(be_string.data.clone()) {
                     Ok(s) => {
@@ -166,7 +172,7 @@ impl<'a> BEParser<'a> {
     fn parse_list(&mut self, path: &String) -> Result<BEList, ParseError> {
         let start = self.offset;
         self.expect_byte(path, b'l')?;
-        let mut elements: Vec<BEValue> = Vec::new();
+        let mut elements: Vec<BENode> = Vec::new();
         let mut index: usize = 0;
         loop {
             match self.peek() {
@@ -178,7 +184,7 @@ impl<'a> BEParser<'a> {
                     break;
                 }
                 Some(byte) => {
-                    elements.push(self.parse_value(&format!("{}/{}", path, index))?);
+                    elements.push(self.parse_node(&format!("{}/{}", path, index))?);
                     index += 1;
                 }
             }
@@ -188,7 +194,7 @@ impl<'a> BEParser<'a> {
 
     fn parse_dict(&mut self, path: &String) -> Result<BEDictionary, ParseError> {
         self.expect_byte(path, b'd')?;
-        let mut elements: BTreeMap<String, BEValue> = BTreeMap::new();
+        let mut elements: BTreeMap<String, BENode> = BTreeMap::new();
         loop {
             match self.peek() {
                 None => { return Err(ParseError::new(self.offset, path, &String::from("Premature end of file"))); }
@@ -205,7 +211,7 @@ impl<'a> BEParser<'a> {
                         }
                         Ok(s) => s
                     };
-                    let value = self.parse_value(&format!("{}/{}", path, key))?;
+                    let value = self.parse_node(&format!("{}/{}", path, key))?;
                     elements.insert(key, value);
                 }
             }
@@ -220,7 +226,7 @@ impl<'a> BEParser<'a> {
         Ok(BEInteger { value: value })
     }
 
-    fn parse_value(&mut self, path: &String) -> Result<BEValue, ParseError> {
+    fn parse_value_inner(&mut self, path: &String) -> Result<BEValue, ParseError> {
         match self.peek() {
             None => Err(self.error(path, "Premature end of file")),
             Some(b'i') => self.parse_integer(path).map(|i| BEValue::Integer(i)),
@@ -229,6 +235,13 @@ impl<'a> BEParser<'a> {
             Some(b'0'..=b'9') => self.parse_bytestring(path).map(|s| BEValue::String(s)),
             Some(byte) => Err(self.error(path, &format!("Unknown value type: {}", byte))),
         }
+    }
+
+    fn parse_node(&mut self, path: &String) -> Result<BENode, ParseError> {
+        let start = self.offset;
+        let value = self.parse_value_inner(path)?;
+        let end = self.offset;
+        Ok(BENode { start, end, value })
     }
 }
 
@@ -244,10 +257,10 @@ impl Torrent {
 
 fn test_parse(data: &[u8]) {
     let mut parser = BEParser::new(data);
-    let res = parser.parse_value(&String::from(""));
+    let res = parser.parse_node(&String::from(""));
     match res {
-        Ok(value) => {
-            value.dump(0);
+        Ok(node) => {
+            node.dump(0);
         }
         Err(e) => {
             println!("Parse failed at offset {}, path \"{}\": {}", e.offset, e.path, e.msg);
