@@ -30,6 +30,47 @@ pub enum BEValue {
     Dictionary(Box<BEDictionary>),
 }
 
+impl BEValue {
+    fn dump(&self, indent: usize) {
+        for i in 0..indent {
+            print!("    ");
+        }
+        match self {
+            BEValue::String(s) => {
+                match String::from_utf8(s.value.clone()) {
+                    Ok(s) => {
+                        println!("{}", s);
+                    }
+                    Err(e) => {
+                        println!("<binary data>");
+                    }
+                }
+
+                // println!("{:?}", s.value);
+            }
+            BEValue::Integer(i) => {
+                println!("{}", i.value);
+            }
+            BEValue::List(l) => {
+                println!("list");
+                for element in &l.elements {
+                    element.dump(indent + 1);
+                }
+            }
+            BEValue::Dictionary(d) => {
+                println!("dict");
+                for (key, value) in d.elements.iter() {
+                    for i in 0..indent + 1 {
+                        print!("    ");
+                    }
+                    println!("{} =", key);
+                    value.dump(indent + 2);
+                }
+            }
+        }
+    }
+}
+
 pub struct BEParser<'a> {
     offset: usize,
     data: &'a [u8],
@@ -123,6 +164,74 @@ impl<'a> BEParser<'a> {
         }
     }
 
+    fn parse_bytestring(&mut self, path: &String) -> Result<BEString, ParseError> {
+        let start = self.offset;
+        let size = self.parse_usize(path)?;
+
+        if Some(b':') != self.read() {
+            return Err(ParseError::new(self.offset, path, "Expected :"));
+        }
+
+
+        // FIXME: Handle integer overflow
+        if self.offset + size > self.data.len() {
+            return Err(ParseError::new(start, path, "String goes beyond end of file"));
+        }
+        // let colon_offset
+        // let colon = self.read().ok_or_else(|| ParseError::new(self.offset, path, "Expected :"))?;
+        // if colon != b'x'
+
+        // match self.peek() {
+        //     None => {
+        //         return Err(ParseError::new(self.offset, path, "Expected :"));
+        //     }
+        //     Some(c) => {
+        //         if c != b'X' {
+        //             return Err(ParseError::new(self.offset, path, "Expected :"));
+        //         }
+        //         else {
+        //             self.advance();
+        //         }
+        //     }
+        // }
+
+
+
+
+
+        let data_start = self.offset;
+        let data_end = self.offset + size;
+        let data: Vec<u8> = Vec::from(&self.data[data_start..data_end]);
+        self.offset += size;
+        return Ok(BEString { value: data })
+    }
+
+    fn parse_list(&mut self, path: &String) -> Result<BEList, ParseError> {
+        let start = self.offset;
+        if self.read() != Some(b'l') {
+            return Err(ParseError::new(start, path, "Expected 'l'"));
+        }
+        let mut elements: Vec<BEValue> = Vec::new();
+        let mut index: usize = 0;
+        loop {
+            match self.peek() {
+                None => { return Err(ParseError::new(self.offset, path, &String::from("Premature end of file"))); }
+                Some(byte) => {
+                    if byte == b'e' {
+                        self.advance();
+                        break;
+                    }
+                    // elements.append(self.parse_value(path)?);
+                    // let value = self.parse_value(path)?;
+                    elements.push(self.parse_value(&format!("{}/{}", path, index))?);
+                    index += 1;
+                }
+            }
+        }
+        return Ok(BEList { elements: elements })
+        // return Err(self.error(path, "Lists unsupported"));
+    }
+
     fn parse_dict(&mut self, path: &String) -> Result<BEDictionary, ParseError> {
         let mut elements: BTreeMap<String, BEValue> = BTreeMap::new();
         // return Ok(BEValue::Dictionary(BEDictionary { elements: elements }));
@@ -134,13 +243,38 @@ impl<'a> BEParser<'a> {
                         self.advance();
                         break;
                     }
-                    let size = self.parse_usize(path)?;
+                    // let size = self.parse_usize(path)?;
+                    let bekey_start = self.offset;
+                    let bekey = self.parse_bytestring(path)?;
+                    // let x: () = colon;
+                    let key = match String::from_utf8(bekey.value) {
+                        Err(e) => {
+                            return Err(ParseError::new(bekey_start, path, "Invalid UTF-8 string"));
+                        }
+                        Ok(s) => s
+                    };
+                    println!("Found key: {}", key);
+                    let value = self.parse_value(&format!("{}/{}", path, key))?;
+                    elements.insert(key, value);
 
-                    break;
+                    // break;
                 }
             }
         }
         return Ok(BEDictionary { elements: elements });
+    }
+
+    fn parse_integer(&mut self, path: &String) -> Result<BEInteger, ParseError> {
+        let start = self.offset;
+        if self.read() != Some(b'i') {
+            return Err(ParseError::new(start, path, "Expected 'i'"));
+        }
+        let value = self.parse_usize(path)?;
+        let start = self.offset;
+        if self.read() != Some(b'e') {
+            return Err(ParseError::new(start, path, "Expected 'e'"));
+        }
+        return Ok(BEInteger { value: value });
     }
 
     fn parse_value(&mut self, path: &String) -> Result<BEValue, ParseError> {
@@ -150,22 +284,25 @@ impl<'a> BEParser<'a> {
             Some(byte) => {
                     // unimplemented!();
                 if byte == b'i' {
-                    println!("found integer");
-                    unimplemented!();
+                    // println!("found integer");
+                    // unimplemented!();
+                    self.parse_integer(path).map(|i| BEValue::Integer(i))
                 }
                 else if byte == b'l' {
                     println!("found list");
-                    unimplemented!();
+                    // unimplemented!();
+                    // self.advance();
+                    self.parse_list(path).map(|l| BEValue::List(Box::new(l)))
                 }
                 else if byte == b'd' {
                     println!("found dictionary");
                     self.advance();
                     self.parse_dict(path).map(|d| BEValue::Dictionary(Box::new(d)))
-                    // unimplemented!()
                 }
                 else if byte >= b'0' && byte <= b'9' {
-                    println!("found string");
-                    unimplemented!()
+                    // println!("found string");
+                    // unimplemented!()
+                    self.parse_bytestring(path).map(|s| BEValue::String(s))
                 }
                 else {
                     // Err(ParseError::new(self.offset, path, &format!("Unknown value type: {}", byte)))
@@ -206,6 +343,8 @@ fn test_parse(data: &[u8]) {
     match res {
         Ok(value) => {
             println!("Parse successful");
+            println!();
+            value.dump(0);
         }
         Err(e) => {
             println!("Parse failed at offset {}, path \"{}\": {}", e.offset, e.path, e.msg);
