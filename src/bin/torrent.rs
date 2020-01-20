@@ -125,38 +125,23 @@ impl<'a> BEParser<'a> {
         let start = self.offset;
         loop {
             match self.peek() {
-                None => { break; }
-                Some(byte) => {
-                    if byte >= b'0' && byte <= b'9' {
-                        self.advance();
-                    }
-                    else {
-                        break;
-                    }
-                }
+                None => break,
+                Some(b'0'..=b'9') => self.advance(),
+                Some(byte) => break,
             }
         }
         let end = self.offset;
         if end == start {
             return Err(self.error(path, "Expected a digit"));
         }
-        match String::from_utf8(Vec::from(&self.data[start..end])) {
-            Ok(s) => {
-                // println!("Got integer string: {}", s);
-                match s.parse::<usize>() {
-                    Ok(value) => {
-                        // println!("value = {}", value);
-                        return Ok(value);
-                    }
-                    Err(e) => {
-                        return Err(ParseError::new(start, path, &format!("{}", e)));
-                    }
-                }
-            }
-            Err(e) => {
-                return Err(ParseError::new(start, path, "Invalid UTF-8 string"));
-            }
-        }
+
+        let s = String::from_utf8(Vec::from(&self.data[start..end]))
+            .or_else(|e| Err(ParseError::new(start, path, &format!("{}", e))))?;
+
+        let value = s.parse::<usize>()
+            .or_else(|e| Err(ParseError::new(start, path, &format!("{}", e))))?;
+
+        Ok(value)
     }
 
     fn expect_byte(&mut self, path: &String, byte: u8) -> Result<(), ParseError> {
@@ -179,7 +164,6 @@ impl<'a> BEParser<'a> {
         let size = self.parse_usize(path)?;
 
         self.expect_byte(path, b':')?;
-
 
         // FIXME: Handle integer overflow
         if self.offset + size > self.data.len() {
