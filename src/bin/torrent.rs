@@ -104,17 +104,6 @@ impl<'a> BEParser<'a> {
         }
     }
 
-    fn read(&mut self) -> Option<u8> {
-        if self.offset >= self.data.len() {
-            None
-        }
-        else {
-            let byte = self.data[self.offset];
-            self.offset += 1;
-            Some(byte)
-        }
-    }
-
     fn advance(&mut self) {
         if self.offset < self.data.len() {
             self.offset += 1;
@@ -160,19 +149,17 @@ impl<'a> BEParser<'a> {
     }
 
     fn parse_bytestring(&mut self, path: &String) -> Result<BEString, ParseError> {
-        let start = self.offset;
         let size = self.parse_usize(path)?;
-
         self.expect_byte(path, b':')?;
 
-        // FIXME: Handle integer overflow
-        if self.offset + size > self.data.len() {
-            return Err(ParseError::new(start, path, "String goes beyond end of file"));
+        let start = self.offset;
+        let end = self.offset.checked_add(size).ok_or_else(|| self.error(path, "Integer overflow"))?;
+        if end > self.data.len() {
+            return Err(self.error(path, "String goes beyond end of file"));
         }
-        let data_start = self.offset;
-        let data_end = self.offset + size;
-        let data: Vec<u8> = Vec::from(&self.data[data_start..data_end]);
-        self.offset += size;
+
+        let data: Vec<u8> = Vec::from(&self.data[start..end]);
+        self.offset = end;
         Ok(BEString { data })
     }
 
