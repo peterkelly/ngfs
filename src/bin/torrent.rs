@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 pub enum BEValue {
-    String(Vec<u8>),
+    ByteString(Vec<u8>),
     Integer(usize),
     List(Vec<BENode>),
     Dictionary(BTreeMap<String, BENode>),
@@ -26,7 +26,7 @@ impl BENode {
             print!("    ");
         }
         match &self.value {
-            BEValue::String(data) => {
+            BEValue::ByteString(data) => {
                 match String::from_utf8(data.clone()) {
                     Ok(s) => {
                         println!("{}", s);
@@ -216,7 +216,7 @@ impl<'a> BEParser<'a> {
             Some(b'i') => self.parse_integer(path).map(|i| BEValue::Integer(i)),
             Some(b'l') => self.parse_list(path).map(|l| BEValue::List(l)),
             Some(b'd') => self.parse_dict(path).map(|d| BEValue::Dictionary(d)),
-            Some(b'0'..=b'9') => self.parse_byte_string(path).map(|s| BEValue::String(s)),
+            Some(b'0'..=b'9') => self.parse_byte_string(path).map(|s| BEValue::ByteString(s)),
             Some(byte) => Err(self.error(path, &format!("Unknown value type: {}", byte))),
         }
     }
