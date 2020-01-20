@@ -187,14 +187,10 @@ impl<'a> BEParser<'a> {
                     break;
                 }
                 Some(byte) => {
-                    let bekey_start = self.offset;
+                    let key_start = self.offset;
                     let key_data = self.parse_bytestring(path)?;
-                    let key = match String::from_utf8(key_data) {
-                        Err(e) => {
-                            return Err(ParseError::new(bekey_start, path, "Invalid UTF-8 string"));
-                        }
-                        Ok(s) => s
-                    };
+                    let key = String::from_utf8(key_data)
+                        .or_else(|e| Err(ParseError::new(key_start, path, &format!("{}", e))))?;
                     let value = self.parse_node(&format!("{}/{}", path, key))?;
                     elements.insert(key, value);
                 }
