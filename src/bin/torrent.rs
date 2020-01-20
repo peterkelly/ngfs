@@ -199,12 +199,14 @@ impl<'a> BEParser<'a> {
         let mut index: usize = 0;
         loop {
             match self.peek() {
-                None => { return Err(ParseError::new(self.offset, path, &String::from("Premature end of file"))); }
+                None => {
+                    return Err(self.error(path, &String::from("Premature end of file")));
+                }
+                Some(b'e') => {
+                    self.advance();
+                    break;
+                }
                 Some(byte) => {
-                    if byte == b'e' {
-                        self.advance();
-                        break;
-                    }
                     elements.push(self.parse_value(&format!("{}/{}", path, index))?);
                     index += 1;
                 }
@@ -219,11 +221,11 @@ impl<'a> BEParser<'a> {
         loop {
             match self.peek() {
                 None => { return Err(ParseError::new(self.offset, path, &String::from("Premature end of file"))); }
+                Some(b'e') => {
+                    self.advance();
+                    break;
+                }
                 Some(byte) => {
-                    if byte == b'e' {
-                        self.advance();
-                        break;
-                    }
                     let bekey_start = self.offset;
                     let bekey = self.parse_bytestring(path)?;
                     let key = match String::from_utf8(bekey.data) {
@@ -249,26 +251,12 @@ impl<'a> BEParser<'a> {
 
     fn parse_value(&mut self, path: &String) -> Result<BEValue, ParseError> {
         match self.peek() {
-            None => {
-                Err(self.error(path, "Premature end of file"))
-            }
-            Some(byte) => {
-                if byte == b'i' {
-                    self.parse_integer(path).map(|i| BEValue::Integer(i))
-                }
-                else if byte == b'l' {
-                    self.parse_list(path).map(|l| BEValue::List(Box::new(l)))
-                }
-                else if byte == b'd' {
-                    self.parse_dict(path).map(|d| BEValue::Dictionary(Box::new(d)))
-                }
-                else if byte >= b'0' && byte <= b'9' {
-                    self.parse_bytestring(path).map(|s| BEValue::String(s))
-                }
-                else {
-                    Err(self.error(path, &format!("Unknown value type: {}", byte)))
-                }
-            }
+            None => Err(self.error(path, "Premature end of file")),
+            Some(b'i') => self.parse_integer(path).map(|i| BEValue::Integer(i)),
+            Some(b'l') => self.parse_list(path).map(|l| BEValue::List(Box::new(l))),
+            Some(b'd') => self.parse_dict(path).map(|d| BEValue::Dictionary(Box::new(d))),
+            Some(b'0'..=b'9') => self.parse_bytestring(path).map(|s| BEValue::String(s)),
+            Some(byte) => Err(self.error(path, &format!("Unknown value type: {}", byte))),
         }
     }
 }
