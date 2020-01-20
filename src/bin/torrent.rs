@@ -123,9 +123,6 @@ impl<'a> BEParser<'a> {
         }
     }
 
-    // fn error(&self, path: &String, msg: &str) {
-    // }
-
     fn parse_usize(&mut self, path: &String) -> Result<usize, ParseError> {
         let start = self.offset;
         loop {
@@ -164,53 +161,42 @@ impl<'a> BEParser<'a> {
         }
     }
 
+    fn expect_byte(&mut self, path: &String, byte: u8) -> Result<(), ParseError> {
+        match self.peek() {
+            None => {
+                Err(self.error(path, &format!("Expected {}, got end of file", byte_repr(byte))))
+            }
+            Some(b) if b != byte => {
+                Err(self.error(path, &format!("Expected {}, got {}", byte_repr(byte), byte_repr(b))))
+            }
+            Some(b) => {
+                self.advance();
+                Ok(())
+            }
+        }
+    }
+
     fn parse_bytestring(&mut self, path: &String) -> Result<BEString, ParseError> {
         let start = self.offset;
         let size = self.parse_usize(path)?;
 
-        if Some(b':') != self.read() {
-            return Err(ParseError::new(self.offset, path, "Expected :"));
-        }
+        self.expect_byte(path, b':')?;
 
 
         // FIXME: Handle integer overflow
         if self.offset + size > self.data.len() {
             return Err(ParseError::new(start, path, "String goes beyond end of file"));
         }
-        // let colon_offset
-        // let colon = self.read().ok_or_else(|| ParseError::new(self.offset, path, "Expected :"))?;
-        // if colon != b'x'
-
-        // match self.peek() {
-        //     None => {
-        //         return Err(ParseError::new(self.offset, path, "Expected :"));
-        //     }
-        //     Some(c) => {
-        //         if c != b'X' {
-        //             return Err(ParseError::new(self.offset, path, "Expected :"));
-        //         }
-        //         else {
-        //             self.advance();
-        //         }
-        //     }
-        // }
-
-
-
-
-
         let data_start = self.offset;
         let data_end = self.offset + size;
         let data: Vec<u8> = Vec::from(&self.data[data_start..data_end]);
         self.offset += size;
-        return Ok(BEString { value: data })
+        Ok(BEString { value: data })
     }
 
     fn parse_list(&mut self, path: &String) -> Result<BEList, ParseError> {
         let start = self.offset;
-        if self.read() != Some(b'l') {
-            return Err(ParseError::new(start, path, "Expected 'l'"));
-        }
+        self.expect_byte(path, b'l')?;
         let mut elements: Vec<BEValue> = Vec::new();
         let mut index: usize = 0;
         loop {
@@ -221,20 +207,17 @@ impl<'a> BEParser<'a> {
                         self.advance();
                         break;
                     }
-                    // elements.append(self.parse_value(path)?);
-                    // let value = self.parse_value(path)?;
                     elements.push(self.parse_value(&format!("{}/{}", path, index))?);
                     index += 1;
                 }
             }
         }
-        return Ok(BEList { elements: elements })
-        // return Err(self.error(path, "Lists unsupported"));
+        Ok(BEList { elements: elements })
     }
 
     fn parse_dict(&mut self, path: &String) -> Result<BEDictionary, ParseError> {
+        self.expect_byte(path, b'd')?;
         let mut elements: BTreeMap<String, BEValue> = BTreeMap::new();
-        // return Ok(BEValue::Dictionary(BEDictionary { elements: elements }));
         loop {
             match self.peek() {
                 None => { return Err(ParseError::new(self.offset, path, &String::from("Premature end of file"))); }
@@ -243,38 +226,27 @@ impl<'a> BEParser<'a> {
                         self.advance();
                         break;
                     }
-                    // let size = self.parse_usize(path)?;
                     let bekey_start = self.offset;
                     let bekey = self.parse_bytestring(path)?;
-                    // let x: () = colon;
                     let key = match String::from_utf8(bekey.value) {
                         Err(e) => {
                             return Err(ParseError::new(bekey_start, path, "Invalid UTF-8 string"));
                         }
                         Ok(s) => s
                     };
-                    // println!("Found key: {}", key);
                     let value = self.parse_value(&format!("{}/{}", path, key))?;
                     elements.insert(key, value);
-
-                    // break;
                 }
             }
         }
-        return Ok(BEDictionary { elements: elements });
+        Ok(BEDictionary { elements: elements })
     }
 
     fn parse_integer(&mut self, path: &String) -> Result<BEInteger, ParseError> {
-        let start = self.offset;
-        if self.read() != Some(b'i') {
-            return Err(ParseError::new(start, path, "Expected 'i'"));
-        }
+        self.expect_byte(path, b'i')?;
         let value = self.parse_usize(path)?;
-        let start = self.offset;
-        if self.read() != Some(b'e') {
-            return Err(ParseError::new(start, path, "Expected 'e'"));
-        }
-        return Ok(BEInteger { value: value });
+        self.expect_byte(path, b'e')?;
+        Ok(BEInteger { value: value })
     }
 
     fn parse_value(&mut self, path: &String) -> Result<BEValue, ParseError> {
@@ -290,7 +262,6 @@ impl<'a> BEParser<'a> {
                     self.parse_list(path).map(|l| BEValue::List(Box::new(l)))
                 }
                 else if byte == b'd' {
-                    self.advance();
                     self.parse_dict(path).map(|d| BEValue::Dictionary(Box::new(d)))
                 }
                 else if byte >= b'0' && byte <= b'9' {
@@ -326,6 +297,21 @@ fn test_parse(data: &[u8]) {
         }
     }
 }
+
+fn byte_repr(value: u8) -> String {
+    if value >= 0x20 && value <= 0x7e {
+        format!("'{}'", String::from_utf8_lossy(&[value]))
+    }
+    else {
+        format!("0x{:02x}", value)
+    }
+}
+
+// fn main() {
+//     for i in 0..=255 {
+//         println!("{:02x} -- {}", i, byte_repr(i));
+//     }
+// }
 
 fn main() {
     // println!("Hello World!");
