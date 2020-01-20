@@ -147,10 +147,10 @@ impl<'a> BEParser<'a> {
         }
         match String::from_utf8(Vec::from(&self.data[start..end])) {
             Ok(s) => {
-                println!("Got integer string: {}", s);
+                // println!("Got integer string: {}", s);
                 match s.parse::<usize>() {
                     Ok(value) => {
-                        println!("value = {}", value);
+                        // println!("value = {}", value);
                         return Ok(value);
                     }
                     Err(e) => {
@@ -253,7 +253,7 @@ impl<'a> BEParser<'a> {
                         }
                         Ok(s) => s
                     };
-                    println!("Found key: {}", key);
+                    // println!("Found key: {}", key);
                     let value = self.parse_value(&format!("{}/{}", path, key))?;
                     elements.insert(key, value);
 
@@ -279,52 +279,29 @@ impl<'a> BEParser<'a> {
 
     fn parse_value(&mut self, path: &String) -> Result<BEValue, ParseError> {
         match self.peek() {
-            // None => Err(ParseError::new(self.offset, path, &String::from("Premature end of file"))),
-            None => Err(self.error(path, "Premature end of file")),
+            None => {
+                Err(self.error(path, "Premature end of file"))
+            }
             Some(byte) => {
-                    // unimplemented!();
                 if byte == b'i' {
-                    // println!("found integer");
-                    // unimplemented!();
                     self.parse_integer(path).map(|i| BEValue::Integer(i))
                 }
                 else if byte == b'l' {
-                    println!("found list");
-                    // unimplemented!();
-                    // self.advance();
                     self.parse_list(path).map(|l| BEValue::List(Box::new(l)))
                 }
                 else if byte == b'd' {
-                    println!("found dictionary");
                     self.advance();
                     self.parse_dict(path).map(|d| BEValue::Dictionary(Box::new(d)))
                 }
                 else if byte >= b'0' && byte <= b'9' {
-                    // println!("found string");
-                    // unimplemented!()
                     self.parse_bytestring(path).map(|s| BEValue::String(s))
                 }
                 else {
-                    // Err(ParseError::new(self.offset, path, &format!("Unknown value type: {}", byte)))
                     Err(self.error(path, &format!("Unknown value type: {}", byte)))
                 }
             }
         }
     }
-    //     if (this.pos >= this.len)
-    //         throw new ParseError(path, this.pos, "Premature end of file");
-    //     const byte = this.buf[this.pos];
-    //     if (byte === "i".charCodeAt(0))
-    //         return this.parseIntegerValue(path);
-    //     else if (byte === "l".charCodeAt(0))
-    //         return this.parseListValue(path);
-    //     else if (byte === "d".charCodeAt(0))
-    //         return this.parseDictValue(path);
-    //     else if ((byte >= 0x30) && (byte <= 0x39))
-    //         return this.parseStringValue(path);
-    //     else
-    //         throw new ParseError(path, this.pos, "Unknown value type: " + String.fromCharCode(byte));
-    // }
 }
 
 pub struct Torrent {
@@ -342,8 +319,6 @@ fn test_parse(data: &[u8]) {
     let res = parser.parse_value(&String::from(""));
     match res {
         Ok(value) => {
-            println!("Parse successful");
-            println!();
             value.dump(0);
         }
         Err(e) => {
@@ -353,10 +328,10 @@ fn test_parse(data: &[u8]) {
 }
 
 fn main() {
-    println!("Hello World!");
+    // println!("Hello World!");
 
     let args: Vec<String> = std::env::args().collect();
-    println!("args.len() = {}", args.len());
+    // println!("args.len() = {}", args.len());
     // for arg in &args {
     //     let x: i32 = arg;
     //     println!("arg: {}", arg);
@@ -368,7 +343,7 @@ fn main() {
     }
 
     let filename: &String = &args[1];
-    println!("filename = {}", filename);
+    // println!("filename = {}", filename);
 
     let res = std::fs::read(filename);
     match res {
