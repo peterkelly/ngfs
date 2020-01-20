@@ -7,27 +7,11 @@
 
 use std::collections::BTreeMap;
 
-pub struct BEString {
-    pub data: Vec<u8>,
-}
-
-pub struct BEInteger {
-    pub value: usize,
-}
-
-pub struct BEList {
-    pub elements: Vec<BENode>,
-}
-
-pub struct BEDictionary {
-    pub elements: BTreeMap<String, BENode>,
-}
-
 pub enum BEValue {
-    String(BEString),
-    Integer(BEInteger),
-    List(Box<BEList>),
-    Dictionary(Box<BEDictionary>),
+    String(Vec<u8>),
+    Integer(usize),
+    List(Vec<BENode>),
+    Dictionary(BTreeMap<String, BENode>),
 }
 
 pub struct BENode {
@@ -42,28 +26,28 @@ impl BENode {
             print!("    ");
         }
         match &self.value {
-            BEValue::String(be_string) => {
-                match String::from_utf8(be_string.data.clone()) {
+            BEValue::String(data) => {
+                match String::from_utf8(data.clone()) {
                     Ok(s) => {
                         println!("{}", s);
                     }
                     Err(e) => {
-                        println!("<{} bytes of binary data>", be_string.data.len());
+                        println!("<{} bytes of binary data>", data.len());
                     }
                 }
             }
-            BEValue::Integer(i) => {
-                println!("{}", i.value);
+            BEValue::Integer(value) => {
+                println!("{}", value);
             }
-            BEValue::List(l) => {
+            BEValue::List(elements) => {
                 println!("list");
-                for element in &l.elements {
+                for element in elements {
                     element.dump(indent + 1);
                 }
             }
-            BEValue::Dictionary(d) => {
+            BEValue::Dictionary(elements) => {
                 println!("dict");
-                for (key, value) in d.elements.iter() {
+                for (key, value) in elements.iter() {
                     for i in 0..indent + 1 {
                         print!("    ");
                     }
@@ -154,7 +138,7 @@ impl<'a> BEParser<'a> {
         }
     }
 
-    fn parse_bytestring(&mut self, path: &String) -> Result<BEString, ParseError> {
+    fn parse_bytestring(&mut self, path: &String) -> Result<Vec<u8>, ParseError> {
         let size = self.parse_usize(path)?;
         self.expect_byte(path, b':')?;
 
@@ -166,10 +150,10 @@ impl<'a> BEParser<'a> {
 
         let data: Vec<u8> = Vec::from(&self.data[start..end]);
         self.offset = end;
-        Ok(BEString { data })
+        Ok(data)
     }
 
-    fn parse_list(&mut self, path: &String) -> Result<BEList, ParseError> {
+    fn parse_list(&mut self, path: &String) -> Result<Vec<BENode>, ParseError> {
         let start = self.offset;
         self.expect_byte(path, b'l')?;
         let mut elements: Vec<BENode> = Vec::new();
@@ -189,10 +173,10 @@ impl<'a> BEParser<'a> {
                 }
             }
         }
-        Ok(BEList { elements: elements })
+        Ok(elements)
     }
 
-    fn parse_dict(&mut self, path: &String) -> Result<BEDictionary, ParseError> {
+    fn parse_dict(&mut self, path: &String) -> Result<BTreeMap<String, BENode>, ParseError> {
         self.expect_byte(path, b'd')?;
         let mut elements: BTreeMap<String, BENode> = BTreeMap::new();
         loop {
@@ -204,8 +188,8 @@ impl<'a> BEParser<'a> {
                 }
                 Some(byte) => {
                     let bekey_start = self.offset;
-                    let bekey = self.parse_bytestring(path)?;
-                    let key = match String::from_utf8(bekey.data) {
+                    let key_data = self.parse_bytestring(path)?;
+                    let key = match String::from_utf8(key_data) {
                         Err(e) => {
                             return Err(ParseError::new(bekey_start, path, "Invalid UTF-8 string"));
                         }
@@ -216,22 +200,22 @@ impl<'a> BEParser<'a> {
                 }
             }
         }
-        Ok(BEDictionary { elements: elements })
+        Ok(elements)
     }
 
-    fn parse_integer(&mut self, path: &String) -> Result<BEInteger, ParseError> {
+    fn parse_integer(&mut self, path: &String) -> Result<usize, ParseError> {
         self.expect_byte(path, b'i')?;
         let value = self.parse_usize(path)?;
         self.expect_byte(path, b'e')?;
-        Ok(BEInteger { value: value })
+        Ok(value)
     }
 
     fn parse_value_inner(&mut self, path: &String) -> Result<BEValue, ParseError> {
         match self.peek() {
             None => Err(self.error(path, "Premature end of file")),
             Some(b'i') => self.parse_integer(path).map(|i| BEValue::Integer(i)),
-            Some(b'l') => self.parse_list(path).map(|l| BEValue::List(Box::new(l))),
-            Some(b'd') => self.parse_dict(path).map(|d| BEValue::Dictionary(Box::new(d))),
+            Some(b'l') => self.parse_list(path).map(|l| BEValue::List(l)),
+            Some(b'd') => self.parse_dict(path).map(|d| BEValue::Dictionary(d)),
             Some(b'0'..=b'9') => self.parse_bytestring(path).map(|s| BEValue::String(s)),
             Some(byte) => Err(self.error(path, &format!("Unknown value type: {}", byte))),
         }
