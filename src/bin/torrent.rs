@@ -138,7 +138,7 @@ impl<'a> BEParser<'a> {
         }
     }
 
-    fn parse_bytestring(&mut self, path: &String) -> Result<Vec<u8>, ParseError> {
+    fn parse_byte_string(&mut self, path: &String) -> Result<Vec<u8>, ParseError> {
         let size = self.parse_usize(path)?;
         self.expect_byte(path, b':')?;
 
@@ -176,6 +176,13 @@ impl<'a> BEParser<'a> {
         Ok(elements)
     }
 
+    fn parse_utf8_string(&mut self, path: &String) -> Result<String, ParseError> {
+        let start = self.offset;
+        let data = self.parse_byte_string(path)?;
+        String::from_utf8(data)
+            .or_else(|e| Err(ParseError::new(start, path, &format!("{}", e))))
+    }
+
     fn parse_dict(&mut self, path: &String) -> Result<BTreeMap<String, BENode>, ParseError> {
         self.expect_byte(path, b'd')?;
         let mut elements: BTreeMap<String, BENode> = BTreeMap::new();
@@ -187,10 +194,7 @@ impl<'a> BEParser<'a> {
                     break;
                 }
                 Some(byte) => {
-                    let key_start = self.offset;
-                    let key_data = self.parse_bytestring(path)?;
-                    let key = String::from_utf8(key_data)
-                        .or_else(|e| Err(ParseError::new(key_start, path, &format!("{}", e))))?;
+                    let key = self.parse_utf8_string(path)?;
                     let value = self.parse_node(&format!("{}/{}", path, key))?;
                     elements.insert(key, value);
                 }
@@ -212,7 +216,7 @@ impl<'a> BEParser<'a> {
             Some(b'i') => self.parse_integer(path).map(|i| BEValue::Integer(i)),
             Some(b'l') => self.parse_list(path).map(|l| BEValue::List(l)),
             Some(b'd') => self.parse_dict(path).map(|d| BEValue::Dictionary(d)),
-            Some(b'0'..=b'9') => self.parse_bytestring(path).map(|s| BEValue::String(s)),
+            Some(b'0'..=b'9') => self.parse_byte_string(path).map(|s| BEValue::String(s)),
             Some(byte) => Err(self.error(path, &format!("Unknown value type: {}", byte))),
         }
     }
