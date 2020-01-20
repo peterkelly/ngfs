@@ -11,7 +11,7 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    fn parse(data: &[u8]) -> Result<bencoding::BENode, String> {
+    fn parse(data: &[u8]) -> Result<bencoding::Node, String> {
         println!("data length = {}", data.len());
         Err(String::from("Cannot parse"))
     }
