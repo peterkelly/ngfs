@@ -1,4 +1,5 @@
 pub mod bencoding;
+pub mod util;
 
 #[cfg(test)]
 mod tests {

@@ -6,6 +6,8 @@
 #![allow(unused_macros)]
 
 use std::collections::BTreeMap;
+use std::fmt;
+use crate::util::BinaryData;
 
 pub enum Value {
     ByteString(Vec<u8>),
@@ -14,10 +16,40 @@ pub enum Value {
     Dictionary(BTreeMap<String, Node>),
 }
 
+impl Value {
+    pub fn as_byte_string(&self) -> Option<&Vec<u8>> {
+        match self {
+            Value::ByteString(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn as_integer(&self) -> Option<usize> {
+        match self {
+            Value::Integer(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&Vec<Node>> {
+        match self {
+            Value::List(elements) => Some(elements),
+            _ => None,
+        }
+    }
+
+    pub fn as_dictionary(&self) -> Option<&BTreeMap<String, Node>> {
+        match self {
+            Value::Dictionary(entries) => Some(entries),
+            _ => None,
+        }
+    }
+}
+
 pub struct Node {
-    start: usize,
-    end: usize,
-    value: Value,
+    pub start: usize,
+    pub end: usize,
+    pub value: Value,
 }
 
 impl Node {
@@ -32,7 +64,12 @@ impl Node {
                         println!("{}", s);
                     }
                     Err(e) => {
-                        println!("<{} bytes of binary data>", data.len());
+                        if data.len() <= 20 {
+                            println!("{}", BinaryData(data))
+                        }
+                        else {
+                            println!("<{} bytes of binary data>", data.len());
+                        }
                     }
                 }
             }
@@ -73,6 +110,12 @@ pub struct ParseError {
 impl ParseError {
     fn new(offset: usize, path: &str, msg: &str) -> ParseError {
         ParseError { offset: offset, path: String::from(path), msg: String::from(msg) }
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Offset {}, path \"{}\": {}", self.offset, self.path, self.msg)
     }
 }
 
