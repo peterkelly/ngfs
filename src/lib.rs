@@ -1,3 +1,4 @@
+pub mod result;
 pub mod bencoding;
 pub mod util;
 

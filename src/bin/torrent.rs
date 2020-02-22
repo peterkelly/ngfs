@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use torrent::bencoding;
 use torrent::bencoding::{Node, Value};
 use torrent::util::BinaryData;
+use torrent::result::{GError, GResult};
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 // use std::fmt::Write;
@@ -277,3 +278,23 @@ fn main() {
     // }
 
 }
+
+// fn errortest() -> GResult<u32> {
+//     // Err(GError::new(String::from("test")))
+//     Err(GError::new("test"))
+//     // let foo = std::fs::read("test.txt")?;
+//     // let bar = String::from_utf8_lossy(foo.as_slice());
+//     // Ok(4)
+// }
+
+// fn main() {
+//     match errortest() {
+//         Ok(res) => {
+//             println!("Ok: {}", res);
+//         }
+//         Err(e) => {
+//             eprintln!("Error: {}", e);
+//             std::process::exit(1);
+//         }
+//     }
+// }
