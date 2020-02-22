@@ -21,7 +21,10 @@ impl fmt::Display for GError {
 
 impl std::error::Error for GError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        // Generic error, underlying cause isn't tracked.
         None
     }
+}
+
+pub fn error<S, T: Into<String>>(msg: T) -> GResult<S> {
+    Err(Box::new(GError { msg: msg.into() }))
 }

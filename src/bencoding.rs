@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use crate::util::BinaryData;
+use crate::result::{GError, GResult, error};
 
 pub enum Value {
     ByteString(Vec<u8>),
@@ -17,31 +18,31 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn as_byte_string(&self) -> Option<&Vec<u8>> {
+    pub fn as_byte_string(&self) -> GResult<&Vec<u8>> {
         match self {
-            Value::ByteString(b) => Some(b),
-            _ => None,
+            Value::ByteString(b) => Ok(b),
+            _ => error("Not a byte string"),
         }
     }
 
-    pub fn as_integer(&self) -> Option<usize> {
+    pub fn as_integer(&self) -> GResult<usize> {
         match self {
-            Value::Integer(i) => Some(*i),
-            _ => None,
+            Value::Integer(i) => Ok(*i),
+            _ => error("Not an integer"),
         }
     }
 
-    pub fn as_list(&self) -> Option<&Vec<Node>> {
+    pub fn as_list(&self) -> GResult<&Vec<Node>> {
         match self {
-            Value::List(elements) => Some(elements),
-            _ => None,
+            Value::List(elements) => Ok(elements),
+            _ => error("Not a list"),
         }
     }
 
-    pub fn as_dictionary(&self) -> Option<&BTreeMap<String, Node>> {
+    pub fn as_dictionary(&self) -> GResult<&BTreeMap<String, Node>> {
         match self {
-            Value::Dictionary(entries) => Some(entries),
-            _ => None,
+            Value::Dictionary(entries) => Ok(entries),
+            _ => error("Not a dictionary"),
         }
     }
 }
@@ -101,6 +102,7 @@ pub struct Parser<'a> {
     data: &'a [u8],
 }
 
+#[derive(Debug, Clone)]
 pub struct ParseError {
     pub offset: usize,
     pub path: String,
@@ -112,6 +114,13 @@ impl ParseError {
         ParseError { offset: offset, path: String::from(path), msg: String::from(msg) }
     }
 }
+
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

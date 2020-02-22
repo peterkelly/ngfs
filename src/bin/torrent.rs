@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use torrent::bencoding;
 use torrent::bencoding::{Node, Value};
 use torrent::util::BinaryData;
-use torrent::result::{GError, GResult};
+use torrent::result::{GError, GResult, error};
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 // use std::fmt::Write;
@@ -50,18 +50,14 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    fn parse_announce_list(be_announce_list_node: &Node) -> Result<Vec<TrackerGroup>, String> {
+    fn parse_announce_list(be_announce_list_node: &Node) -> GResult<Vec<TrackerGroup>> {
         let mut groups: Vec<TrackerGroup> = Vec::new();
-        let be_announce_list = be_announce_list_node.value.as_list()
-            .ok_or_else(|| String::from("announce_list is not a list"))?;
+        let be_announce_list = be_announce_list_node.value.as_list()?;
         for be_group_node in be_announce_list.iter() {
             let mut members: Vec<Tracker> = Vec::new();
-            let be_group_list = be_group_node.value.as_list()
-                .ok_or_else(|| String::from("group is not a list"))?;
+            let be_group_list = be_group_node.value.as_list()?;
             for tracker_node in be_group_list.iter() {
-                // let x: () = tracker_node;
-                let tracker_string = tracker_node.value.as_byte_string()
-                    .ok_or_else(|| String::from("Tracker URL is not a string"))?;
+                let tracker_string = tracker_node.value.as_byte_string()?;
                 let tracker_string_utf8 = String::from_utf8(tracker_string.clone())
                     .map_err(|e| format!("{}", e))?;
                 // let x: () = tracker_string_utf8;
@@ -73,29 +69,21 @@ impl Torrent {
         return Ok(groups);
     }
 
-    fn parse_files(be_files_node: &Node) -> Result<Vec<TorrentFile>, String> {
+    fn parse_files(be_files_node: &Node) -> GResult<Vec<TorrentFile>> {
         let mut files: Vec<TorrentFile> = Vec::new();
-        let be_files_list = be_files_node.value.as_list()
-            .ok_or_else(|| String::from("files is not a list"))?;
+        let be_files_list = be_files_node.value.as_list()?;
         for be_file_node in be_files_list.iter() {
-            let be_file_dict = be_file_node.value.as_dictionary()
-                .ok_or_else(|| String::from("file is not a dictionary"))?;
+            let be_file_dict = be_file_node.value.as_dictionary()?;
             let be_length_node = be_file_dict.get("length")
                 .ok_or_else(|| String::from("file: missing length"))?;
             let be_path_node = be_file_dict.get("path")
                 .ok_or_else(|| String::from("file: missing path"))?;
-            let length: usize = be_length_node.value.as_integer()
-                .ok_or_else(|| String::from("file: length is not an integer"))?;
-            let be_components_list = be_path_node.value.as_list()
-                .ok_or_else(|| String::from("file: path is not a list"))?;
-            // let mut path = std::path::PathBuf::new();
+            let length: usize = be_length_node.value.as_integer()?;
+            let be_components_list = be_path_node.value.as_list()?;
             let mut spath = String::new();
-            // let mut components: Vec<String> = Vec::new();
             for be_component_node in be_components_list.iter() {
-                let component_bytes = be_component_node.value.as_byte_string()
-                    .ok_or_else(|| String::from("path component is not a string"))?;
-                let component = String::from_utf8(component_bytes.clone())
-                    .map_err(|e| format!("{}", e))?;
+                let component_bytes = be_component_node.value.as_byte_string()?;
+                let component = String::from_utf8(component_bytes.clone())?;
                 if spath.len() > 0 {
                     spath.push_str("/");
                 }
@@ -106,21 +94,22 @@ impl Torrent {
         return Ok(files);
     }
 
-    pub fn from_bytes(data: &[u8]) -> Result<Torrent, String> {
-        let node = bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))?;
+    pub fn from_bytes(data: &[u8]) -> GResult<Torrent> {
+        // let node = bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))?;
+        let node = bencoding::parse(data)?;
         let root_dict: &BTreeMap<String, Node> = match &node.value {
             Value::Dictionary(entries) => {
                 entries
             }
             _ => {
-                return Err(String::from("Root is not a dictionary"));
+                return Err(GError::new("Root is not a dictionary"));
             }
         };
         let info = root_dict.get("info").ok_or_else(|| String::from("Missing info dictionary"))?;
-        let info_dict = info.value.as_dictionary().ok_or_else(|| String::from("Invalid info dictionary"))?;
+        let info_dict = info.value.as_dictionary()?;
 
         let name_node = info_dict.get("name").ok_or_else(|| String::from("info: Missing name property"))?;
-        let name_bstr = name_node.value.as_byte_string().ok_or_else(|| String::from("name: Not a string"))?;
+        let name_bstr = name_node.value.as_byte_string()?;
         let name = String::from_utf8(name_bstr.clone()).or_else(|e| Err(format!("name: {}", e)))?;
 
 
