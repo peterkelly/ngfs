@@ -14,6 +14,7 @@ use crypto::sha1::Sha1;
 // use std::fmt::Write;
 use std::fmt;
 use std::path::PathBuf;
+use std::ffi::OsString;
 
 pub struct InfoHash {
     data: [u8; 20],
@@ -35,7 +36,7 @@ pub struct TrackerGroup {
 
 pub struct TorrentFile {
     pub length: usize,
-    pub path: PathBuf,
+    pub path: String,
 }
 
 pub struct Torrent {
@@ -86,17 +87,20 @@ impl Torrent {
                 .ok_or_else(|| String::from("file: length is not an integer"))?;
             let be_components_list = be_path_node.value.as_list()
                 .ok_or_else(|| String::from("file: path is not a list"))?;
-            let mut path = std::path::PathBuf::new();
+            // let mut path = std::path::PathBuf::new();
+            let mut spath = String::new();
             // let mut components: Vec<String> = Vec::new();
             for be_component_node in be_components_list.iter() {
                 let component_bytes = be_component_node.value.as_byte_string()
                     .ok_or_else(|| String::from("path component is not a string"))?;
                 let component = String::from_utf8(component_bytes.clone())
                     .map_err(|e| format!("{}", e))?;
-                path.push(component);
-                // components.push(component);
+                if spath.len() > 0 {
+                    spath.push_str("/");
+                }
+                spath.push_str(&component);
             }
-            files.push(TorrentFile { length, path });
+            files.push(TorrentFile { length, path: spath });
         }
         return Ok(files);
     }
@@ -152,20 +156,11 @@ impl Torrent {
     }
 }
 
-// impl Torrent {
-//     fn parse(data: &[u8]) -> Result<bencoding::Node, String> {
-//         println!("data length = {}", data.len());
-//         Err(String::from("Cannot parse"))
-//     }
-// }
-
 fn decode(data: &[u8]) -> Result<bencoding::Node, String> {
     bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))
 }
 
 fn test_parse2(data: &[u8]) -> Result<(), String> {
-    // let mut parser = BEParser::new(data);
-    // let res = parser.parse_node(&String::from(""));
     let node = decode(data)?;
     node.dump(0);
     println!("");
@@ -216,15 +211,16 @@ fn test_parse(data: &[u8]) {
             }
             println!("    files");
             for file in torrent.files.iter() {
-                match file.path.clone().into_os_string().into_string() {
-                    Ok(path) => {
-                        println!("        {:<12} {}", file.length, path);
+                println!("        {:<12} {}", file.length, file.path);
+                // match file.path.clone().into_os_string().into_string() {
+                //     Ok(path) => {
+                //         println!("        {:<12} {}", file.length, path);
 
-                    }
-                    Err(e) => {
-                        println!("        {} INVALID", file.length);
-                    }
-                }
+                //     }
+                //     Err(e) => {
+                //         println!("        {} INVALID", file.length);
+                //     }
+                // }
             }
         }
         Err(e) => {
