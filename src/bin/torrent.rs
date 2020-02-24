@@ -126,7 +126,7 @@ impl Torrent {
 
         let mut hasher: Sha1 = Sha1::new();
         // hasher.input_str("hello world");
-        hasher.input(&data[info.start..info.end]);
+        hasher.input(&data[info.loc.start..info.loc.end]);
         let hex: String = hasher.result_str();
         println!("hex = {}", hex);
         println!("sha1 output bits = {}", hasher.output_bits());
@@ -159,10 +159,10 @@ fn test_parse2(data: &[u8]) -> Result<(), String> {
             println!("Is a dictionary");
             match entries.get("info") {
                 Some(info) => {
-                    println!("Have info {} - {}", info.start, info.end);
+                    println!("Have info {} - {}", info.loc.start, info.loc.end);
                     let mut hasher: Sha1 = Sha1::new();
                     // hasher.input_str("hello world");
-                    hasher.input(&data[info.start..info.end]);
+                    hasher.input(&data[info.loc.start..info.loc.end]);
                     let hex: String = hasher.result_str();
                     println!("hex = {}", hex);
                     // let x: () = hex;

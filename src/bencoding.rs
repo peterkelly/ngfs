@@ -10,6 +10,12 @@ use std::fmt;
 use crate::util::BinaryData;
 use crate::result::{GError, GResult, error};
 
+pub struct Location {
+    pub start: usize,
+    pub end: usize,
+    pub path: String,
+}
+
 pub enum Value {
     ByteString(Vec<u8>),
     Integer(usize),
@@ -48,8 +54,9 @@ impl Value {
 }
 
 pub struct Node {
-    pub start: usize,
-    pub end: usize,
+    // pub start: usize,
+    // pub end: usize,
+    pub loc: Location,
     pub value: Value,
 }
 
@@ -277,7 +284,14 @@ impl<'a> Parser<'a> {
         let start = self.offset;
         let value = self.parse_value(path)?;
         let end = self.offset;
-        Ok(Node { start, end, value })
+        Ok(Node {
+            loc: Location {
+                start: start,
+                end: end,
+                path: path.clone(),
+            },
+            value: value,
+        })
     }
 }
 
