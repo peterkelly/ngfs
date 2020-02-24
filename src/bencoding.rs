@@ -16,19 +16,29 @@ pub struct Location {
     pub path: String,
 }
 
+impl Location {
+    pub fn new(start: usize, end: usize, path: String) -> Location {
+        Location { start, end, path }
+    }
+}
+
 pub struct ByteString {
+    pub loc: Location,
     pub data: Vec<u8>,
 }
 
 pub struct Integer {
+    pub loc: Location,
     pub value: usize,
 }
 
 pub struct List {
+    pub loc: Location,
     pub items: Vec<Node>,
 }
 
 pub struct Dictionary {
+    pub loc: Location,
     pub entries: BTreeMap<String, Node>,
 }
 
@@ -37,6 +47,17 @@ pub enum Value {
     Integer(Integer),
     List(List),
     Dictionary(Dictionary),
+}
+
+impl Value {
+    pub fn loc(&self) -> &Location {
+        match self {
+            Value::ByteString(b) => &b.loc,
+            Value::Integer(i) => &i.loc,
+            Value::List(l) => &l.loc,
+            Value::Dictionary(d) => &d.loc,
+        }
+    }
 }
 
 impl Value {
@@ -70,9 +91,6 @@ impl Value {
 }
 
 pub struct Node {
-    // pub start: usize,
-    // pub end: usize,
-    pub loc: Location,
     pub value: Value,
 }
 
@@ -289,26 +307,39 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_value(&mut self, path: &String) -> Result<Value, ParseError> {
+        let start = self.offset;
         match self.peek() {
             None => Err(self.error(path, "Premature end of file")),
-            Some(b'i') => self.parse_integer(path).map(|i| Value::Integer(Integer { value: i })),
-            Some(b'l') => self.parse_list(path).map(|l| Value::List(List { items: l })),
-            Some(b'd') => self.parse_dict(path).map(|d| Value::Dictionary(Dictionary { entries: d })),
-            Some(b'0'..=b'9') => self.parse_byte_string(path).map(|s| Value::ByteString(ByteString { data: s })),
+            Some(b'i') => self.parse_integer(path).map(|i| Value::Integer(Integer {
+                loc: Location::new(start, self.offset, path.clone()),
+                value: i
+            })),
+            Some(b'l') => self.parse_list(path).map(|l| Value::List(List {
+                loc: Location::new(start, self.offset, path.clone()),
+                items: l
+            })),
+            Some(b'd') => self.parse_dict(path).map(|d| Value::Dictionary(Dictionary {
+                loc: Location::new(start, self.offset, path.clone()),
+                entries: d
+            })),
+            Some(b'0'..=b'9') => self.parse_byte_string(path).map(|s| Value::ByteString(ByteString {
+                loc: Location::new(start, self.offset, path.clone()),
+                data: s
+            })),
             Some(byte) => Err(self.error(path, &format!("Unknown value type: {}", byte))),
         }
     }
 
     fn parse_node(&mut self, path: &String) -> Result<Node, ParseError> {
-        let start = self.offset;
+        // let start = self.offset;
         let value = self.parse_value(path)?;
-        let end = self.offset;
+        // let end = self.offset;
         Ok(Node {
-            loc: Location {
-                start: start,
-                end: end,
-                path: path.clone(),
-            },
+            // loc: Location {
+            //     start: start,
+            //     end: end,
+            //     path: path.clone(),
+            // },
             value: value,
         })
     }
