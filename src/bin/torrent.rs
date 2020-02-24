@@ -98,8 +98,8 @@ impl Torrent {
         // let node = bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))?;
         let node = bencoding::parse(data)?;
         let root_dict: &BTreeMap<String, Node> = match &node.value {
-            Value::Dictionary(entries) => {
-                entries
+            Value::Dictionary(d) => {
+                &d.entries
             }
             _ => {
                 return Err(GError::new("Root is not a dictionary"));
@@ -155,7 +155,8 @@ fn test_parse2(data: &[u8]) -> Result<(), String> {
     node.dump(0);
     println!("");
     match node.value {
-        bencoding::Value::Dictionary(entries) => {
+        bencoding::Value::Dictionary(d) => {
+            let entries = &d.entries;
             println!("Is a dictionary");
             match entries.get("info") {
                 Some(info) => {

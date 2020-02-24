@@ -16,38 +16,54 @@ pub struct Location {
     pub path: String,
 }
 
+pub struct ByteString {
+    pub data: Vec<u8>,
+}
+
+pub struct Integer {
+    pub value: usize,
+}
+
+pub struct List {
+    pub items: Vec<Node>,
+}
+
+pub struct Dictionary {
+    pub entries: BTreeMap<String, Node>,
+}
+
 pub enum Value {
-    ByteString(Vec<u8>),
-    Integer(usize),
-    List(Vec<Node>),
-    Dictionary(BTreeMap<String, Node>),
+    ByteString(ByteString),
+    Integer(Integer),
+    List(List),
+    Dictionary(Dictionary),
 }
 
 impl Value {
     pub fn as_byte_string(&self) -> GResult<&Vec<u8>> {
         match self {
-            Value::ByteString(b) => Ok(b),
+            Value::ByteString(b) => Ok(&b.data),
             _ => error("Not a byte string"),
         }
     }
 
     pub fn as_integer(&self) -> GResult<usize> {
         match self {
-            Value::Integer(i) => Ok(*i),
+            Value::Integer(i) => Ok(i.value),
             _ => error("Not an integer"),
         }
     }
 
     pub fn as_list(&self) -> GResult<&Vec<Node>> {
         match self {
-            Value::List(elements) => Ok(elements),
+            Value::List(l) => Ok(&l.items),
             _ => error("Not a list"),
         }
     }
 
     pub fn as_dictionary(&self) -> GResult<&BTreeMap<String, Node>> {
         match self {
-            Value::Dictionary(entries) => Ok(entries),
+            Value::Dictionary(d) => Ok(&d.entries),
             _ => error("Not a dictionary"),
         }
     }
@@ -66,7 +82,8 @@ impl Node {
             print!("    ");
         }
         match &self.value {
-            Value::ByteString(data) => {
+            Value::ByteString(b) => {
+                let data = &b.data;
                 match String::from_utf8(data.clone()) {
                     Ok(s) => {
                         println!("{}", s);
@@ -81,16 +98,18 @@ impl Node {
                     }
                 }
             }
-            Value::Integer(value) => {
-                println!("{}", value);
+            Value::Integer(i) => {
+                println!("{}", i.value);
             }
-            Value::List(elements) => {
+            Value::List(l) => {
+                let elements = &l.items;
                 println!("list");
                 for element in elements {
                     element.dump(indent + 1);
                 }
             }
-            Value::Dictionary(elements) => {
+            Value::Dictionary(d) => {
+                let elements = &d.entries;
                 println!("dict");
                 for (key, value) in elements.iter() {
                     for i in 0..indent + 1 {
@@ -272,10 +291,10 @@ impl<'a> Parser<'a> {
     fn parse_value(&mut self, path: &String) -> Result<Value, ParseError> {
         match self.peek() {
             None => Err(self.error(path, "Premature end of file")),
-            Some(b'i') => self.parse_integer(path).map(|i| Value::Integer(i)),
-            Some(b'l') => self.parse_list(path).map(|l| Value::List(l)),
-            Some(b'd') => self.parse_dict(path).map(|d| Value::Dictionary(d)),
-            Some(b'0'..=b'9') => self.parse_byte_string(path).map(|s| Value::ByteString(s)),
+            Some(b'i') => self.parse_integer(path).map(|i| Value::Integer(Integer { value: i })),
+            Some(b'l') => self.parse_list(path).map(|l| Value::List(List { items: l })),
+            Some(b'd') => self.parse_dict(path).map(|d| Value::Dictionary(Dictionary { entries: d })),
+            Some(b'0'..=b'9') => self.parse_byte_string(path).map(|s| Value::ByteString(ByteString { data: s })),
             Some(byte) => Err(self.error(path, &format!("Unknown value type: {}", byte))),
         }
     }
