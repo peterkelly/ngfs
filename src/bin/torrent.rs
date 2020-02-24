@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use torrent::bencoding;
-use torrent::bencoding::{Node, Value};
+use torrent::bencoding::{Value};
 use torrent::util::BinaryData;
 use torrent::result::{GError, GResult, error};
 use crypto::digest::Digest;
@@ -42,7 +42,7 @@ pub struct TorrentFile {
 
 pub struct Torrent {
     pub data: Vec<u8>,
-    pub root: Node,
+    pub root: Value,
     pub info_hash: InfoHash,
     pub name: String,
     pub trackers: Vec<TrackerGroup>,
@@ -50,14 +50,14 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    fn parse_announce_list(be_announce_list_node: &Node) -> GResult<Vec<TrackerGroup>> {
+    fn parse_announce_list(be_announce_list_value: &Value) -> GResult<Vec<TrackerGroup>> {
         let mut groups: Vec<TrackerGroup> = Vec::new();
-        let be_announce_list = be_announce_list_node.value.as_list()?;
-        for be_group_node in be_announce_list.iter() {
+        let be_announce_list = be_announce_list_value.as_list()?;
+        for be_group_value in be_announce_list.iter() {
             let mut members: Vec<Tracker> = Vec::new();
-            let be_group_list = be_group_node.value.as_list()?;
-            for tracker_node in be_group_list.iter() {
-                let tracker_string = tracker_node.value.as_byte_string()?;
+            let be_group_list = be_group_value.as_list()?;
+            for tracker_value in be_group_list.iter() {
+                let tracker_string = tracker_value.as_byte_string()?;
                 let tracker_string_utf8 = String::from_utf8(tracker_string.clone())
                     .map_err(|e| format!("{}", e))?;
                 // let x: () = tracker_string_utf8;
@@ -69,20 +69,20 @@ impl Torrent {
         return Ok(groups);
     }
 
-    fn parse_files(be_files_node: &Node) -> GResult<Vec<TorrentFile>> {
+    fn parse_files(be_files_value: &Value) -> GResult<Vec<TorrentFile>> {
         let mut files: Vec<TorrentFile> = Vec::new();
-        let be_files_list = be_files_node.value.as_list()?;
-        for be_file_node in be_files_list.iter() {
-            let be_file_dict = be_file_node.value.as_dictionary()?;
-            let be_length_node = be_file_dict.get("length")
+        let be_files_list = be_files_value.as_list()?;
+        for be_file_value in be_files_list.iter() {
+            let be_file_dict = be_file_value.as_dictionary()?;
+            let be_length_value = be_file_dict.get("length")
                 .ok_or_else(|| String::from("file: missing length"))?;
-            let be_path_node = be_file_dict.get("path")
+            let be_path_value = be_file_dict.get("path")
                 .ok_or_else(|| String::from("file: missing path"))?;
-            let length: usize = be_length_node.value.as_integer()?;
-            let be_components_list = be_path_node.value.as_list()?;
+            let length: usize = be_length_value.as_integer()?;
+            let be_components_list = be_path_value.as_list()?;
             let mut spath = String::new();
-            for be_component_node in be_components_list.iter() {
-                let component_bytes = be_component_node.value.as_byte_string()?;
+            for be_component_value in be_components_list.iter() {
+                let component_bytes = be_component_value.as_byte_string()?;
                 let component = String::from_utf8(component_bytes.clone())?;
                 if spath.len() > 0 {
                     spath.push_str("/");
@@ -96,8 +96,8 @@ impl Torrent {
 
     pub fn from_bytes(data: &[u8]) -> GResult<Torrent> {
         // let node = bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))?;
-        let node = bencoding::parse(data)?;
-        let root_dict: &BTreeMap<String, Node> = match &node.value {
+        let value = bencoding::parse(data)?;
+        let root_dict: &BTreeMap<String, Value> = match &value {
             Value::Dictionary(d) => {
                 &d.entries
             }
@@ -106,10 +106,10 @@ impl Torrent {
             }
         };
         let info = root_dict.get("info").ok_or_else(|| String::from("Missing info dictionary"))?;
-        let info_dict = info.value.as_dictionary()?;
+        let info_dict = info.as_dictionary()?;
 
-        let name_node = info_dict.get("name").ok_or_else(|| String::from("info: Missing name property"))?;
-        let name_bstr = name_node.value.as_byte_string()?;
+        let name_value = info_dict.get("name").ok_or_else(|| String::from("info: Missing name property"))?;
+        let name_bstr = name_value.as_byte_string()?;
         let name = String::from_utf8(name_bstr.clone()).or_else(|e| Err(format!("name: {}", e)))?;
 
 
@@ -126,7 +126,7 @@ impl Torrent {
 
         let mut hasher: Sha1 = Sha1::new();
         // hasher.input_str("hello world");
-        hasher.input(&data[info.value.loc().start..info.value.loc().end]);
+        hasher.input(&data[info.loc().start..info.loc().end]);
         let hex: String = hasher.result_str();
         println!("hex = {}", hex);
         println!("sha1 output bits = {}", hasher.output_bits());
@@ -142,28 +142,28 @@ impl Torrent {
         // let trackers: Vec<TrackerGroup> = Vec::new();
 
 
-        Ok(Torrent { data: Vec::from(data), root: node, info_hash, name, trackers, files })
+        Ok(Torrent { data: Vec::from(data), root: value, info_hash, name, trackers, files })
     }
 }
 
-fn decode(data: &[u8]) -> Result<bencoding::Node, String> {
+fn decode(data: &[u8]) -> Result<bencoding::Value, String> {
     bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))
 }
 
 fn test_parse2(data: &[u8]) -> Result<(), String> {
-    let node = decode(data)?;
-    node.dump(0);
+    let value = decode(data)?;
+    value.dump(0);
     println!("");
-    match node.value {
+    match value {
         bencoding::Value::Dictionary(d) => {
             let entries = &d.entries;
             println!("Is a dictionary");
             match entries.get("info") {
                 Some(info) => {
-                    println!("Have info {} - {}", info.value.loc().start, info.value.loc().end);
+                    println!("Have info {} - {}", info.loc().start, info.loc().end);
                     let mut hasher: Sha1 = Sha1::new();
                     // hasher.input_str("hello world");
-                    hasher.input(&data[info.value.loc().start..info.value.loc().end]);
+                    hasher.input(&data[info.loc().start..info.loc().end]);
                     let hex: String = hasher.result_str();
                     println!("hex = {}", hex);
                     // let x: () = hex;

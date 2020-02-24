@@ -34,12 +34,12 @@ pub struct Integer {
 
 pub struct List {
     pub loc: Location,
-    pub items: Vec<Node>,
+    pub items: Vec<Value>,
 }
 
 pub struct Dictionary {
     pub loc: Location,
-    pub entries: BTreeMap<String, Node>,
+    pub entries: BTreeMap<String, Value>,
 }
 
 pub enum Value {
@@ -75,31 +75,25 @@ impl Value {
         }
     }
 
-    pub fn as_list(&self) -> GResult<&Vec<Node>> {
+    pub fn as_list(&self) -> GResult<&Vec<Value>> {
         match self {
             Value::List(l) => Ok(&l.items),
             _ => error("Not a list"),
         }
     }
 
-    pub fn as_dictionary(&self) -> GResult<&BTreeMap<String, Node>> {
+    pub fn as_dictionary(&self) -> GResult<&BTreeMap<String, Value>> {
         match self {
             Value::Dictionary(d) => Ok(&d.entries),
             _ => error("Not a dictionary"),
         }
     }
-}
 
-pub struct Node {
-    pub value: Value,
-}
-
-impl Node {
     pub fn dump(&self, indent: usize) {
         for i in 0..indent {
             print!("    ");
         }
-        match &self.value {
+        match self {
             Value::ByteString(b) => {
                 let data = &b.data;
                 match String::from_utf8(data.clone()) {
@@ -249,10 +243,10 @@ impl<'a> Parser<'a> {
         Ok(data)
     }
 
-    fn parse_list(&mut self, path: &String) -> Result<Vec<Node>, ParseError> {
+    fn parse_list(&mut self, path: &String) -> Result<Vec<Value>, ParseError> {
         let start = self.offset;
         self.expect_byte(path, b'l')?;
-        let mut elements: Vec<Node> = Vec::new();
+        let mut elements: Vec<Value> = Vec::new();
         let mut index: usize = 0;
         loop {
             match self.peek() {
@@ -279,9 +273,9 @@ impl<'a> Parser<'a> {
             .or_else(|e| Err(ParseError::new(start, path, &format!("{}", e))))
     }
 
-    fn parse_dict(&mut self, path: &String) -> Result<BTreeMap<String, Node>, ParseError> {
+    fn parse_dict(&mut self, path: &String) -> Result<BTreeMap<String, Value>, ParseError> {
         self.expect_byte(path, b'd')?;
-        let mut elements: BTreeMap<String, Node> = BTreeMap::new();
+        let mut elements: BTreeMap<String, Value> = BTreeMap::new();
         loop {
             match self.peek() {
                 None => { return Err(ParseError::new(self.offset, path, &String::from("Premature end of file"))); }
@@ -330,18 +324,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_node(&mut self, path: &String) -> Result<Node, ParseError> {
-        // let start = self.offset;
-        let value = self.parse_value(path)?;
-        // let end = self.offset;
-        Ok(Node {
-            // loc: Location {
-            //     start: start,
-            //     end: end,
-            //     path: path.clone(),
-            // },
-            value: value,
-        })
+    fn parse_node(&mut self, path: &String) -> Result<Value, ParseError> {
+        self.parse_value(path)
     }
 }
 
@@ -354,7 +338,7 @@ fn byte_repr(value: u8) -> String {
     }
 }
 
-pub fn parse(data: &[u8]) -> Result<Node, ParseError> {
+pub fn parse(data: &[u8]) -> Result<Value, ParseError> {
     let mut parser = Parser::new(data);
     parser.parse_node(&String::from(""))
 }
