@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use crate::util::BinaryData;
-use crate::result::{GError, GResult, error};
+use crate::result::{Result as GResult, error};
 
 pub struct Location {
     pub start: usize,

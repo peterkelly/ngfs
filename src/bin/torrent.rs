@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use torrent::bencoding;
 use torrent::bencoding::{Value};
 use torrent::util::BinaryData;
-use torrent::result::{GError, GResult, error};
+use torrent::result::{Error, Result, error};
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 // use std::fmt::Write;
@@ -50,7 +50,7 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    fn parse_announce_list(be_announce_list_value: &Value) -> GResult<Vec<TrackerGroup>> {
+    fn parse_announce_list(be_announce_list_value: &Value) -> Result<Vec<TrackerGroup>> {
         let mut groups: Vec<TrackerGroup> = Vec::new();
         let be_announce_list = be_announce_list_value.as_list()?;
         for be_group_value in be_announce_list.items.iter() {
@@ -69,7 +69,7 @@ impl Torrent {
         return Ok(groups);
     }
 
-    fn parse_files(be_files_value: &Value) -> GResult<Vec<TorrentFile>> {
+    fn parse_files(be_files_value: &Value) -> Result<Vec<TorrentFile>> {
         let mut files: Vec<TorrentFile> = Vec::new();
         let be_files_list = be_files_value.as_list()?;
         for be_file_value in be_files_list.items.iter() {
@@ -94,7 +94,7 @@ impl Torrent {
         return Ok(files);
     }
 
-    pub fn from_bytes(data: &[u8]) -> GResult<Torrent> {
+    pub fn from_bytes(data: &[u8]) -> Result<Torrent> {
         // let node = bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))?;
         let value = bencoding::parse(data)?;
         let root_dict: &BTreeMap<String, Value> = match &value {
@@ -102,7 +102,7 @@ impl Torrent {
                 &d.entries
             }
             _ => {
-                return Err(GError::new("Root is not a dictionary"));
+                return Err(Error::new("Root is not a dictionary"));
             }
         };
         let info = root_dict.get("info").ok_or_else(|| String::from("Missing info dictionary"))?;
@@ -136,21 +136,25 @@ impl Torrent {
         println!("{}", hashdata[0]);
 
         let info_hash = InfoHash { data: hashdata };
-
-
-        // let x: () = info_dict;
-        // let trackers: Vec<TrackerGroup> = Vec::new();
-
-
-        Ok(Torrent { data: Vec::from(data), root: value, info_hash, name, trackers, files })
+        Ok(Torrent {
+            data: Vec::from(data),
+            root: value,
+            info_hash,
+            name,
+            trackers,
+            files,
+        })
     }
 }
 
-fn decode(data: &[u8]) -> Result<bencoding::Value, String> {
-    bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))
+fn decode(data: &[u8]) -> Result<bencoding::Value> {
+    match bencoding::parse(data) {
+        Ok(v) => Ok(v),
+        Err(e) => Err(Error::new(format!("Corrupt torrent: {}", e))),
+    }
 }
 
-fn test_parse2(data: &[u8]) -> Result<(), String> {
+fn test_parse2(data: &[u8]) -> Result<()> {
     let value = decode(data)?;
     value.dump(0);
     println!("");
@@ -259,32 +263,4 @@ fn main() {
             // let b: () = x;
         }
     }
-
-    // let data: Vec<u8> = vec![0x12, 0xab, 0xcd];
-    // println!("{:x?}", data);
-    // let mut hex_str = String::new();
-    // for byte in data {
-    //     write!(hex_str, "{:02x}", byte);
-    // }
-
 }
-
-// fn errortest() -> GResult<u32> {
-//     // Err(GError::new(String::from("test")))
-//     Err(GError::new("test"))
-//     // let foo = std::fs::read("test.txt")?;
-//     // let bar = String::from_utf8_lossy(foo.as_slice());
-//     // Ok(4)
-// }
-
-// fn main() {
-//     match errortest() {
-//         Ok(res) => {
-//             println!("Ok: {}", res);
-//         }
-//         Err(e) => {
-//             eprintln!("Error: {}", e);
-//             std::process::exit(1);
-//         }
-//     }
-// }
