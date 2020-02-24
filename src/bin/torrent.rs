@@ -53,12 +53,12 @@ impl Torrent {
     fn parse_announce_list(be_announce_list_value: &Value) -> GResult<Vec<TrackerGroup>> {
         let mut groups: Vec<TrackerGroup> = Vec::new();
         let be_announce_list = be_announce_list_value.as_list()?;
-        for be_group_value in be_announce_list.iter() {
+        for be_group_value in be_announce_list.items.iter() {
             let mut members: Vec<Tracker> = Vec::new();
             let be_group_list = be_group_value.as_list()?;
-            for tracker_value in be_group_list.iter() {
+            for tracker_value in be_group_list.items.iter() {
                 let tracker_string = tracker_value.as_byte_string()?;
-                let tracker_string_utf8 = String::from_utf8(tracker_string.clone())
+                let tracker_string_utf8 = String::from_utf8(tracker_string.data.clone())
                     .map_err(|e| format!("{}", e))?;
                 // let x: () = tracker_string_utf8;
                 members.push(Tracker { url: tracker_string_utf8 });
@@ -72,18 +72,18 @@ impl Torrent {
     fn parse_files(be_files_value: &Value) -> GResult<Vec<TorrentFile>> {
         let mut files: Vec<TorrentFile> = Vec::new();
         let be_files_list = be_files_value.as_list()?;
-        for be_file_value in be_files_list.iter() {
+        for be_file_value in be_files_list.items.iter() {
             let be_file_dict = be_file_value.as_dictionary()?;
-            let be_length_value = be_file_dict.get("length")
+            let be_length_value = be_file_dict.entries.get("length")
                 .ok_or_else(|| String::from("file: missing length"))?;
-            let be_path_value = be_file_dict.get("path")
+            let be_path_value = be_file_dict.entries.get("path")
                 .ok_or_else(|| String::from("file: missing path"))?;
-            let length: usize = be_length_value.as_integer()?;
+            let length: usize = be_length_value.as_integer()?.value;
             let be_components_list = be_path_value.as_list()?;
             let mut spath = String::new();
-            for be_component_value in be_components_list.iter() {
+            for be_component_value in be_components_list.items.iter() {
                 let component_bytes = be_component_value.as_byte_string()?;
-                let component = String::from_utf8(component_bytes.clone())?;
+                let component = String::from_utf8(component_bytes.data.clone())?;
                 if spath.len() > 0 {
                     spath.push_str("/");
                 }
@@ -108,16 +108,16 @@ impl Torrent {
         let info = root_dict.get("info").ok_or_else(|| String::from("Missing info dictionary"))?;
         let info_dict = info.as_dictionary()?;
 
-        let name_value = info_dict.get("name").ok_or_else(|| String::from("info: Missing name property"))?;
+        let name_value = info_dict.entries.get("name").ok_or_else(|| String::from("info: Missing name property"))?;
         let name_bstr = name_value.as_byte_string()?;
-        let name = String::from_utf8(name_bstr.clone()).or_else(|e| Err(format!("name: {}", e)))?;
+        let name = String::from_utf8(name_bstr.data.clone()).or_else(|e| Err(format!("name: {}", e)))?;
 
 
         let announce_list = root_dict.get("announce-list")
             .ok_or_else(|| String::from("Missing announce-list property"))?;
         let trackers = Torrent::parse_announce_list(announce_list)?;
 
-        let files_node = info_dict.get("files")
+        let files_node = info_dict.entries.get("files")
             .ok_or_else(|| String::from("info: Missing files property"))?;
         let files = Self::parse_files(files_node)?;
 

@@ -61,30 +61,30 @@ impl Value {
 }
 
 impl Value {
-    pub fn as_byte_string(&self) -> GResult<&Vec<u8>> {
+    pub fn as_byte_string(&self) -> GResult<&ByteString> {
         match self {
-            Value::ByteString(b) => Ok(&b.data),
+            Value::ByteString(b) => Ok(b),
             _ => error("Not a byte string"),
         }
     }
 
-    pub fn as_integer(&self) -> GResult<usize> {
+    pub fn as_integer(&self) -> GResult<&Integer> {
         match self {
-            Value::Integer(i) => Ok(i.value),
+            Value::Integer(i) => Ok(i),
             _ => error("Not an integer"),
         }
     }
 
-    pub fn as_list(&self) -> GResult<&Vec<Value>> {
+    pub fn as_list(&self) -> GResult<&List> {
         match self {
-            Value::List(l) => Ok(&l.items),
+            Value::List(l) => Ok(l),
             _ => error("Not a list"),
         }
     }
 
-    pub fn as_dictionary(&self) -> GResult<&BTreeMap<String, Value>> {
+    pub fn as_dictionary(&self) -> GResult<&Dictionary> {
         match self {
-            Value::Dictionary(d) => Ok(&d.entries),
+            Value::Dictionary(d) => Ok(d),
             _ => error("Not a dictionary"),
         }
     }
