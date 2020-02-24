@@ -10,3 +10,34 @@ impl<'a> fmt::Display for BinaryData<'a> {
         Ok(())
     }
 }
+
+pub fn from_hex(s: &str) -> Option<Vec<u8>> {
+    let raw = s.as_bytes();
+    if raw.len() % 2 != 0 {
+        return None;
+    }
+
+    let mut i = 0;
+    let mut bytes: Vec<u8> = Vec::new();
+    while i + 2 <= raw.len() {
+        let hi = hex_from_byte(raw[i]);
+        let lo = hex_from_byte(raw[i + 1]);
+        match (hi, lo) {
+            (Some(hi), Some(lo)) => {
+                bytes.push(hi << 4 | lo);
+            },
+            _ => return None,
+        }
+        i += 2;
+    }
+    return Some(bytes);
+
+    fn hex_from_byte(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+}
