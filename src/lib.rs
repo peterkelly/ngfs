@@ -1,6 +1,7 @@
 pub mod result;
 pub mod bencoding;
 pub mod util;
+pub mod torrent;
 
 #[cfg(test)]
 mod tests {

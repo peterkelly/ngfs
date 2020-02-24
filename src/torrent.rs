@@ -1,21 +1,18 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
+use std::fmt;
 use std::collections::BTreeMap;
-use torrent::bencoding;
-use torrent::bencoding::{Value};
-use torrent::util::BinaryData;
-use torrent::result::{Error, Result, error};
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
-// use std::fmt::Write;
-use std::fmt;
-use std::path::PathBuf;
-use std::ffi::OsString;
+use super::bencoding;
+use super::bencoding::{Value};
+use super::result::{Error, Result};
+use super::util::BinaryData;
 
 pub struct InfoHash {
     data: [u8; 20],
@@ -112,7 +109,6 @@ impl Torrent {
         let name_bstr = name_value.as_byte_string()?;
         let name = String::from_utf8(name_bstr.data.clone()).or_else(|e| Err(format!("name: {}", e)))?;
 
-
         let announce_list = root_dict.get("announce-list")
             .ok_or_else(|| String::from("Missing announce-list property"))?;
         let trackers = Torrent::parse_announce_list(announce_list)?;
@@ -144,123 +140,5 @@ impl Torrent {
             trackers,
             files,
         })
-    }
-}
-
-fn decode(data: &[u8]) -> Result<bencoding::Value> {
-    match bencoding::parse(data) {
-        Ok(v) => Ok(v),
-        Err(e) => Err(Error::new(format!("Corrupt torrent: {}", e))),
-    }
-}
-
-fn test_parse2(data: &[u8]) -> Result<()> {
-    let value = decode(data)?;
-    value.dump(0);
-    println!("");
-    match value {
-        bencoding::Value::Dictionary(d) => {
-            let entries = &d.entries;
-            println!("Is a dictionary");
-            match entries.get("info") {
-                Some(info) => {
-                    println!("Have info {} - {}", info.loc().start, info.loc().end);
-                    let mut hasher: Sha1 = Sha1::new();
-                    // hasher.input_str("hello world");
-                    hasher.input(&data[info.loc().start..info.loc().end]);
-                    let hex: String = hasher.result_str();
-                    println!("hex = {}", hex);
-                    // let x: () = hex;
-                }
-                None => {
-                    println!("Do not have info");
-                }
-            }
-        }
-        _ => {
-            println!("Not a dictionary");
-        }
-    };
-    Ok(())
-}
-
-fn test_parse(data: &[u8]) {
-    match test_parse2(data) {
-        Ok(_) => {},
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
-        }
-    };
-    println!("-----------");
-    match Torrent::from_bytes(data) {
-        Ok(torrent) => {
-            println!("Torrent loaded successfully");
-            println!("    name = {}", torrent.name);
-            println!("    info hash = {}", torrent.info_hash);
-            for (group_index, group) in torrent.trackers.iter().enumerate() {
-                println!("    group {}", group_index);
-                for (tracker_index, tracker) in group.members.iter().enumerate() {
-                    println!("        {}: {}", tracker_index, tracker.url);
-                }
-            }
-            println!("    files");
-            for file in torrent.files.iter() {
-                println!("        {:<12} {}", file.length, file.path);
-                // match file.path.clone().into_os_string().into_string() {
-                //     Ok(path) => {
-                //         println!("        {:<12} {}", file.length, path);
-
-                //     }
-                //     Err(e) => {
-                //         println!("        {} INVALID", file.length);
-                //     }
-                // }
-            }
-        }
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
-        }
-    }
-}
-
-// fn main() {
-//     for i in 0..=255 {
-//         println!("{:02x} -- {}", i, byte_repr(i));
-//     }
-// }
-
-fn main() {
-    // println!("Hello World!");
-
-    let args: Vec<String> = std::env::args().collect();
-    // println!("args.len() = {}", args.len());
-    // for arg in &args {
-    //     let x: i32 = arg;
-    //     println!("arg: {}", arg);
-    // }
-
-    if args.len() < 2 {
-        eprintln!("No filename specified");
-        std::process::exit(1);
-    }
-
-    let filename: &String = &args[1];
-    // println!("filename = {}", filename);
-
-    let res = std::fs::read(filename);
-    match res {
-        Ok(data) => {
-            // let a: () = x;
-            // let parser = BEParser { offset: 0, data: data.as_slice() };
-            test_parse(data.as_slice());
-            // let torrent = Torrent::parse(data.as_slice());
-        }
-        Err(err) => {
-            println!("Cannot read {}: {}", filename, err);
-            std::process::exit(1);
-            // let b: () = x;
-        }
     }
 }
