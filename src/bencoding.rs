@@ -1,9 +1,9 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -90,7 +90,7 @@ impl Value {
     }
 
     pub fn dump(&self, indent: usize) {
-        for i in 0..indent {
+        for _i in 0..indent {
             print!("    ");
         }
         match self {
@@ -100,7 +100,7 @@ impl Value {
                     Ok(s) => {
                         println!("{}", s);
                     }
-                    Err(e) => {
+                    Err(_) => {
                         if data.len() <= 20 {
                             println!("{}", BinaryData(data))
                         }
@@ -124,7 +124,7 @@ impl Value {
                 let elements = &d.entries;
                 println!("dict");
                 for (key, value) in elements.iter() {
-                    for i in 0..indent + 1 {
+                    for _ in 0..indent + 1 {
                         print!("    ");
                     }
                     println!("{} =", key);
@@ -196,7 +196,7 @@ impl<'a> Parser<'a> {
             match self.peek() {
                 None => break,
                 Some(b'0'..=b'9') => self.advance(),
-                Some(byte) => break,
+                Some(_) => break,
             }
         }
         let end = self.offset;
@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
             Some(b) if b != byte => {
                 Err(self.error(path, &format!("Expected {}, got {}", byte_repr(byte), byte_repr(b))))
             }
-            Some(b) => {
+            Some(_) => {
                 self.advance();
                 Ok(())
             }
@@ -244,7 +244,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_list(&mut self, path: &String) -> Result<Vec<Value>, ParseError> {
-        let start = self.offset;
         self.expect_byte(path, b'l')?;
         let mut elements: Vec<Value> = Vec::new();
         let mut index: usize = 0;
@@ -257,7 +256,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     break;
                 }
-                Some(byte) => {
+                Some(_) => {
                     elements.push(self.parse_node(&format!("{}/{}", path, index))?);
                     index += 1;
                 }
@@ -283,7 +282,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     break;
                 }
-                Some(byte) => {
+                Some(_) => {
                     let key = self.parse_utf8_string(path)?;
                     let value = self.parse_node(&format!("{}/{}", path, key))?;
                     elements.insert(key, value);

@@ -1,22 +1,15 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
-use std::collections::BTreeMap;
 use torrent::bencoding;
-use torrent::bencoding::{Value};
-use torrent::util::BinaryData;
 use torrent::result::{Error, Result, error};
 use torrent::torrent::{Torrent};
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
-// use std::fmt::Write;
-use std::fmt;
-use std::path::PathBuf;
-use std::ffi::OsString;
 
 fn decode(data: &[u8]) -> Result<bencoding::Value> {
     match bencoding::parse(data) {
@@ -55,28 +48,36 @@ fn view_bencoding(data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn view_torrent(data: &[u8]) {
-    match Torrent::from_bytes(data) {
-        Ok(torrent) => {
-            println!("Torrent loaded successfully");
-            println!("    name = {}", torrent.name);
-            println!("    info hash = {}", torrent.info_hash);
-            for (group_index, group) in torrent.trackers.iter().enumerate() {
-                println!("    group {}", group_index);
-                for (tracker_index, tracker) in group.members.iter().enumerate() {
-                    println!("        {}: {}", tracker_index, tracker.url);
-                }
-            }
-            println!("    files");
-            for file in torrent.files.iter() {
-                println!("        {:<12} {}", file.length, file.path);
-            }
-        }
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
+fn view_torrent(data: &[u8]) -> Result<()> {
+    let torrent = Torrent::from_bytes(data)?;
+    println!("Torrent loaded successfully");
+    println!("    name = {}", torrent.name);
+    println!("    info hash = {}", torrent.info_hash);
+    for (group_index, group) in torrent.trackers.iter().enumerate() {
+        println!("    group {}", group_index);
+        for (tracker_index, tracker) in group.members.iter().enumerate() {
+            println!("        {}: {}", tracker_index, tracker.url);
         }
     }
+    println!("    files");
+    for file in torrent.files.iter() {
+        println!("        {:<12} {}", file.length, file.path);
+    }
+    Ok(())
+}
+
+fn run(filename: &String) -> Result<()> {
+    let data: Vec<u8> = match std::fs::read(filename) {
+        Ok(data) => data,
+        Err(err) => {
+            return error(format!("Cannot read {}: {}", filename, err));
+        }
+    };
+
+    view_bencoding(&data)?;
+    println!("-----------");
+    view_torrent(data.as_slice())?;
+    Ok(())
 }
 
 fn main() {
@@ -88,26 +89,11 @@ fn main() {
     }
 
     let filename: &String = &args[1];
-
-    let res = std::fs::read(filename);
-    match res {
-        Ok(data) => {
-
-            match view_bencoding(&data) {
-                Ok(_) => {},
-                Err(e) => {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
-                }
-            };
-            println!("-----------");
-
-
-            view_torrent(data.as_slice());
-        }
-        Err(err) => {
-            println!("Cannot read {}: {}", filename, err);
+    match run(filename) {
+        Ok(()) => (),
+        Err(e) => {
+            eprintln!("{}", e);
             std::process::exit(1);
         }
-    }
+    };
 }
