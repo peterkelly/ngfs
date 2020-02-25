@@ -23,12 +23,24 @@
 
 #![warn(rust_2018_idioms)]
 
+use std::sync::{Mutex, Arc};
 use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use std::env;
 use std::error::Error;
+
+struct Stats {
+    received: usize,
+    sent: usize,
+}
+
+impl Stats {
+    pub fn new() -> Stats {
+        Stats { received: 0, sent: 0 }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -45,6 +57,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut listener = TcpListener::bind(&addr).await?;
     println!("Listening on: {}", addr);
 
+    let stats_mutex = Arc::new(Mutex::new(Stats::new()));
+
     loop {
         // Asynchronously wait for an inbound socket.
         let (mut socket, _) = listener.accept().await?;
@@ -57,6 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Essentially here we're executing a new task to run concurrently,
         // which will allow all of our clients to be processed concurrently.
 
+        let stats_mutex = stats_mutex.clone();
         tokio::spawn(async move {
             let mut buf = [0; 1024];
 
@@ -66,6 +81,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .read(&mut buf)
                     .await
                     .expect("failed to read data from socket");
+                {
+                    let mut stats = stats_mutex.lock().unwrap();
+                    stats.received += n;
+                    println!("received {}, sent {}", stats.received, stats.sent);
+                }
 
                 if n == 0 {
                     return;
@@ -75,6 +95,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .write_all(&buf[0..n])
                     .await
                     .expect("failed to write data to socket");
+
+                {
+                    let mut stats = stats_mutex.lock().unwrap();
+                    stats.sent += n;
+                    println!("received {}, sent {}", stats.received, stats.sent);
+                }
             }
         });
     }
