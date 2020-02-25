@@ -15,11 +15,11 @@ use super::result::{Error, Result, error};
 use super::util::BinaryData;
 
 pub struct InfoHash {
-    data: [u8; 20],
+    pub data: [u8; 20],
 }
 
 pub struct PieceHash {
-    data: [u8; 20],
+    pub data: [u8; 20],
 }
 
 impl fmt::Display for InfoHash {
