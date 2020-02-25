@@ -64,28 +64,28 @@ impl Value {
     pub fn as_byte_string(&self) -> GResult<&ByteString> {
         match self {
             Value::ByteString(b) => Ok(b),
-            _ => error("Not a byte string"),
+            _ => error(&format!("{}: Not a byte string", self.loc().path)),
         }
     }
 
     pub fn as_integer(&self) -> GResult<&Integer> {
         match self {
             Value::Integer(i) => Ok(i),
-            _ => error("Not an integer"),
+            _ => error(&format!("{}: Not an integer", self.loc().path)),
         }
     }
 
     pub fn as_list(&self) -> GResult<&List> {
         match self {
             Value::List(l) => Ok(l),
-            _ => error("Not a list"),
+            _ => error(&format!("{}: Not a list", self.loc().path)),
         }
     }
 
     pub fn as_dictionary(&self) -> GResult<&Dictionary> {
         match self {
             Value::Dictionary(d) => Ok(d),
-            _ => error("Not a dictionary"),
+            _ => error(&format!("{}: Not a dictionary", self.loc().path)),
         }
     }
 

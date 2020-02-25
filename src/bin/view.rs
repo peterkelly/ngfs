@@ -1,9 +1,9 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_mut)]
-// #![allow(unused_assignments)]
-// #![allow(unused_imports)]
-// #![allow(unused_macros)]
+#![allow(unused_variables)]
+#![allow(dead_code)]
+#![allow(unused_mut)]
+#![allow(unused_assignments)]
+#![allow(unused_imports)]
+#![allow(unused_macros)]
 
 use torrent::bencoding;
 use torrent::result::{Error, Result, error};
@@ -21,30 +21,6 @@ fn decode(data: &[u8]) -> Result<bencoding::Value> {
 fn view_bencoding(data: &[u8]) -> Result<()> {
     let value = decode(data)?;
     value.dump(0);
-    println!("");
-    match value {
-        bencoding::Value::Dictionary(d) => {
-            let entries = &d.entries;
-            println!("Is a dictionary");
-            match entries.get("info") {
-                Some(info) => {
-                    println!("Have info {} - {}", info.loc().start, info.loc().end);
-                    let mut hasher: Sha1 = Sha1::new();
-                    // hasher.input_str("hello world");
-                    hasher.input(&data[info.loc().start..info.loc().end]);
-                    let hex: String = hasher.result_str();
-                    println!("hex = {}", hex);
-                    // let x: () = hex;
-                }
-                None => {
-                    println!("Do not have info");
-                }
-            }
-        }
-        _ => {
-            println!("Not a dictionary");
-        }
-    };
     Ok(())
 }
 
@@ -53,7 +29,7 @@ fn view_torrent(data: &[u8]) -> Result<()> {
     println!("Torrent loaded successfully");
     println!("    name = {}", torrent.name);
     println!("    info hash = {}", torrent.info_hash);
-    for (group_index, group) in torrent.trackers.iter().enumerate() {
+    for (group_index, group) in torrent.tracker_groups.iter().enumerate() {
         println!("    group {}", group_index);
         for (tracker_index, tracker) in group.members.iter().enumerate() {
             println!("        {}: {}", tracker_index, tracker.url);
@@ -80,20 +56,136 @@ fn run(filename: &String) -> Result<()> {
     Ok(())
 }
 
+type CommandFun = &'static dyn Fn(&[String]) -> Result<()>;
+
+struct Command {
+    name: String,
+    f: CommandFun,
+}
+
+impl Command {
+    fn new(name: &str, f: CommandFun) -> Command {
+        Command { name: String::from(name), f: f }
+    }
+}
+
+fn filename_arg(args: &[String], index: usize) -> Result<&String> {
+    Ok(args.get(0).ok_or_else(|| Error::new("No filename specified"))?)
+}
+
+fn read_file_from_arg(args: &[String], index: usize) -> Result<Vec<u8>> {
+    let filename = filename_arg(args, index)?;
+    // Ok(std::fs::read(filename)?)
+    std::fs::read(filename).map_err(|e| Error::new(&format!("{}: {}", filename, e)).into())
+}
+
+fn trackers(args: &[String]) -> Result<()> {
+    let data = read_file_from_arg(args, 0)?;
+    let torrent = Torrent::from_bytes(&data)?;
+    for (group_index, group) in torrent.tracker_groups.iter().enumerate() {
+        for (tracker_index, tracker) in group.members.iter().enumerate() {
+            println!("{}", tracker.url);
+        }
+        if group_index + 1 < torrent.tracker_groups.len() {
+            println!("");
+        }
+    }
+    Ok(())
+}
+
+fn files(args: &[String]) -> Result<()> {
+    let data = read_file_from_arg(args, 0)?;
+    let torrent = Torrent::from_bytes(&data)?;
+    for file in torrent.files.iter() {
+        println!("{}", file.path);
+    }
+    Ok(())
+}
+
+fn info(args: &[String]) -> Result<()> {
+    let data = read_file_from_arg(args, 0)?;
+    let torrent = Torrent::from_bytes(&data)?;
+    println!("Info hash: {}", torrent.info_hash);
+    println!("Name: {}", torrent.name);
+
+    // let mut group_count = 0;
+    let mut tracker_count = 0;
+
+    let group_count = torrent.tracker_groups.len();
+    for group in torrent.tracker_groups.iter() {
+        // group_count += 1;
+        tracker_count += group.members.len();
+    }
+    println!("Tracker groups: {}", group_count);
+    println!("Trackers: {}", tracker_count);
+    println!("Piece length: {}", torrent.piece_length);
+    println!("Pieces: {}", torrent.pieces.len());
+    println!("Files: {}", torrent.files.len());
+
+    Ok(())
+}
+
+fn raw(args: &[String]) -> Result<()> {
+    let data = read_file_from_arg(args, 0)?;
+    view_bencoding(&data)
+}
+
+fn full(args: &[String]) -> Result<()> {
+    // let data = read_file_from_arg(args, 0)?;
+    let filename = filename_arg(args, 0)?;
+    run(filename)
+    // Ok(())
+}
+
+fn build_commands() -> Vec<Command> {
+    let mut commands = Vec::<Command>::new();
+    commands.push(Command::new("trackers", &trackers));
+    commands.push(Command::new("files", &files));
+    commands.push(Command::new("info", &info));
+    commands.push(Command::new("raw", &raw));
+    commands.push(Command::new("full", &full));
+    return commands;
+}
+
+fn print_usage(commands: &Vec<Command>) {
+    // println!("Usage: view [OPTIONS] COMMAND [ARGS]...");
+    // println!("");
+    // println!("Options:");
+    // println!("  --help  Show this message and exit.");
+    // println!("");
+    println!("Commands:");
+    for command in commands.iter() {
+        println!("  {}", command.name);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let commands = build_commands();
 
-    if args.len() < 2 {
-        eprintln!("No filename specified");
-        std::process::exit(1);
+    let mut command_opt: Option<&Command> = None;
+    if let Some(name) = args.get(1) {
+        for c in commands.iter() {
+            if name == &c.name {
+                command_opt = Some(c);
+                break;
+            }
+        }
     }
 
-    let filename: &String = &args[1];
-    match run(filename) {
-        Ok(()) => (),
-        Err(e) => {
-            eprintln!("{}", e);
+    match command_opt {
+        Some(command) => {
+            match (&command.f)(&args[2..]) {
+                Ok(_) => {},
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => {
+            print_usage(&commands);
             std::process::exit(1);
         }
-    };
+    }
 }

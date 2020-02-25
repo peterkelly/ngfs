@@ -11,14 +11,24 @@ use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 use super::bencoding;
 use super::bencoding::{Value};
-use super::result::{Error, Result};
+use super::result::{Error, Result, error};
 use super::util::BinaryData;
 
 pub struct InfoHash {
     data: [u8; 20],
 }
 
+pub struct PieceHash {
+    data: [u8; 20],
+}
+
 impl fmt::Display for InfoHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", BinaryData(&self.data))
+    }
+}
+
+impl fmt::Display for PieceHash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", BinaryData(&self.data))
     }
@@ -42,8 +52,10 @@ pub struct Torrent {
     pub root: Value,
     pub info_hash: InfoHash,
     pub name: String,
-    pub trackers: Vec<TrackerGroup>,
+    pub tracker_groups: Vec<TrackerGroup>,
     pub files: Vec<TorrentFile>,
+    pub piece_length: usize,
+    pub pieces: Vec<PieceHash>,
 }
 
 impl Torrent {
@@ -111,25 +123,45 @@ impl Torrent {
 
         let announce_list = root_dict.get("announce-list")
             .ok_or_else(|| String::from("Missing announce-list property"))?;
-        let trackers = Torrent::parse_announce_list(announce_list)?;
+        let tracker_groups = Torrent::parse_announce_list(announce_list)?;
 
         let files_node = info_dict.entries.get("files")
             .ok_or_else(|| String::from("info: Missing files property"))?;
         let files = Self::parse_files(files_node)?;
 
+        let piece_length_value = info_dict.entries.get("piece length").ok_or_else(
+            || String::from("info: Missing piece length property"))?;
+        let piece_length = piece_length_value.as_integer()?.value;
+
+        let pieces_value = info_dict.entries.get("pieces").ok_or_else(
+            || String::from("info: Missing pieces property"))?;
+        let pieces_data = &pieces_value.as_byte_string()?.data;
+
+        if pieces_data.len() % 20 != 0 {
+            return error(&format!("Pieces data is {} bytes, which is not a multiple of 20", pieces_data.len()))
+        }
+
+        let mut pieces = Vec::<PieceHash>::new();
+        let mut i = 0;
+        while i + 20 < pieces_data.len() {
+            let mut data: [u8; 20] = [0; 20];
+            data.copy_from_slice(&pieces_data[i..i + 20]);
+            pieces.push(PieceHash { data });
+            i += 20;
+        }
 
 
 
         let mut hasher: Sha1 = Sha1::new();
         // hasher.input_str("hello world");
         hasher.input(&data[info.loc().start..info.loc().end]);
-        let hex: String = hasher.result_str();
-        println!("hex = {}", hex);
-        println!("sha1 output bits = {}", hasher.output_bits());
+        // let hex: String = hasher.result_str();
+        // println!("hex = {}", hex);
+        // println!("sha1 output bits = {}", hasher.output_bits());
 
         let mut hashdata: [u8; 20] = [0; 20];
         hasher.result(&mut hashdata);
-        println!("{}", hashdata[0]);
+        // println!("{}", hashdata[0]);
 
         let info_hash = InfoHash { data: hashdata };
         Ok(Torrent {
@@ -137,8 +169,10 @@ impl Torrent {
             root: value,
             info_hash,
             name,
-            trackers,
+            tracker_groups,
             files,
+            piece_length,
+            pieces,
         })
     }
 }
