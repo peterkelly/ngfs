@@ -14,10 +14,12 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::cell::RefCell;
 
+type RWFuture<'a> = Box<dyn Future<Output=Result<usize, std::io::Error>> + 'a>;
+
 struct ReadWrite<'a> {
     // socket: &'a Box<TcpStream>,
-    read_future: &'a Box<dyn Future<Output=Result<usize, std::io::Error>> + 'a>,
-    write_future: &'a Box<dyn Future<Output=Result<usize, std::io::Error>> + 'a>,
+    read_future: &'a RWFuture<'a>,
+    write_future: &'a RWFuture<'a>,
 }
 
 #[tokio::main]
