@@ -88,6 +88,64 @@ impl AnnounceRequest {
     }
 }
 
+struct PeerEndpoint {
+    ip: u32,
+    port: u16,
+}
+
+struct AnnonuceResponse {      // Offset      Size            Name            Value
+    action: u32,               // 0           32-bit integer  action          1 // announce
+    transaction_id: u32,       // 4           32-bit integer  transaction_id
+    interval: u32,             // 8           32-bit integer  interval
+    leechers: u32,             // 12          32-bit integer  leechers
+    seeders: u32,              // 16          32-bit integer  seeders
+    peers: Vec<PeerEndpoint>,  // 20 + 6 * n  32-bit integer  IP address
+                               // 24 + 6 * n  16-bit integer  TCP port
+}
+
+impl AnnonuceResponse {
+    fn from(buf: &[u8]) -> Result<AnnonuceResponse> {
+        if buf.len() < 20 {
+            return error("Invalid announce response");
+        }
+
+        let action = u32::from_be_bytes(buf[0..4].try_into().unwrap());
+        let transaction_id = u32::from_be_bytes(buf[4..8].try_into().unwrap());
+        let interval = u32::from_be_bytes(buf[8..12].try_into().unwrap());
+        let leechers = u32::from_be_bytes(buf[12..16].try_into().unwrap());
+        let seeders = u32::from_be_bytes(buf[16..20].try_into().unwrap());
+
+        if action != 1 {
+            return error(&format!("action = {}, expected 1", action));
+        }
+
+        let peer_count = leechers + seeders;
+        let expected_len: usize = (20 + peer_count * 6) as usize;
+        if buf.len() != expected_len {
+            return error(&format!("Invalid response length: expected {}, got {}", expected_len, buf.len()));
+        }
+
+        let mut peers: Vec<PeerEndpoint> = Vec::new();
+
+        for i in 0..peer_count {
+            let offset: usize = (20 + i * 6) as usize;
+            peers.push(PeerEndpoint {
+                ip: u32::from_be_bytes(buf[offset..offset + 4].try_into().unwrap()),
+                port: u16::from_be_bytes(buf[offset + 4..offset + 6].try_into().unwrap()),
+            })
+        }
+
+        Ok(AnnonuceResponse {
+            action,
+            transaction_id,
+            interval,
+            leechers,
+            seeders,
+            peers,
+        })
+    }
+}
+
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut rng = rand::thread_rng();
@@ -211,8 +269,23 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let mut buf: [u8; 65536] = [0; 65536];
     let r = sock.recv(&mut buf).await?;
-    println!("Received {} bytes: {}", r, BinaryData(&buf[..r]));
-    std::fs::write("announce_response", &buf[..r])?;
+    // println!("Received {} bytes: {}", r, BinaryData(&buf[..r]));
+    // std::fs::write("announce_response", &buf[..r])?;
+
+
+    let response = AnnonuceResponse::from(&buf[0..r])?;
+    println!("action = {}", response.action);
+    println!("transaction_id = {}", response.transaction_id);
+    println!("interval = {}", response.interval);
+    println!("leechers = {}", response.leechers);
+    println!("seeders = {}", response.seeders);
+    for peer in response.peers.iter() {
+        let n0 = (peer.ip >> 24) & 0xFF;
+        let n1 = (peer.ip >> 16) & 0xFF;
+        let n2 = (peer.ip >> 8) & 0xFF;
+        let n3 = (peer.ip >> 0) & 0xFF;
+        println!("{}.{}.{}.{}:{}", n0, n1, n2, n3, peer.port);
+    }
 
     Ok(())
 }
