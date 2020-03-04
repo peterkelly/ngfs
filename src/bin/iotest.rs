@@ -11,7 +11,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use futures::future::{Future, Either, select, join};
 use std::error::Error;
-use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, Mutex};
+use std::sync::{Arc};
 use std::cell::RefCell;
 use std::net::SocketAddr;
 
@@ -29,14 +30,16 @@ struct ConnectionImpl {
     connection_id: usize,
     receive_queue: Vec<u8>,
     send_queue: Vec<u8>,
+    tx: mpsc::UnboundedSender<String>,
 }
 
 impl ConnectionImpl {
-    fn new(connection_id: usize) -> ConnectionImpl {
+    fn new(connection_id: usize, tx: mpsc::UnboundedSender<String>) -> ConnectionImpl {
         ConnectionImpl {
             connection_id,
             receive_queue: Vec::new(),
             send_queue: Vec::new(),
+            tx,
         }
     }
 
@@ -60,13 +63,13 @@ struct Connection {
 }
 
 impl Connection {
-    fn new(connection_id: usize) -> Connection {
-        let mut conn = ConnectionImpl::new(connection_id);
+    fn new(connection_id: usize, tx: mpsc::UnboundedSender<String>) -> Connection {
+        let mut conn = ConnectionImpl::new(connection_id, tx);
         Connection { cref: Arc::new(Mutex::new(conn)) }
     }
 
-    fn on_receive(&self, data: &[u8]) {
-        self.cref.lock().unwrap().on_receive(data);
+    async fn on_receive(&self, data: &[u8]) {
+        self.cref.lock().await.on_receive(data);
     }
 }
 
@@ -74,13 +77,13 @@ async fn connection_reader<'a>(conn_ref: &Connection, reader: &mut ReadHalf<'a>)
     loop {
         let mut buf: [u8; 1024] = [0; 1024];
         match reader.read(&mut buf).await {
+            Ok(0) => {
+                println!("Finished reading");
+                break;
+            }
             Ok(r) => {
-                if r == 0 {
-                    println!("Finished reading");
-                    return;
-                }
                 println!("read {} bytes", r);
-                conn_ref.on_receive(&buf[0..r]);
+                conn_ref.on_receive(&buf[0..r]).await;
             }
             Err(err) => {
                 println!("read error: {}", err);
@@ -115,9 +118,8 @@ async fn process<'a>(conn_ref: &Connection, reader: &mut ReadHalf<'a>, writer: &
 
 async fn setup_connection(stream: &mut TcpStream, addr: SocketAddr, connection_id: usize) {
     let (mut reader, mut writer) = stream.split();
-    // let mut conn = ConnectionImpl::new(connection_id);
-    // let wrapper = Connection { cref: Arc::new(Mutex::new(conn)) };
-    let conn = Connection::new(connection_id);
+    let (tx, rx) : (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) = mpsc::unbounded_channel();
+    let conn = Connection::new(connection_id, tx);
     match process(&conn, &mut reader, &mut writer).await {
         Ok(_) => (),
         Err(e) => eprintln!("{}: {}", addr, e),
