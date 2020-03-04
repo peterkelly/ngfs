@@ -23,62 +23,18 @@ type RWFuture<'a> = Box<dyn Future<Output=Result<usize, std::io::Error>> + 'a>;
 //     write_future: &'a RWFuture<'a>,
 // }
 
-struct Connection {
+struct ConnectionImpl {
     // reader: ReadHalf<'a>,
     // writer: WriteHalf<'a>,
+    connection_id: usize,
     receive_queue: Vec<u8>,
     send_queue: Vec<u8>,
 }
 
-async fn do_reading<'a>(reader: &mut ReadHalf<'a>) {
-}
-
-async fn do_writing<'a>(writer: &mut WriteHalf<'a>) {
-}
-
-
-async fn process<'a>(conn_ref: Arc<Mutex<Connection>>, reader: &mut ReadHalf<'a>, writer: &mut WriteHalf<'a>)
-                    -> Result<(), Box<dyn Error>> {
-    let read_handle = async move {
-        loop {
-            let mut buf: [u8; 1024] = [0; 1024];
-            match reader.read(&mut buf).await {
-                Ok(r) => {
-                    println!("read {} bytes", r);
-                    conn_ref.lock().unwrap().on_receive(&buf[0..r]);
-                }
-                Err(err) => {
-                    println!("read error: {}", err);
-                    break;
-                }
-            };
-        };
-    };
-
-    let write_handle = async move {
-        // loop {
-            let welcome = "=======\nWelcome\n=======\n";
-            match writer.write(welcome.as_bytes()).await {
-                Ok(w) => {
-                    println!("wrote {} bytes", w);
-                }
-                Err(err) => {
-                    println!("write error: {}", err);
-                    // break;
-                }
-            }
-        // }
-    };
-
-    join(read_handle, write_handle).await;
-
-
-    Ok(())
-}
-
-impl Connection {
-    fn new() -> Connection {
-        Connection {
+impl ConnectionImpl {
+    fn new(connection_id: usize) -> ConnectionImpl {
+        ConnectionImpl {
+            connection_id,
             receive_queue: Vec::new(),
             send_queue: Vec::new(),
         }
@@ -99,11 +55,70 @@ impl Connection {
     }
 }
 
-async fn setup_connection(stream: &mut TcpStream, addr: SocketAddr) {
+struct Connection {
+    cref: Arc<Mutex<ConnectionImpl>>,
+}
+
+impl Connection {
+    fn new(connection_id: usize) -> Connection {
+        let mut conn = ConnectionImpl::new(connection_id);
+        Connection { cref: Arc::new(Mutex::new(conn)) }
+    }
+
+    fn on_receive(&self, data: &[u8]) {
+        self.cref.lock().unwrap().on_receive(data);
+    }
+}
+
+async fn connection_reader<'a>(conn_ref: &Connection, reader: &mut ReadHalf<'a>) {
+    loop {
+        let mut buf: [u8; 1024] = [0; 1024];
+        match reader.read(&mut buf).await {
+            Ok(r) => {
+                if r == 0 {
+                    println!("Finished reading");
+                    return;
+                }
+                println!("read {} bytes", r);
+                conn_ref.on_receive(&buf[0..r]);
+            }
+            Err(err) => {
+                println!("read error: {}", err);
+                break;
+            }
+        };
+    };
+}
+
+async fn connection_writer<'a>(conn_ref: &Connection, writer: &mut WriteHalf<'a>) {
+    // loop {
+        let welcome = "=======\nWelcome\n=======\n";
+        match writer.write(welcome.as_bytes()).await {
+            Ok(w) => {
+                println!("wrote {} bytes", w);
+            }
+            Err(err) => {
+                println!("write error: {}", err);
+                // break;
+            }
+        }
+    // }
+}
+
+async fn process<'a>(conn_ref: &Connection, reader: &mut ReadHalf<'a>, writer: &mut WriteHalf<'a>)
+                    -> Result<(), Box<dyn Error>> {
+    let read_handle = connection_reader(conn_ref, reader);
+    let write_handle = connection_writer(conn_ref, writer);
+    join(read_handle, write_handle).await;
+    Ok(())
+}
+
+async fn setup_connection(stream: &mut TcpStream, addr: SocketAddr, connection_id: usize) {
     let (mut reader, mut writer) = stream.split();
-    let mut conn = Connection::new();
-    let conn_ref = Arc::new(Mutex::new(conn));
-    match process(conn_ref.clone(), &mut reader, &mut writer).await {
+    // let mut conn = ConnectionImpl::new(connection_id);
+    // let wrapper = Connection { cref: Arc::new(Mutex::new(conn)) };
+    let conn = Connection::new(connection_id);
+    match process(&conn, &mut reader, &mut writer).await {
         Ok(_) => (),
         Err(e) => eprintln!("{}: {}", addr, e),
     };
@@ -117,12 +132,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut listener = TcpListener::bind(&addr).await?;
     println!("Listening on: {}", addr);
 
+    let mut next_connection_id: usize = 0;
     loop {
         let (mut stream, client_addr) = listener.accept().await?;
         println!("Got connection from {}", client_addr);
         // let mut connection = Connection::new(stream);
+        let connection_id = next_connection_id;
+        next_connection_id += 1;
         let handle = tokio::spawn(async move {
-            setup_connection(&mut stream, client_addr).await;
+            setup_connection(&mut stream, client_addr, connection_id).await;
             // let (mut reader, mut writer) = stream.split();
             // let mut conn = Connection::new(reader, writer);
             // match conn.process().await {
