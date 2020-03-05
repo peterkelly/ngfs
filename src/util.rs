@@ -41,3 +41,29 @@ pub fn from_hex(s: &str) -> Option<Vec<u8>> {
         }
     }
 }
+
+pub fn escape_string(s: &str) -> String {
+    let mut escaped: Vec<char> = Vec::new();
+    escaped.push('\"');
+    for c in s.chars() {
+        match c {
+            '"' => {
+                escaped.push('\\');
+                escaped.push('"');
+            }
+            '\r' => {
+                escaped.push('\\');
+                escaped.push('r');
+            }
+            '\n' => {
+                escaped.push('\\');
+                escaped.push('n');
+            }
+            _ => {
+                escaped.push(c);
+            }
+        }
+    }
+    escaped.push('\"');
+    return escaped.into_iter().collect();
+}
