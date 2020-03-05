@@ -53,7 +53,7 @@ enum WriterMessage {
     Close,
 }
 
-async fn connection_reader<'a>(conn: Arc<Connection>, reader: &mut ReadHalf<'a>) {
+async fn connection_reader<'a>(conn: Arc<Connection>, mut reader: ReadHalf<'a>) {
     let mut buf: [u8; 1024] = [0; 1024];
     loop {
         match reader.read(&mut buf).await {
@@ -72,7 +72,7 @@ async fn connection_reader<'a>(conn: Arc<Connection>, reader: &mut ReadHalf<'a>)
     }
 }
 
-async fn connection_writer<'a>(conn: Arc<Connection>, reader: &mut WriteHalf<'a>,
+async fn connection_writer<'a>(conn: Arc<Connection>, mut writer: WriteHalf<'a>,
                 mut rx: mpsc::UnboundedReceiver<WriterMessage>) {
     while let Some(msg) = rx.recv().await {
         match msg {
@@ -92,40 +92,9 @@ async fn process_connection(state: Arc<State>, stream: &mut TcpStream,
     let mut rx: mpsc::UnboundedReceiver<WriterMessage> = rx1;
     let conn = Arc::new(Connection::new(connection_id));
 
-    // reader future
-    let reader_handle = connection_reader(conn.clone(), &mut reader);
-    // let reader_handle = async move {
-    //     let mut buf: [u8; 1024] = [0; 1024];
-    //     loop {
-    //         match reader.read(&mut buf).await {
-    //             Ok(0) => {
-    //                 println!("Connection closed");
-    //                 break;
-    //             }
-    //             Ok(r) => {
-    //                 println!("Received {} bytes", r);
-    //             }
-    //             Err(e) => {
-    //                 println!("Connection error: {}", e);
-    //                 break;
-    //             }
-    //         };
-    //     }
-    // };
-
-    // writer future
-    let writer_handle = connection_writer(conn.clone(), &mut writer, rx);
-    // let writer_handle = async move {
-    //     while let Some(msg) = rx.recv().await {
-    //         match msg {
-    //             WriterMessage::Write(bytes) => {
-    //             }
-    //             WriterMessage::Close => {
-    //             }
-    //         }
-    //     }
-    // };
-    join(reader_handle, writer_handle).await;
+    let reader_future = connection_reader(conn.clone(), reader);
+    let writer_future = connection_writer(conn.clone(), writer, rx);
+    join(reader_future, writer_future).await;
 }
 
 #[tokio::main]
