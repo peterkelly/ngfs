@@ -162,6 +162,10 @@ impl<'a> FieldData<'a> {
         Ok(self.as_bytes()?.bytes_to_string()?)
     }
 
+    pub fn to_bytes(&self) -> Result<&'a [u8], Box<dyn Error>> {
+        Ok(self.as_bytes()?.0)
+    }
+
     pub fn to_u64(&self) -> Result<u64, Box<dyn Error>> {
         match self {
             FieldData::Bits64(v) => Ok(v.bits64_to_u64()),
@@ -315,7 +319,9 @@ impl<'a> fmt::Debug for FieldData<'a> {
 
 pub struct FieldRef<'a> {
     pub offset: usize,
+    pub tag: u64,
     pub field_number: u64,
+    pub wire_type: u8,
     pub data: FieldData<'a>,
 }
 
@@ -386,7 +392,9 @@ impl<'a> PBufReader<'a> {
 
         Ok(Some(FieldRef {
             offset: start,
+            tag: tag,
             field_number: field_number,
+            wire_type: wire_type as u8,
             data: data,
         }))
     }

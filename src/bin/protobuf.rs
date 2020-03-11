@@ -7,8 +7,9 @@
 
 use std::error::Error;
 use torrent::util::escape_string;
-use torrent::result::{Error as GError};
+use torrent::result::{error as gerror, Error as GError};
 use torrent::protobuf::{PBufReader, FieldRef};
+use torrent::util::BinaryData;
 
 fn show_field<'a>(field: &FieldRef<'a>) -> Result<(), Box<dyn Error>> {
     match field.field_number {
@@ -100,23 +101,162 @@ fn show_field<'a>(field: &FieldRef<'a>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+
+// https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-pb.md
+
+
+struct PBLink {
+    hash: Vec<u8>,
+    name: String,
+    tsize: u64,
+}
+
+struct PBNode {
+    links: Vec<PBNode>,
+    data: Option<Vec<u8>>,
+}
+
+
+
+
+
+impl PBLink {
+    fn from_pb(data: &[u8]) -> Result<PBLink, Box<dyn Error>> {
+        let mut hash: Option<Vec<u8>> = None;
+        let mut name: Option<String> = None;
+        let mut tsize: Option<u64> = None;
+
+        let mut reader = PBufReader::new(&data);
+        while let Some(field) = reader.read_field()? {
+            match field.field_number {
+                1 => {
+                    hash = Some(Vec::from(field.data.to_bytes()?));
+                    // println!("    hash {}", BinaryData(hash));
+                }
+                2 => {
+                    name = Some(field.data.to_string()?);
+                    // println!("    name {}", name);
+                }
+                3 => {
+                    tsize = Some(field.data.to_u64()?);
+                    // println!("    size {}", size);
+                }
+                _ => {
+                    // println!("Other field {}", field.field_number);
+                }
+            }
+        }
+
+        let hash = match hash {
+            Some(v) => v,
+            None => return gerror("Missing field: hash"),
+        };
+
+
+        let name = match name {
+            Some(v) => v,
+            None => return gerror("Missing field: name"),
+        };
+
+        let tsize = match tsize {
+            Some(v) => v,
+            None => return gerror("Missing field: tsize"),
+        };
+
+        Ok(PBLink { hash, name, tsize })
+    }
+}
+
+
+
+
+
+// https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-pb.md
+// fn print_directory_entry(data: &[u8]) -> Result<(), Box<dyn Error>> {
+//     let mut reader = PBufReader::new(&data);
+//     while let Some(field) = reader.read_field()? {
+//         match field.field_number {
+//             1 => {
+//                 let hash = field.data.to_bytes()?;
+//                 println!("    hash {}", BinaryData(hash));
+//             }
+//             2 => {
+//                 let name = field.data.to_string()?;
+//                 println!("    name {}", name);
+//             }
+//             3 => {
+//                 let size = field.data.to_u64()?;
+//                 println!("    size {}", size);
+//             }
+//             _ => {
+//                 println!("Other field {}", field.field_number);
+//             }
+//         }
+//     }
+
+
+//     // print_fields(data)?;
+//     Ok(())
+// }
+
+fn print_directory(raw_data: &[u8]) -> Result<(), Box<dyn Error>> {
+    let mut links: Vec<PBLink> = Vec::new();
+    let mut data: Option<Vec<u8>> = None;
+
+    let mut reader = PBufReader::new(&raw_data);
+    while let Some(field) = reader.read_field()? {
+        match field.field_number {
+            1 => {
+                data = Some(Vec::from(field.data.to_bytes()?));
+            }
+            2 => {
+                let b = field.data.to_bytes()?;
+                links.push(PBLink::from_pb(b)?);
+            }
+            _ => {
+                println!("Other field {}", field.field_number);
+            }
+        }
+    }
+
+    for link in links.iter() {
+        println!("{:<30} {:<16} {}", link.name, link.tsize, BinaryData(&link.hash));
+    }
+    println!();
+    match data {
+        Some(data) => {
+            println!("Data {}", BinaryData(&data));
+        }
+        None => {
+            println!("Data None");
+        }
+    }
+    Ok(())
+}
+
+fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
+    let mut reader = PBufReader::new(&data);
+    while let Some(field) = reader.read_field()? {
+        println!("offset 0x{:04x}, field_number {:2}, data {:?}",
+            field.offset, field.field_number, field.data);
+        // println!();
+        // match show_field(&field) {
+        //     Ok(_) => (),
+        //     Err(e) => {
+        //         println!("    Error: {}", e);
+        //     }
+        // }
+        // println!();
+    }
+    Ok(())
+}
+
 fn main_result() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let filename = args.get(1).ok_or_else(|| GError::new("No filename specified"))?;
     let raw_data = std::fs::read(filename)?;
-    let mut reader = PBufReader::new(&raw_data);
-    while let Some(field) = reader.read_field()? {
-        // // println!("offset 0x{:04x}, field_number {:2}, data {:?}",
-        // //     field.offset, field.field_number, field.data);
-        // println!();
-        match show_field(&field) {
-            Ok(_) => (),
-            Err(e) => {
-                println!("    Error: {}", e);
-            }
-        }
-        // println!();
-    }
+    // print_fields(&raw_data)?;
+    print_directory(&raw_data)?;
 
     Ok(())
 }
