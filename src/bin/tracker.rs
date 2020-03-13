@@ -129,6 +129,9 @@ impl AnnonuceResponse {
 
         for i in 0..peer_count {
             let offset: usize = (20 + i * 6) as usize;
+            // if offset + 6 > buf.len() {
+            //     break;
+            // }
             peers.push(PeerEndpoint {
                 ip: u32::from_be_bytes(buf[offset..offset + 4].try_into().unwrap()),
                 port: u16::from_be_bytes(buf[offset + 4..offset + 6].try_into().unwrap()),

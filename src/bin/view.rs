@@ -125,6 +125,14 @@ fn info(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn hash(args: &[String]) -> Result<()> {
+    let filename = filename_arg(args, 0)?;
+    let data = read_file_from_arg(args, 0)?;
+    let torrent = Torrent::from_bytes(&data)?;
+    println!("{} {}", filename, torrent.info_hash);
+    Ok(())
+}
+
 fn raw(args: &[String]) -> Result<()> {
     let data = read_file_from_arg(args, 0)?;
     view_bencoding(&data)
@@ -142,6 +150,7 @@ fn build_commands() -> Vec<Command> {
     commands.push(Command::new("trackers", &trackers));
     commands.push(Command::new("files", &files));
     commands.push(Command::new("info", &info));
+    commands.push(Command::new("hash", &hash));
     commands.push(Command::new("raw", &raw));
     commands.push(Command::new("full", &full));
     return commands;
