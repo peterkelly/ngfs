@@ -9,7 +9,7 @@ use std::fmt;
 use std::error::Error;
 // use std::collections::BTreeMap;
 use std::convert::TryInto;
-use super::result::{error as gerror};
+use super::result::{general_error};
 
 pub struct VarInt<'a>(&'a [u8]);
 pub struct Bits32([u8; 4]);
@@ -133,28 +133,28 @@ impl<'a> FieldData<'a> {
     // fn as_varint(&self) -> Result<&VarInt<'a>, Box<dyn Error>> {
     //     match self {
     //         FieldData::VarInt(v) => Ok(v),
-    //         _ => gerror("Not a varint"),
+    //         _ => general_error("Not a varint"),
     //     }
     // }
 
     fn as_bytes(&self) -> Result<&Bytes<'a>, Box<dyn Error>> {
         match self {
             FieldData::Bytes(v) => Ok(v),
-            _ => gerror("Not a byte array"),
+            _ => general_error("Not a byte array"),
         }
     }
 
     fn as_bits32(&self) -> Result<&Bits32, Box<dyn Error>> {
         match self {
             FieldData::Bits32(v) => Ok(v),
-            _ => gerror("Not a bits32"),
+            _ => general_error("Not a bits32"),
         }
     }
 
     fn as_bits64(&self) -> Result<&Bits64, Box<dyn Error>> {
         match self {
             FieldData::Bits64(v) => Ok(v),
-            _ => gerror("Not a bits64"),
+            _ => general_error("Not a bits64"),
         }
     }
 
@@ -170,7 +170,7 @@ impl<'a> FieldData<'a> {
         match self {
             FieldData::Bits64(v) => Ok(v.bits64_to_u64()),
             FieldData::VarInt(v) => Ok(v.to_u64()),
-            _ => gerror("Not a bits64 or varint"),
+            _ => general_error("Not a bits64 or varint"),
         }
     }
 
@@ -178,14 +178,14 @@ impl<'a> FieldData<'a> {
         match self {
             FieldData::Bits64(v) => Ok(v.bits64_to_i64()),
             FieldData::VarInt(v) => Ok(v.to_i64()),
-            _ => gerror("Not a bits64 or varint"),
+            _ => general_error("Not a bits64 or varint"),
         }
     }
 
     pub fn to_i64_zigzag(&self) -> Result<i64, Box<dyn Error>> {
         match self {
             FieldData::VarInt(v) => Ok(v.to_i64_zigzag()),
-            _ => gerror("Not a varint"),
+            _ => general_error("Not a varint"),
         }
     }
 
@@ -197,7 +197,7 @@ impl<'a> FieldData<'a> {
         match self {
             FieldData::Bits32(v) => Ok(v.bits32_to_u32()),
             FieldData::VarInt(v) => Ok(v.to_u32()),
-            _ => gerror("Not a bits32 or varint"),
+            _ => general_error("Not a bits32 or varint"),
         }
     }
 
@@ -205,14 +205,14 @@ impl<'a> FieldData<'a> {
         match self {
             FieldData::Bits32(v) => Ok(v.bits32_to_i32()),
             FieldData::VarInt(v) => Ok(v.to_i32()),
-            _ => gerror("Not a bits32 or varint"),
+            _ => general_error("Not a bits32 or varint"),
         }
     }
 
     pub fn to_i32_zigzag(&self) -> Result<i32, Box<dyn Error>> {
         match self {
             FieldData::VarInt(v) => Ok(v.to_i32_zigzag()),
-            _ => gerror("Not a varint"),
+            _ => general_error("Not a varint"),
         }
     }
 
@@ -223,7 +223,7 @@ impl<'a> FieldData<'a> {
     pub fn to_bool(&self) -> Result<bool, Box<dyn Error>> {
         match self {
             FieldData::VarInt(v) => Ok(v.to_bool()),
-            _ => gerror("Not a varint"),
+            _ => general_error("Not a varint"),
         }
     }
 }

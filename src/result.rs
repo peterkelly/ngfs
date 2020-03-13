@@ -1,30 +1,29 @@
 use std::fmt;
-
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+use std::error::Error;
 
 #[derive(Debug, Clone)]
-pub struct Error {
+pub struct GeneralError {
     msg: String,
 }
 
-impl Error {
-    pub fn new<T: Into<String>>(msg: T) -> Box<Error> {
-        Box::new(Error { msg: msg.into() })
+impl GeneralError {
+    pub fn new<T: Into<String>>(msg: T) -> Box<GeneralError> {
+        Box::new(GeneralError { msg: msg.into() })
     }
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for GeneralError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.msg)
     }
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl Error for GeneralError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         None
     }
 }
 
-pub fn error<S, T: Into<String>>(msg: T) -> Result<S> {
-    Err(Box::new(Error { msg: msg.into() }))
+pub fn general_error<S, T: Into<String>>(msg: T) -> Result<S, Box<dyn Error>> {
+    Err(Box::new(GeneralError { msg: msg.into() }))
 }

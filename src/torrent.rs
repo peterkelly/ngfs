@@ -7,11 +7,12 @@
 
 use std::fmt;
 use std::collections::BTreeMap;
+use std::error::Error;
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 use super::bencoding;
 use super::bencoding::{Value};
-use super::result::{Error, Result, error};
+use super::result::{GeneralError, general_error};
 use super::util::BinaryData;
 
 pub struct InfoHash {
@@ -59,7 +60,7 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    fn parse_announce_list(be_announce_list_value: &Value) -> Result<Vec<TrackerGroup>> {
+    fn parse_announce_list(be_announce_list_value: &Value) -> Result<Vec<TrackerGroup>, Box<dyn Error>> {
         let mut groups: Vec<TrackerGroup> = Vec::new();
         let be_announce_list = be_announce_list_value.as_list()?;
         for be_group_value in be_announce_list.items.iter() {
@@ -78,7 +79,7 @@ impl Torrent {
         return Ok(groups);
     }
 
-    fn parse_files(be_files_value: &Value) -> Result<Vec<TorrentFile>> {
+    fn parse_files(be_files_value: &Value) -> Result<Vec<TorrentFile>, Box<dyn Error>> {
         let mut files: Vec<TorrentFile> = Vec::new();
         let be_files_list = be_files_value.as_list()?;
         for be_file_value in be_files_list.items.iter() {
@@ -103,7 +104,7 @@ impl Torrent {
         return Ok(files);
     }
 
-    pub fn from_bytes(data: &[u8]) -> Result<Torrent> {
+    pub fn from_bytes(data: &[u8]) -> Result<Torrent, Box<dyn Error>> {
         // let node = bencoding::parse(data).or_else(|e| Err(format!("Corrupt torrent: {}", e)))?;
         let value = bencoding::parse(data)?;
         let root_dict: &BTreeMap<String, Value> = match &value {
@@ -111,7 +112,7 @@ impl Torrent {
                 &d.entries
             }
             _ => {
-                return Err(Error::new("Root is not a dictionary"));
+                return Err(GeneralError::new("Root is not a dictionary"));
             }
         };
         let info = root_dict.get("info").ok_or_else(|| String::from("Missing info dictionary"))?;
@@ -138,7 +139,7 @@ impl Torrent {
         let pieces_data = &pieces_value.as_byte_string()?.data;
 
         if pieces_data.len() % 20 != 0 {
-            return error(&format!("Pieces data is {} bytes, which is not a multiple of 20", pieces_data.len()))
+            return general_error(&format!("Pieces data is {} bytes, which is not a multiple of 20", pieces_data.len()))
         }
 
         let mut pieces = Vec::<PieceHash>::new();

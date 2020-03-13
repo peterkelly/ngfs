@@ -5,26 +5,27 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
+use std::error::Error;
 use torrent::bencoding;
-use torrent::result::{Error, Result, error};
+use torrent::result::{GeneralError, general_error};
 use torrent::torrent::{Torrent};
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 
-fn decode(data: &[u8]) -> Result<bencoding::Value> {
+fn decode(data: &[u8]) -> Result<bencoding::Value, Box<dyn Error>> {
     match bencoding::parse(data) {
         Ok(v) => Ok(v),
-        Err(e) => Err(Error::new(format!("Corrupt torrent: {}", e))),
+        Err(e) => Err(GeneralError::new(format!("Corrupt torrent: {}", e))),
     }
 }
 
-fn view_bencoding(data: &[u8]) -> Result<()> {
+fn view_bencoding(data: &[u8]) -> Result<(), Box<dyn Error>> {
     let value = decode(data)?;
     value.dump(0);
     Ok(())
 }
 
-fn view_torrent(data: &[u8]) -> Result<()> {
+fn view_torrent(data: &[u8]) -> Result<(), Box<dyn Error>> {
     let torrent = Torrent::from_bytes(data)?;
     println!("Torrent loaded successfully");
     println!("    name = {}", torrent.name);
@@ -42,11 +43,11 @@ fn view_torrent(data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn run(filename: &String) -> Result<()> {
+fn run(filename: &String) -> Result<(), Box<dyn Error>> {
     let data: Vec<u8> = match std::fs::read(filename) {
         Ok(data) => data,
         Err(err) => {
-            return error(format!("Cannot read {}: {}", filename, err));
+            return general_error(format!("Cannot read {}: {}", filename, err));
         }
     };
 
@@ -56,7 +57,7 @@ fn run(filename: &String) -> Result<()> {
     Ok(())
 }
 
-type CommandFun = &'static dyn Fn(&[String]) -> Result<()>;
+type CommandFun = &'static dyn Fn(&[String]) -> Result<(), Box<dyn Error>>;
 
 struct Command {
     name: String,
@@ -69,17 +70,17 @@ impl Command {
     }
 }
 
-fn filename_arg(args: &[String], index: usize) -> Result<&String> {
-    Ok(args.get(0).ok_or_else(|| Error::new("No filename specified"))?)
+fn filename_arg(args: &[String], index: usize) -> Result<&String, Box<dyn Error>> {
+    Ok(args.get(0).ok_or_else(|| GeneralError::new("No filename specified"))?)
 }
 
-fn read_file_from_arg(args: &[String], index: usize) -> Result<Vec<u8>> {
+fn read_file_from_arg(args: &[String], index: usize) -> Result<Vec<u8>, Box<dyn Error>> {
     let filename = filename_arg(args, index)?;
     // Ok(std::fs::read(filename)?)
-    std::fs::read(filename).map_err(|e| Error::new(&format!("{}: {}", filename, e)).into())
+    std::fs::read(filename).map_err(|e| GeneralError::new(&format!("{}: {}", filename, e)).into())
 }
 
-fn trackers(args: &[String]) -> Result<()> {
+fn trackers(args: &[String]) -> Result<(), Box<dyn Error>> {
     let data = read_file_from_arg(args, 0)?;
     let torrent = Torrent::from_bytes(&data)?;
     for (group_index, group) in torrent.tracker_groups.iter().enumerate() {
@@ -93,7 +94,7 @@ fn trackers(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn files(args: &[String]) -> Result<()> {
+fn files(args: &[String]) -> Result<(), Box<dyn Error>> {
     let data = read_file_from_arg(args, 0)?;
     let torrent = Torrent::from_bytes(&data)?;
     for file in torrent.files.iter() {
@@ -102,7 +103,7 @@ fn files(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn info(args: &[String]) -> Result<()> {
+fn info(args: &[String]) -> Result<(), Box<dyn Error>> {
     let data = read_file_from_arg(args, 0)?;
     let torrent = Torrent::from_bytes(&data)?;
     println!("Info hash: {}", torrent.info_hash);
@@ -125,7 +126,7 @@ fn info(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn hash(args: &[String]) -> Result<()> {
+fn hash(args: &[String]) -> Result<(), Box<dyn Error>> {
     let filename = filename_arg(args, 0)?;
     let data = read_file_from_arg(args, 0)?;
     let torrent = Torrent::from_bytes(&data)?;
@@ -133,12 +134,12 @@ fn hash(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn raw(args: &[String]) -> Result<()> {
+fn raw(args: &[String]) -> Result<(), Box<dyn Error>> {
     let data = read_file_from_arg(args, 0)?;
     view_bencoding(&data)
 }
 
-fn full(args: &[String]) -> Result<()> {
+fn full(args: &[String]) -> Result<(), Box<dyn Error>> {
     // let data = read_file_from_arg(args, 0)?;
     let filename = filename_arg(args, 0)?;
     run(filename)

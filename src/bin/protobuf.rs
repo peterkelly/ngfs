@@ -7,7 +7,7 @@
 
 use std::error::Error;
 use torrent::util::escape_string;
-use torrent::result::{error as gerror, Error as GError};
+use torrent::result::{general_error, GeneralError};
 use torrent::protobuf::{PBufReader, FieldRef};
 use torrent::util::BinaryData;
 
@@ -149,18 +149,18 @@ impl PBLink {
 
         let hash = match hash {
             Some(v) => v,
-            None => return gerror("Missing field: hash"),
+            None => return general_error("Missing field: hash"),
         };
 
 
         let name = match name {
             Some(v) => v,
-            None => return gerror("Missing field: name"),
+            None => return general_error("Missing field: name"),
         };
 
         let tsize = match tsize {
             Some(v) => v,
-            None => return gerror("Missing field: tsize"),
+            None => return general_error("Missing field: tsize"),
         };
 
         Ok(PBLink { hash, name, tsize })
@@ -253,7 +253,7 @@ fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
 
 fn main_result() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
-    let filename = args.get(1).ok_or_else(|| GError::new("No filename specified"))?;
+    let filename = args.get(1).ok_or_else(|| GeneralError::new("No filename specified"))?;
     let raw_data = std::fs::read(filename)?;
     // print_fields(&raw_data)?;
     print_directory(&raw_data)?;

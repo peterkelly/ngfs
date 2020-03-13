@@ -6,9 +6,10 @@
 // #![allow(unused_macros)]
 
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::fmt;
 use crate::util::BinaryData;
-use crate::result::{Result as GResult, error};
+use crate::result::{general_error};
 
 pub struct Location {
     pub start: usize,
@@ -61,31 +62,31 @@ impl Value {
 }
 
 impl Value {
-    pub fn as_byte_string(&self) -> GResult<&ByteString> {
+    pub fn as_byte_string(&self) -> Result<&ByteString, Box<dyn Error>> {
         match self {
             Value::ByteString(b) => Ok(b),
-            _ => error(&format!("{}: Not a byte string", self.loc().path)),
+            _ => general_error(&format!("{}: Not a byte string", self.loc().path)),
         }
     }
 
-    pub fn as_integer(&self) -> GResult<&Integer> {
+    pub fn as_integer(&self) -> Result<&Integer, Box<dyn Error>> {
         match self {
             Value::Integer(i) => Ok(i),
-            _ => error(&format!("{}: Not an integer", self.loc().path)),
+            _ => general_error(&format!("{}: Not an integer", self.loc().path)),
         }
     }
 
-    pub fn as_list(&self) -> GResult<&List> {
+    pub fn as_list(&self) -> Result<&List, Box<dyn Error>> {
         match self {
             Value::List(l) => Ok(l),
-            _ => error(&format!("{}: Not a list", self.loc().path)),
+            _ => general_error(&format!("{}: Not a list", self.loc().path)),
         }
     }
 
-    pub fn as_dictionary(&self) -> GResult<&Dictionary> {
+    pub fn as_dictionary(&self) -> Result<&Dictionary, Box<dyn Error>> {
         match self {
             Value::Dictionary(d) => Ok(d),
-            _ => error(&format!("{}: Not a dictionary", self.loc().path)),
+            _ => general_error(&format!("{}: Not a dictionary", self.loc().path)),
         }
     }
 
