@@ -9,8 +9,44 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use crate::util::BinaryData;
-use crate::result::{general_error};
 
+#[derive(Debug)]
+pub struct ValueError {
+    loc: Location,
+    data: ValueErrorData,
+}
+
+impl Error for ValueError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
+}
+
+#[derive(Debug)]
+enum ValueErrorData {
+    InvalidUTF8String(std::string::FromUtf8Error),
+    MissingDictionaryKey(String),
+    IsNotType(String),
+}
+
+impl fmt::Display for ValueError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: ", self.loc.path)?;
+        match &self.data {
+            ValueErrorData::InvalidUTF8String(e) => {
+                write!(f, "{}", e)
+            }
+            ValueErrorData::MissingDictionaryKey(key) => {
+                write!(f, "Missing key: {}", key)
+            }
+            ValueErrorData::IsNotType(t) => {
+                write!(f, "Expected {}", t)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Location {
     pub start: usize,
     pub end: usize,
@@ -28,6 +64,18 @@ pub struct ByteString {
     pub data: Vec<u8>,
 }
 
+impl ByteString {
+    pub fn as_string(&self) -> Result<String, ValueError> {
+        match String::from_utf8(self.data.clone()) {
+            Ok(s) => Ok(s),
+            Err(e) => Err(ValueError {
+                loc: self.loc.clone(),
+                data: ValueErrorData::InvalidUTF8String(e),
+            }),
+        }
+    }
+}
+
 pub struct Integer {
     pub loc: Location,
     pub value: usize,
@@ -41,6 +89,22 @@ pub struct List {
 pub struct Dictionary {
     pub loc: Location,
     pub entries: BTreeMap<String, Value>,
+}
+
+impl Dictionary {
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.entries.get(key)
+    }
+
+    pub fn get_required(&self, key: &str) -> Result<&Value, ValueError> {
+        match self.entries.get(key) {
+            Some(value) => Ok(value),
+            None => Err(ValueError {
+                loc: self.loc.clone(),
+                data: ValueErrorData::MissingDictionaryKey(String::from(key))
+            }),
+        }
+    }
 }
 
 pub enum Value {
@@ -62,31 +126,47 @@ impl Value {
 }
 
 impl Value {
-    pub fn as_byte_string(&self) -> Result<&ByteString, Box<dyn Error>> {
+    pub fn as_string(&self) -> Result<String, Box<dyn Error>> {
+        return Ok(self.as_byte_string()?.as_string()?)
+    }
+
+    pub fn as_byte_string(&self) -> Result<&ByteString, ValueError> {
         match self {
             Value::ByteString(b) => Ok(b),
-            _ => general_error(&format!("{}: Not a byte string", self.loc().path)),
+            _ => Err(ValueError {
+                loc: self.loc().clone(),
+                data: ValueErrorData::IsNotType(String::from("bytes")),
+            }),
         }
     }
 
-    pub fn as_integer(&self) -> Result<&Integer, Box<dyn Error>> {
+    pub fn as_integer(&self) -> Result<&Integer, ValueError> {
         match self {
             Value::Integer(i) => Ok(i),
-            _ => general_error(&format!("{}: Not an integer", self.loc().path)),
+            _ => Err(ValueError {
+                loc: self.loc().clone(),
+                data: ValueErrorData::IsNotType(String::from("integer")),
+            }),
         }
     }
 
-    pub fn as_list(&self) -> Result<&List, Box<dyn Error>> {
+    pub fn as_list(&self) -> Result<&List, ValueError> {
         match self {
             Value::List(l) => Ok(l),
-            _ => general_error(&format!("{}: Not a list", self.loc().path)),
+            _ => Err(ValueError {
+                loc: self.loc().clone(),
+                data: ValueErrorData::IsNotType(String::from("list")),
+            }),
         }
     }
 
-    pub fn as_dictionary(&self) -> Result<&Dictionary, Box<dyn Error>> {
+    pub fn as_dictionary(&self) -> Result<&Dictionary, ValueError> {
         match self {
             Value::Dictionary(d) => Ok(d),
-            _ => general_error(&format!("{}: Not a dictionary", self.loc().path)),
+            _ => Err(ValueError {
+                loc: self.loc().clone(),
+                data: ValueErrorData::IsNotType(String::from("dictionary")),
+            }),
         }
     }
 
