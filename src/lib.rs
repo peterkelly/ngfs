@@ -4,6 +4,7 @@ pub mod util;
 pub mod torrent;
 pub mod protobuf;
 pub mod detrand;
+pub mod multibase;
 
 #[cfg(test)]
 mod tests {
