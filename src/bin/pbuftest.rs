@@ -10,6 +10,7 @@ use torrent::util::escape_string;
 use torrent::result::{general_error, GeneralError};
 use torrent::protobuf::{PBufReader, FieldRef};
 use torrent::util::BinaryData;
+use torrent::multibase::{Base, encode, decode};
 
 fn show_field<'a>(field: &FieldRef<'a>) -> Result<(), Box<dyn Error>> {
     match field.field_number {
@@ -111,15 +112,6 @@ struct PBLink {
     tsize: u64,
 }
 
-struct PBNode {
-    links: Vec<PBNode>,
-    data: Option<Vec<u8>>,
-}
-
-
-
-
-
 impl PBLink {
     fn from_pb(data: &[u8]) -> Result<PBLink, Box<dyn Error>> {
         let mut hash: Option<Vec<u8>> = None;
@@ -167,70 +159,144 @@ impl PBLink {
     }
 }
 
+struct PBNode {
+    links: Vec<PBLink>,
+    data: Vec<u8>,
+}
+
+impl PBNode {
+    fn from_pb(raw_data: &[u8]) -> Result<PBNode, Box<dyn Error>> {
+        let mut links: Vec<PBLink> = Vec::new();
+        let mut data: Option<Vec<u8>> = None;
+
+        let mut reader = PBufReader::new(&raw_data);
+        while let Some(field) = reader.read_field()? {
+            match field.field_number {
+                1 => {
+                    data = Some(Vec::from(field.data.to_bytes()?));
+                }
+                2 => {
+                    let b = field.data.to_bytes()?;
+                    links.push(PBLink::from_pb(b)?);
+                }
+                _ => {
+                    // println!("Other field {}", field.field_number);
+                }
+            }
+        }
+
+        // for link in links.iter() {
+        //     println!("{:<30} {:<16} {}", link.name, link.tsize, BinaryData(&link.hash));
+        // }
+        // println!();
+
+        let data = match data {
+            Some(v) => v,
+            None => return general_error("Missing field: data"),
+        };
+
+        Ok(PBNode {
+            links,
+            data,
+        })
+    }
+}
+
+// offset 0x0000, field_number  1, data VarInt(02)
+// offset 0x0002, field_number  3, data VarInt(d4 b0 29)
+// offset 0x0006, field_number  4, data VarInt(80 80 10)
+// offset 0x000a, field_number  4, data VarInt(80 80 10)
+// offset 0x000e, field_number  4, data VarInt(d4 b0 09)
+
+enum UnixFSData {
+    Raw,
+    Directory,
+    File,
+    Metadata,
+    Symlink,
+    HAMTShard,
+}
+
+impl UnixFSData {
+    fn from_pb(raw_data: &[u8]) -> Result<UnixFSData, Box<dyn Error>> {
+
+        let mut reader = PBufReader::new(&raw_data);
+        while let Some(field) = reader.read_field()? {
+            let mut d_type: Option<u64> = None;
+            let mut d_data: Option<Vec<u8>> = None;
+            let mut d_filesize: Option<u64> = None;
+            let mut d_blocksizes: Vec<u64> = Vec::new();
+            let mut d_hashtype: Option<u64> = None;
+            let mut d_fanout: Option<u64> = None;
+
+            match field.field_number {
+                1 => {
+                    d_type = Some(field.data.to_u64()?);
+                    println!("d_type = {:?}", d_type);
+                    // data = Some(Vec::from(field.data.to_bytes()?));
+                }
+                3 => {
+                    d_filesize = Some(field.data.to_u64()?);
+                    println!("d_filesize = {:?}", d_filesize);
+                }
+                4 => {
+                    let blocksize = field.data.to_u64()?;
+                    println!("blocksize = {}", blocksize);
+                    d_blocksizes.push(blocksize);
+                }
+                _ => {
+                    // println!("Other field {}", field.field_number);
+                }
+            }
+        }
 
 
-
-
-// https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-pb.md
-// fn print_directory_entry(data: &[u8]) -> Result<(), Box<dyn Error>> {
-//     let mut reader = PBufReader::new(&data);
-//     while let Some(field) = reader.read_field()? {
-//         match field.field_number {
-//             1 => {
-//                 let hash = field.data.to_bytes()?;
-//                 println!("    hash {}", BinaryData(hash));
-//             }
-//             2 => {
-//                 let name = field.data.to_string()?;
-//                 println!("    name {}", name);
-//             }
-//             3 => {
-//                 let size = field.data.to_u64()?;
-//                 println!("    size {}", size);
-//             }
-//             _ => {
-//                 println!("Other field {}", field.field_number);
-//             }
-//         }
-//     }
-
-
-//     // print_fields(data)?;
-//     Ok(())
-// }
+        Ok(UnixFSData::Raw)
+    }
+}
 
 fn print_directory(raw_data: &[u8]) -> Result<(), Box<dyn Error>> {
-    let mut links: Vec<PBLink> = Vec::new();
-    let mut data: Option<Vec<u8>> = None;
+    let node = PBNode::from_pb(raw_data)?;
 
-    let mut reader = PBufReader::new(&raw_data);
-    while let Some(field) = reader.read_field()? {
-        match field.field_number {
-            1 => {
-                data = Some(Vec::from(field.data.to_bytes()?));
-            }
-            2 => {
-                let b = field.data.to_bytes()?;
-                links.push(PBLink::from_pb(b)?);
-            }
-            _ => {
-                println!("Other field {}", field.field_number);
-            }
-        }
+    for link in node.links.iter() {
+        println!("{:<30} {:<16} {}", link.name, link.tsize, encode(&link.hash, Base::Base32));
     }
+    println!("Data {}", BinaryData(&node.data));
+    print_fields(&node.data)?;
 
-    for link in links.iter() {
-        println!("{:<30} {:<16} {}", link.name, link.tsize, BinaryData(&link.hash));
-    }
-    println!();
-    match data {
-        Some(data) => {
-            println!("Data {}", BinaryData(&data));
-        }
-        None => {
-            println!("Data None");
-        }
-    }
+    let unixfs = UnixFSData::from_pb(&node.data)?;
+
+    // let mut links: Vec<PBLink> = Vec::new();
+    // let mut data: Option<Vec<u8>> = None;
+
+    // let mut reader = PBufReader::new(&raw_data);
+    // while let Some(field) = reader.read_field()? {
+    //     match field.field_number {
+    //         1 => {
+    //             data = Some(Vec::from(field.data.to_bytes()?));
+    //         }
+    //         2 => {
+    //             let b = field.data.to_bytes()?;
+    //             links.push(PBLink::from_pb(b)?);
+    //         }
+    //         _ => {
+    //             println!("Other field {}", field.field_number);
+    //         }
+    //     }
+    // }
+
+    // for link in links.iter() {
+    //     println!("{:<30} {:<16} {}", link.name, link.tsize, BinaryData(&link.hash));
+    // }
+    // println!();
+    // match data {
+    //     Some(data) => {
+    //         println!("Data {}", BinaryData(&data));
+    //     }
+    //     None => {
+    //         println!("Data None");
+    //     }
+    // }
     Ok(())
 }
 

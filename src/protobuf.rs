@@ -17,7 +17,7 @@ pub struct Bits64([u8; 8]);
 pub struct Bytes<'a>(&'a [u8]);
 
 impl<'a> VarInt<'a> {
-    fn to_u64(&self) -> u64 {
+    pub fn to_u64(&self) -> u64 {
         let mut value: u64 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as u64);
@@ -25,7 +25,7 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    fn to_u32(&self) -> u32 {
+    pub fn to_u32(&self) -> u32 {
         let mut value: u32 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as u32);
@@ -33,7 +33,7 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    fn to_i64(&self) -> i64 {
+    pub fn to_i64(&self) -> i64 {
         let mut value: i64 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i64);
@@ -41,7 +41,7 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    fn to_i32(&self) -> i32 {
+    pub fn to_i32(&self) -> i32 {
         let mut value: i32 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i32);
@@ -49,7 +49,7 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    fn to_i64_zigzag(&self) -> i64 {
+    pub fn to_i64_zigzag(&self) -> i64 {
         let mut value: i64 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i64);
@@ -57,7 +57,7 @@ impl<'a> VarInt<'a> {
         (value << 63) ^ (value >> 1)
     }
 
-    fn to_i32_zigzag(&self) -> i32 {
+    pub fn to_i32_zigzag(&self) -> i32 {
         let mut value: i32 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i32);
@@ -65,7 +65,7 @@ impl<'a> VarInt<'a> {
         (value << 31) ^ (value >> 1)
     }
 
-    fn to_usize(&self) -> usize {
+    pub fn to_usize(&self) -> usize {
         let mut value: usize = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as usize);
@@ -73,13 +73,33 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    fn to_bool(&self) -> bool {
+    pub fn to_bool(&self) -> bool {
         self.to_u64() != 0
+    }
+
+    pub fn read_from<'x, 'y>(data: &'x [u8], offset: &'y mut usize) -> Option<VarInt<'x>> {
+        let start: usize = *offset;
+        loop {
+            match data.get(*offset) {
+                Some(b) => {
+                    *offset += 1;
+                    if b & 0x80 == 0 {
+                        break;
+                    }
+                }
+                None => {
+                    return None;
+                }
+            }
+        }
+        let end: usize = *offset;
+        Some(VarInt(&data[start..end]))
+
     }
 }
 
 impl<'a> Bytes<'a> {
-    fn bytes_to_string(&self) -> Result<String, std::string::FromUtf8Error> {
+    pub fn to_string(&self) -> Result<String, std::string::FromUtf8Error> {
         String::from_utf8(Vec::from(self.0))
     }
 }
@@ -159,7 +179,7 @@ impl<'a> FieldData<'a> {
     }
 
     pub fn to_string(&self) -> Result<String, Box<dyn Error>> {
-        Ok(self.as_bytes()?.bytes_to_string()?)
+        Ok(self.as_bytes()?.to_string()?)
     }
 
     pub fn to_bytes(&self) -> Result<&'a [u8], Box<dyn Error>> {
@@ -363,8 +383,8 @@ impl std::error::Error for ReadError {
 }
 
 pub struct PBufReader<'a> {
-    offset: usize,
-    data: &'a [u8],
+    pub offset: usize,
+    pub data: &'a [u8],
 }
 
 impl<'a> PBufReader<'a> {
@@ -399,7 +419,7 @@ impl<'a> PBufReader<'a> {
         }))
     }
 
-    fn read_varint(&mut self, read_case: ReadCase) -> Result<VarInt<'a>, ReadError> {
+    pub fn read_varint(&mut self, read_case: ReadCase) -> Result<VarInt<'a>, ReadError> {
         let start = self.offset;
         loop {
             match self.data.get(self.offset) {
@@ -417,27 +437,27 @@ impl<'a> PBufReader<'a> {
         Ok(VarInt(&self.data[start..self.offset]))
     }
 
-    fn read_length_delimited(&mut self) -> Result<Bytes<'a>, ReadError> {
+    pub fn read_length_delimited(&mut self) -> Result<Bytes<'a>, ReadError> {
         let nbytes = self.read_varint(ReadCase::BytesLength)?.to_usize();
         let slice = self.read(nbytes, ReadCase::Bytes)?;
         Ok(Bytes(slice))
     }
 
-    fn read_32bit(&mut self) -> Result<Bits32, ReadError> {
+    pub fn read_32bit(&mut self) -> Result<Bits32, ReadError> {
         let slice = self.read(4, ReadCase::Bits32)?;
         let mut four: [u8; 4] = Default::default();
         four.copy_from_slice(slice);
         Ok(Bits32(four))
     }
 
-    fn read_64bit(&mut self) -> Result<Bits64, ReadError> {
+    pub fn read_64bit(&mut self) -> Result<Bits64, ReadError> {
         let slice = self.read(8, ReadCase::Bits64)?;
         let mut eight: [u8; 8] = Default::default();
         eight.copy_from_slice(slice);
         Ok(Bits64(eight))
     }
 
-    fn read(&mut self, nbytes: usize, read_case: ReadCase) -> Result<&'a [u8], ReadError> {
+    pub fn read(&mut self, nbytes: usize, read_case: ReadCase) -> Result<&'a [u8], ReadError> {
         let end: usize = match self.offset.checked_add(nbytes) {
             Some(v) => v,
             None => return Err(ReadError::LengthOverflow(self.offset)),

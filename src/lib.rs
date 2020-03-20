@@ -5,6 +5,8 @@ pub mod torrent;
 pub mod protobuf;
 pub mod detrand;
 pub mod multibase;
+pub mod cid;
+pub mod p2p;
 
 #[cfg(test)]
 mod tests {

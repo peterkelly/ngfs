@@ -274,6 +274,7 @@ fn encode_base32(chars_vec: &mut Vec<char>, data: &[u8], case: Case, padding: bo
 }
 
 fn decode_basen(encoded_bytes: &[u8], pow2: u8, inv_alphabet: &[u8; 128], padding: bool) -> Result<Vec<u8>, DecodeError> {
+    println!("decode_basen: encoded_bytes.len() = {}", encoded_bytes.len());
     let mut output_bytes: Vec<u8> = Vec::new();
     let mut byte: u8 = 0;
     let mut shift: u8 = 0;

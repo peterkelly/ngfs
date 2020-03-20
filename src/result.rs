@@ -1,7 +1,7 @@
 use std::fmt;
 use std::error::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GeneralError {
     msg: String,
 }
@@ -14,6 +14,12 @@ impl GeneralError {
 
 impl fmt::Display for GeneralError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.msg)
+    }
+}
+
+impl fmt::Debug for GeneralError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.msg)
     }
 }
