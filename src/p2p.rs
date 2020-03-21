@@ -18,6 +18,16 @@ use super::result::{GeneralError, general_error};
 use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, PBufWriter, VarInt};
 
+use openssl::bn::BigNumContext;
+use openssl::ec::*;
+use openssl::nid::Nid;
+use openssl::pkey::PKey;
+use openssl::ecdsa::EcdsaSig;
+use openssl::hash::MessageDigest;
+use openssl::sign::{Signer, Verifier};
+// use openssl::ec::PointConversionForm;
+
+
 #[derive(Debug, Clone)]
 pub enum KeyType {
     RSA = 0,
@@ -151,8 +161,6 @@ impl Propose {
 
     pub fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
-        // writer.write_uint64(1, self.key_type.clone() as u64);
-        // writer.write_bytes(2, &self.data);
         writer.write_bytes(1, &self.rand);
         writer.write_bytes(2, &self.pubkey.to_pb());
         writer.write_string(3, &join_strings(&self.exchanges, ","));
@@ -201,6 +209,13 @@ impl Exchange {
             epubkey,
             signature,
         })
+    }
+
+    pub fn to_pb(&self) -> Vec<u8> {
+        let mut writer = PBufWriter::new();
+        writer.write_bytes(1, &self.epubkey);
+        writer.write_bytes(2, &self.signature);
+        writer.data
     }
 }
 
@@ -368,19 +383,33 @@ async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8
     Ok(receive_exact(stream, length).await?)
 }
 
+fn print_propose(propose: &Propose) {
+    println!("    rand = {}", BinaryData(&propose.rand));
+    println!("    pubkey =");
+    println!("        type = {:?}", propose.pubkey.key_type);
+    println!("        data = {}", BinaryData(&propose.pubkey.data));
+    println!("    exchanges");
+    for item in propose.exchanges.iter() {
+        println!("        {}", item);
+    }
+    println!("    ciphers");
+    for item in propose.ciphers.iter() {
+        println!("        {}", item);
+    }
+    println!("    hashes");
+    for item in propose.hashes.iter() {
+        println!("        {}", item);
+    }
+}
+
 pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
-    // println!("Before generate");
-    let local_rsa_private_key = Rsa::generate(4096)?;
-    // println!("After generate");
-    let local_rsa_public_key_bytes = local_rsa_private_key.public_key_to_der()?;
-    // println!("After public_key_to_der_pkcs1: {}", BinaryData(&local_rsa_public_key_bytes));
-    // std::fs::write("my-public-key", &local_rsa_public_key_bytes)?;
-
-
-
-
-
     let mut rng = rand::thread_rng();
+
+    // Generate out private key (our peer id can be derived from this)
+    let local_rsa_private_key = Rsa::generate(4096)?;
+    let local_rsa_public_key_bytes = local_rsa_private_key.public_key_to_der()?;
+
+    // Open the connection
     let peer_addr: SocketAddr = match lookup_host(server_addr_str).await?.next() {
         Some(v) => v,
         None => return general_error(&format!("Cannot resolve host: {}", server_addr_str)),
@@ -390,134 +419,111 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let mut stream = TcpStream::connect(peer_addr).await?;
     println!("After opening connection");
 
+    // Receive first message; should be "/multistream/1.0.0\n"
     let inmsg1_bytes = receive_varint_length_prefixed(&mut stream).await?;
     let inmsg1_str = String::from_utf8(inmsg1_bytes)?;
     println!("Received inmsg1: {}", escape_string(&inmsg1_str));
 
-
-    // let r = stream.read(&mut buf).await?;
-    // // println!("Received {} bytes: {}", r, BinaryData(&buf[..r]));
-    // let received = &buf[0..r];
-
-
-
-
-
-    // let mut reader = PBufReader::new(received);
-    // let msg = reader.read_length_delimited()?.to_string()?;
-    // println!("Received {}", escape_string(&msg));
-
+    // Tell the server we also want to use multistream
     send_string(&mut stream, "/multistream/1.0.0\n").await?;
+    // Tell the server we want to use secio
     send_string(&mut stream, "/secio/1.0.0\n").await?;
 
-
-
-
-    // let mut buf: [u8; 65536] = [0; 65536];
-    // let r = stream.read(&mut buf).await?;
-    // println!("XReceived {} bytes: {}", r, BinaryData(&buf[..r]));
-    // let received = &buf[0..r];
-    // let mut reader = PBufReader::new(received);
-    // let msg = reader.read_length_delimited()?.to_string()?;
-    // println!("XReceived {}", escape_string(&msg));
-
+    // Receive confirmation that the server is willing to use secio
     let inmsg2_bytes = receive_varint_length_prefixed(&mut stream).await?;
     let inmsg2_str = String::from_utf8(inmsg2_bytes)?;
     println!("Received inmsg2: {}", escape_string(&inmsg2_str));
 
-
-
-
-
-
-
-    let data = recv_length_prefixed_binary(&mut stream).await?;
-    let remote_propose = Propose::from_pb(&data)?;
-
+    // Receive the server's proposal
+    let remote_propose_bytes = recv_length_prefixed_binary(&mut stream).await?;
+    let remote_propose = Propose::from_pb(&remote_propose_bytes)?;
     println!();
     println!("Propose");
+    print_propose(&remote_propose);
 
-    println!("    rand = {}", BinaryData(&remote_propose.rand));
-    println!("    pubkey =");
+    // std::fs::write("remote-public-key", &remote_propose.pubkey.data)?;
+    //
+    // let remote_public_key = Rsa::public_key_from_der()
 
-    println!("        type = {:?}", remote_propose.pubkey.key_type);
-    println!("        data = {}", BinaryData(&remote_propose.pubkey.data));
-
-    // println!("    exchanges = {}", remote_propose.exchanges);
-    // println!("    ciphers = {}", remote_propose.ciphers);
-    // println!("    hashes = {}", remote_propose.hashes);
-
-    println!("    exchanges");
-    for item in remote_propose.exchanges.iter() {
-        println!("        {}", item);
-    }
-    println!("    ciphers");
-    for item in remote_propose.ciphers.iter() {
-        println!("        {}", item);
-    }
-    println!("    hashes");
-    for item in remote_propose.hashes.iter() {
-        println!("        {}", item);
-    }
-
-    // let rsa_public_key = Rsa::public_key_from_der(&remote_propose.pubkey.data)?;
-    // println!("got rsa_public_key");
-    // println!("n = {}", BinaryData(&rsa_public_key.n().to_vec()));
-    // println!("e = {}", rsa_public_key.e());
-
-
-    std::fs::write("remote-public-key", &remote_propose.pubkey.data)?;
+    let remote_rsa_public_key = Rsa::public_key_from_der(&remote_propose.pubkey.data)?;
+    println!("got remote_rsa_public_key");
+    println!("n = {}", BinaryData(&remote_rsa_public_key.n().to_vec()));
+    println!("e = {}", remote_rsa_public_key.e());
 
 
     // Send our proposal
     let local_public_key = PublicKey {
         key_type: KeyType::RSA,
         data: local_rsa_public_key_bytes,
-        // data: remote_propose.pubkey.data.clone(),
     };
     let local_propose = make_propose(&mut rng, &local_public_key);
-    send_length_prefixed_bytes(&mut stream, &local_propose.to_pb()).await?;
-    println!("Sent out proposal");
+    let local_propose_bytes = local_propose.to_pb();
+    send_length_prefixed_bytes(&mut stream, &local_propose_bytes).await?;
+    println!("Sent our proposal");
 
-
-    // send_bytes(&mut stream, &received).await?;
-
-
-
-
-
+    // Receive the server's key exchange
     let data = recv_length_prefixed_binary(&mut stream).await?;
     println!("Received remote exchange");
-    // let r = stream.read(&mut buf).await?;
-    // println!("Received {} bytes: {}", r, BinaryData(&buf[..r]));
-    // let received = &buf[0..r];
-    print_fields(&data)?;
     let remote_exchange = Exchange::from_pb(&data)?;
     println!("    epubkey = {}", BinaryData(&remote_exchange.epubkey));
     println!("    signature = {}", BinaryData(&remote_exchange.signature));
 
+    // get bytes from somewhere, i.e. this will not produce a valid key
+    let public_key: Vec<u8> = vec![];
 
-    // let cx = native_tls::TlsConnector::builder()
-    //     .min_protocol_version(Some(native_tls::Protocol::Tlsv13))
-    //     .max_protocol_version(Some(native_tls::Protocol::Tlsv13))
-    //     .build()?;
-    // let cx = tokio_tls::TlsConnector::from(cx);
+    // create an EcKey from the binary form of a EcPoint
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let mut ctx = BigNumContext::new()?;
+    let point = EcPoint::from_bytes(&group, &remote_exchange.epubkey, &mut ctx)?;
+    let remote_eckey = EcKey::from_public_key(&group, &point);
 
-    // let mut tls_stream = cx.connect("localhost", stream).await?;
-    // println!("TLS Connection established");
+    let mut remote_corpus: Vec<u8> = Vec::new();
+    remote_corpus.append(&mut remote_propose_bytes.clone());
+    remote_corpus.append(&mut local_propose_bytes.clone());
+    remote_corpus.append(&mut remote_exchange.epubkey.clone());
+
+    let remote_pkey = PKey::from_rsa(remote_rsa_public_key)?;
+    let mut remote_verifier = Verifier::new(MessageDigest::sha256(), &remote_pkey)?;
+    remote_verifier.update(&remote_corpus)?;
+    let remote_verify_ok = remote_verifier.verify(&remote_exchange.signature)?;
+    println!("remote_verify_ok = {}", remote_verify_ok);
+    // let sig = EcdsaSig::from_der(&remote_exchange.signature)?;
+    // println!("Created EcdsaSig");
+
+    let local_eckey = EcKey::generate(&group)?;
+    let local_eckey_public_point = local_eckey.public_key();
+    let local_eckey_public_bytes = local_eckey_public_point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
 
 
+    let mut local_corpus: Vec<u8> = Vec::new();
+    local_corpus.append(&mut local_propose_bytes.clone());
+    local_corpus.append(&mut remote_propose_bytes.clone());
+    local_corpus.append(&mut local_eckey_public_bytes.clone());
 
+    let local_pkey = PKey::from_rsa(local_rsa_private_key.clone())?;
+    let mut signer = Signer::new(MessageDigest::sha256(), &local_pkey)?;
+    signer.update(&local_corpus)?;
+    let signature = signer.sign_to_vec()?;
 
+    let mut local_verifier = Verifier::new(MessageDigest::sha256(), &local_pkey)?;
+    local_verifier.update(&local_corpus)?;
+    let local_verify_ok = local_verifier.verify(&signature)?;
+    println!("local_verify_ok = {}", local_verify_ok);
 
-    // let mut offset = 0;
-    // let msg_len = match VarInt::read_from(&received, &mut offset) {
-    //     Some(v) => v.to_usize(),
-    //     None => return general_error("Cannot get message length"),
-    // };
-    // println!("msg_len = {}", msg_len);
+    let local_exchange = Exchange {
+        epubkey: local_eckey_public_bytes,
+        signature: signature,
+    };
+    let local_exchange_bytes = local_exchange.to_pb();
+    send_length_prefixed_bytes(&mut stream, &local_exchange_bytes).await?;
 
+    // let mut newbuf: [u8; 16384] = [0; 16384];
+    // let r = stream.read(&mut newbuf).await?;
+    // println!("r = {}", r);
+    // let received = &newbuf[..r];
 
+    let next_data = recv_length_prefixed_binary(&mut stream).await?;
+    println!("Received: {}", BinaryData(&next_data));
 
     Ok(())
 }
