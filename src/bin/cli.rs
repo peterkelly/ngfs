@@ -46,19 +46,17 @@ async fn p2p_command(args: &[String]) -> Result<(), Box<dyn Error>> {
 }
 
 fn u64_to_varint(mut value: u64) -> Vec<u8> {
-    let mut bytes: Vec<u8> = Vec::new();
+    let mut bytes: Vec<u8> = Vec::with_capacity(10);
     loop {
         let seven = value & 0x7f;
-        bytes.push(seven as u8);
         value = value >> 7;
-        if value == 0 {
+        if value != 0 {
+            bytes.push((seven | 0x80) as u8);
+        }
+        else {
+            bytes.push(seven as u8);
             break;
         }
-    }
-    let mut index = 0;
-    while index + 1 < bytes.len() {
-        bytes[index] = bytes[index] | 0x80;
-        index += 1;
     }
     return bytes;
 }
