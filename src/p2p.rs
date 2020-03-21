@@ -430,10 +430,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let r = stream.read(&mut buf).await?;
     println!("Received {} bytes: {}", r, BinaryData(&buf[..r]));
     let received = &buf[0..r];
-    let mut reader = PBufReader::new(received);
-    let msg = reader.read_length_delimited()?.to_string()?;
-    println!("Received {}", escape_string(&msg));
-
+    print_fields(received)?;
 
 
     // let cx = native_tls::TlsConnector::builder()
