@@ -45,32 +45,15 @@ async fn p2p_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn u64_to_varint(mut value: u64) -> Vec<u8> {
-    let mut bytes: Vec<u8> = Vec::with_capacity(10);
-    loop {
-        let seven = value & 0x7f;
-        value = value >> 7;
-        if value != 0 {
-            bytes.push((seven | 0x80) as u8);
-        }
-        else {
-            bytes.push(seven as u8);
-            break;
-        }
-    }
-    return bytes;
-}
-
 async fn varint_command(args: &[String]) -> Result<(), Box<dyn Error>> {
-    let mut rng = rand::thread_rng();
     let range = Uniform::new_inclusive(0, u64::max_value());
+    let mut rng = rand::thread_rng();
     let mut generator = range.sample_iter(rng);
-    let mut count = 0;
     for i in 0..1000000 {
         let raw: u64 = generator.next().unwrap();
         let bits: u64 = generator.next().unwrap() % 64;
         let value = raw >> bits;
-        let varint_bytes = u64_to_varint(value);
+        let varint_bytes = VarInt::encode_u64(value);
 
         let mut offset = 0;
         match VarInt::read_from(&varint_bytes, &mut offset) {

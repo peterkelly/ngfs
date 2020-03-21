@@ -94,7 +94,26 @@ impl<'a> VarInt<'a> {
         }
         let end: usize = *offset;
         Some(VarInt(&data[start..end]))
+    }
 
+    pub fn encode_usize(value: usize) -> Vec<u8> {
+        VarInt::encode_u64(value as u64)
+    }
+
+    pub fn encode_u64(mut value: u64) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::with_capacity(10);
+        loop {
+            let seven = value & 0x7f;
+            value = value >> 7;
+            if value != 0 {
+                bytes.push((seven | 0x80) as u8);
+            }
+            else {
+                bytes.push(seven as u8);
+                break;
+            }
+        }
+        return bytes;
     }
 }
 
