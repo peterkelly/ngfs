@@ -175,10 +175,13 @@ fn join_strings(strings: &Vec<String>, joiner: &str) -> String {
 
 
 async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), Box<dyn Error>> {
+    send_bytes(stream, &tosend_str.as_bytes()).await?;
+    println!("Sent {}", escape_string(tosend_str));
+    Ok(())
+}
+
+async fn send_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), Box<dyn Error>> {
     let mut tosend: Vec<u8> = Vec::new();
-    // let tosend_str = "/multistream/1.0.0\n";
-    let tosend_bytes = tosend_str.as_bytes();
-    // tosend.push(tosend_bytes.len() as u8);
     tosend.append(&mut VarInt::encode_usize(tosend_bytes.len()));
     tosend.append(&mut Vec::from(tosend_bytes));
     let w = stream.write(&tosend).await?;
@@ -186,9 +189,19 @@ async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), Box
     if w != tosend.len() {
         return general_error(&format!("Only sent {} bytes of {}", w, tosend.len()));
     }
-    println!("Sent {}", escape_string(tosend_str));
     Ok(())
+}
 
+async fn send_length_prefixed_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+    let mut tosend: Vec<u8> = Vec::new();
+    tosend.append(&mut Vec::from(&(tosend_bytes.len() as u32).to_be_bytes()[..]));
+    tosend.append(&mut Vec::from(tosend_bytes));
+    let w = stream.write(&tosend).await?;
+    // println!("Sent {} bytes", w);
+    if w != tosend.len() {
+        return general_error(&format!("Only sent {} bytes of {}", w, tosend.len()));
+    }
+    Ok(())
 }
 
 pub fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
@@ -209,6 +222,7 @@ pub fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
 }
 
 async fn recv_length_prefixed_binary(stream: &mut TcpStream) -> Result<Vec<u8>, Box<dyn Error>> {
+    println!("recv_length_prefixed_binary");
     let mut length_buf: [u8; 4] = [0; 4];
     let r = stream.read(&mut length_buf).await?;
     if r != 4 {
@@ -254,13 +268,13 @@ async fn recv_length_prefixed_binary(stream: &mut TcpStream) -> Result<Vec<u8>, 
     Ok(body)
 }
 
-fn make_propose(rng: &mut impl Rng, rand_bytes: &[u8], pubkey: &PublicKey) -> Propose {
+fn make_propose(rng: &mut impl Rng, pubkey: &PublicKey) -> Propose {
     // let transaction_id: f64 = rng.gen();
 
-    // let mut rand_bytes: Vec<u8> = Vec::with_capacity(16);
-    // for i in 0..16 {
-    //     rand_bytes.push(rng.gen());
-    // }
+    let mut rand_bytes: Vec<u8> = Vec::with_capacity(16);
+    for i in 0..16 {
+        rand_bytes.push(rng.gen());
+    }
 
     // let exchanges: Vec<String> = vec![String::from("P-256")];
     // let ciphers: Vec<String> = vec![String::from("AES-256")];
@@ -281,6 +295,18 @@ fn make_propose(rng: &mut impl Rng, rand_bytes: &[u8], pubkey: &PublicKey) -> Pr
 }
 
 pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
+    println!("Before generate");
+    let local_rsa_private_key = Rsa::generate(4096)?;
+    println!("After generate");
+    // let local_rsa_public_key_bytes = local_rsa_private_key.private_key_to_pem()?;
+    let local_rsa_public_key_bytes = local_rsa_private_key.public_key_to_der()?;
+    println!("After public_key_to_der_pkcs1: {}", BinaryData(&local_rsa_public_key_bytes));
+    std::fs::write("my-public-key", &local_rsa_public_key_bytes)?;
+
+
+
+
+
     let mut rng = rand::thread_rng();
     let peer_addr: SocketAddr = match lookup_host(server_addr_str).await?.next() {
         Some(v) => v,
@@ -333,8 +359,6 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
 
 
-
-
     let r = stream.read(&mut buf).await?;
     println!("Received {} bytes: {}", r, BinaryData(&buf[..r]));
     let received = &buf[0..r];
@@ -378,17 +402,37 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
         println!("        {}", item);
     }
 
-    let rsa_public_key = Rsa::public_key_from_der(&remote_propose.pubkey.data)?;
-    println!("got rsa_public_key");
-    println!("n = {}", BinaryData(&rsa_public_key.n().to_vec()));
-    println!("e = {}", rsa_public_key.e());
+    // let rsa_public_key = Rsa::public_key_from_der(&remote_propose.pubkey.data)?;
+    // println!("got rsa_public_key");
+    // println!("n = {}", BinaryData(&rsa_public_key.n().to_vec()));
+    // println!("e = {}", rsa_public_key.e());
+
+
+    std::fs::write("remote-public-key", &remote_propose.pubkey.data)?;
+
+
+    // Send our proposal
+    let local_public_key = PublicKey {
+        key_type: KeyType::RSA,
+        data: local_rsa_public_key_bytes,
+        // data: remote_propose.pubkey.data.clone(),
+    };
+    let local_propose = make_propose(&mut rng, &local_public_key);
+    send_length_prefixed_bytes(&mut stream, &local_propose.to_pb()).await?;
+
+
+    // send_bytes(&mut stream, &received).await?;
 
 
 
 
-    let local_propose = make_propose(&mut rng, &remote_propose.rand, &remote_propose.pubkey);
-    std::fs::write("remote.propose", remote_propose.to_pb())?;
-    std::fs::write("local.propose", local_propose.to_pb())?;
+
+    let r = stream.read(&mut buf).await?;
+    println!("Received {} bytes: {}", r, BinaryData(&buf[..r]));
+    let received = &buf[0..r];
+    let mut reader = PBufReader::new(received);
+    let msg = reader.read_length_delimited()?.to_string()?;
+    println!("Received {}", escape_string(&msg));
 
 
 
