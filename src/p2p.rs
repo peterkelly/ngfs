@@ -12,9 +12,69 @@ use tokio::net::TcpStream;
 use tokio::prelude::*;
 // use native_tls;
 // use tokio_tls;
-use super::result::general_error;
+use super::result::{GeneralError, general_error};
 use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, VarInt};
+
+struct Propose {
+    rand: Vec<u8>,
+    pubkey: Vec<u8>,
+    exchanges: String,
+    ciphers: String,
+    hashes: String,
+}
+
+impl Propose {
+    fn from_pb(raw_data: &[u8]) -> Result<Propose, Box<dyn Error>> {
+        let mut reader = PBufReader::new(&raw_data);
+
+        let mut rand: Option<Vec<u8>> = None;
+        let mut pubkey: Option<Vec<u8>> = None;
+        let mut exchanges: Option<String> = None;
+        let mut ciphers: Option<String> = None;
+        let mut hashes: Option<String> = None;
+
+
+        while let Some(field) = reader.read_field()? {
+            // println!("offset 0x{:04x}, field_number {:2}, data {:?}",
+            //     field.offset, field.field_number, field.data);
+            match field.field_number {
+                1 => {
+                    rand = Some(Vec::from(field.data.to_bytes()?));
+                }
+                2 => {
+                    pubkey = Some(Vec::from(field.data.to_bytes()?));
+                }
+                3 => {
+                    exchanges = Some(field.data.to_string()?);
+                }
+                4 => {
+                    ciphers = Some(field.data.to_string()?);
+                }
+                5 => {
+                    hashes = Some(field.data.to_string()?);
+                }
+                _ => {
+                }
+            }
+        }
+
+        let rand: Vec<u8> = rand.ok_or_else(|| GeneralError::new(&format!("Missing field: rand")))?;
+        let pubkey: Vec<u8> = pubkey.ok_or_else(|| GeneralError::new(&format!("Missing field: pubkey")))?;
+        let exchanges: String = exchanges.ok_or_else(|| GeneralError::new(&format!("Missing field: exchanges")))?;
+        let ciphers: String = ciphers.ok_or_else(|| GeneralError::new(&format!("Missing field: ciphers")))?;
+        let hashes: String = hashes.ok_or_else(|| GeneralError::new(&format!("Missing field: hashes")))?;
+
+        Ok(Propose {
+            rand,
+            pubkey,
+            exchanges,
+            ciphers,
+            hashes,
+        })
+    }
+}
+
 
 async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), Box<dyn Error>> {
     let mut tosend: Vec<u8> = Vec::new();
@@ -165,7 +225,17 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
 
     let data = recv_length_prefixed_binary(&mut stream).await?;
-    print_fields(&data)?;
+    let propose = Propose::from_pb(&data)?;
+
+    println!();
+    println!("Propose");
+
+    println!("    rand = {}", BinaryData(&propose.rand));
+    println!("    pubkey = {}", BinaryData(&propose.pubkey));
+    println!("    exchanges = {}", propose.exchanges);
+    println!("    ciphers = {}", propose.ciphers);
+    println!("    hashes = {}", propose.hashes);
+
 
     // let cx = native_tls::TlsConnector::builder()
     //     .min_protocol_version(Some(native_tls::Protocol::Tlsv13))
