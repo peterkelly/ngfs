@@ -12,11 +12,13 @@ use tokio::net::TcpStream;
 use tokio::prelude::*;
 // use native_tls;
 // use tokio_tls;
+use openssl::rsa::Rsa;
+use rand::prelude::Rng;
 use super::result::{GeneralError, general_error};
 use super::util::{BinaryData, escape_string};
-use super::protobuf::{PBufReader, VarInt};
+use super::protobuf::{PBufReader, PBufWriter, VarInt};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum KeyType {
     RSA = 0,
     Ed25519 = 1,
@@ -24,6 +26,7 @@ pub enum KeyType {
     ECDSA = 3,
 }
 
+#[derive(Clone)]
 pub struct PublicKey {
     pub key_type: KeyType,
     pub data: Vec<u8>,
@@ -66,6 +69,13 @@ impl PublicKey {
             key_type,
             data,
         })
+    }
+
+    pub fn to_pb(&self) -> Vec<u8> {
+        let mut writer = PBufWriter::new();
+        writer.write_uint64(1, self.key_type.clone() as u64);
+        writer.write_bytes(2, &self.data);
+        writer.data
     }
 }
 
@@ -138,6 +148,29 @@ impl Propose {
             hashes: hashes.split(',').map(|s| String::from(s)).collect(),
         })
     }
+
+    pub fn to_pb(&self) -> Vec<u8> {
+        let mut writer = PBufWriter::new();
+        // writer.write_uint64(1, self.key_type.clone() as u64);
+        // writer.write_bytes(2, &self.data);
+        writer.write_bytes(1, &self.rand);
+        writer.write_bytes(2, &self.pubkey.to_pb());
+        writer.write_string(3, &join_strings(&self.exchanges, ","));
+        writer.write_string(4, &join_strings(&self.ciphers, ","));
+        writer.write_string(5, &join_strings(&self.hashes, ","));
+        writer.data
+    }
+}
+
+fn join_strings(strings: &Vec<String>, joiner: &str) -> String {
+    let mut result = String::new();
+    for (i, s) in strings.iter().enumerate() {
+        if i > 0 {
+            result.push_str(joiner);
+        }
+        result.push_str(s);
+    }
+    return result;
 }
 
 
@@ -158,7 +191,7 @@ async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), Box
 
 }
 
-fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
+pub fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
     let mut reader = PBufReader::new(&data);
     while let Some(field) = reader.read_field()? {
         println!("offset 0x{:04x}, field_number {:2}, data {:?}",
@@ -221,7 +254,34 @@ async fn recv_length_prefixed_binary(stream: &mut TcpStream) -> Result<Vec<u8>, 
     Ok(body)
 }
 
+fn make_propose(rng: &mut impl Rng, rand_bytes: &[u8], pubkey: &PublicKey) -> Propose {
+    // let transaction_id: f64 = rng.gen();
+
+    // let mut rand_bytes: Vec<u8> = Vec::with_capacity(16);
+    // for i in 0..16 {
+    //     rand_bytes.push(rng.gen());
+    // }
+
+    // let exchanges: Vec<String> = vec![String::from("P-256")];
+    // let ciphers: Vec<String> = vec![String::from("AES-256")];
+    // let hashes: Vec<String> = vec![String::from("SHA256")];
+
+
+    let exchanges: Vec<String> = vec![String::from("P-256"), String::from("P-384"), String::from("P-521")];
+    let ciphers: Vec<String> = vec![String::from("AES-256"), String::from("AES-128"), String::from("Blowfish")];
+    let hashes: Vec<String> = vec![String::from("SHA256"), String::from("SHA512")];
+
+    Propose {
+        rand: Vec::from(rand_bytes),
+        pubkey: pubkey.clone(),
+        exchanges,
+        ciphers,
+        hashes,
+    }
+}
+
 pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
+    let mut rng = rand::thread_rng();
     let peer_addr: SocketAddr = match lookup_host(server_addr_str).await?.next() {
         Some(v) => v,
         None => return general_error(&format!("Cannot resolve host: {}", server_addr_str)),
@@ -290,37 +350,45 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
 
     let data = recv_length_prefixed_binary(&mut stream).await?;
-    let propose = Propose::from_pb(&data)?;
+    let remote_propose = Propose::from_pb(&data)?;
 
     println!();
     println!("Propose");
 
-    println!("    rand = {}", BinaryData(&propose.rand));
+    println!("    rand = {}", BinaryData(&remote_propose.rand));
     println!("    pubkey =");
 
-    println!("        type = {:?}", propose.pubkey.key_type);
-    println!("        data = {}", BinaryData(&propose.pubkey.data));
+    println!("        type = {:?}", remote_propose.pubkey.key_type);
+    println!("        data = {}", BinaryData(&remote_propose.pubkey.data));
 
-    // println!("    exchanges = {}", propose.exchanges);
-    // println!("    ciphers = {}", propose.ciphers);
-    // println!("    hashes = {}", propose.hashes);
+    // println!("    exchanges = {}", remote_propose.exchanges);
+    // println!("    ciphers = {}", remote_propose.ciphers);
+    // println!("    hashes = {}", remote_propose.hashes);
 
     println!("    exchanges");
-    for item in propose.exchanges.iter() {
+    for item in remote_propose.exchanges.iter() {
         println!("        {}", item);
     }
     println!("    ciphers");
-    for item in propose.ciphers.iter() {
+    for item in remote_propose.ciphers.iter() {
         println!("        {}", item);
     }
     println!("    hashes");
-    for item in propose.hashes.iter() {
+    for item in remote_propose.hashes.iter() {
         println!("        {}", item);
     }
 
-    println!();
-    println!("pubkey");
-    // print_fields(&propose.pubkey)?;
+    let rsa_public_key = Rsa::public_key_from_der(&remote_propose.pubkey.data)?;
+    println!("got rsa_public_key");
+    println!("n = {}", BinaryData(&rsa_public_key.n().to_vec()));
+    println!("e = {}", rsa_public_key.e());
+
+
+
+
+    let local_propose = make_propose(&mut rng, &remote_propose.rand, &remote_propose.pubkey);
+    std::fs::write("remote.propose", remote_propose.to_pb())?;
+    std::fs::write("local.propose", local_propose.to_pb())?;
 
 
 

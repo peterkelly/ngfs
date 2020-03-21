@@ -401,6 +401,118 @@ impl std::error::Error for ReadError {
     }
 }
 
+pub struct PBufWriter {
+    pub data: Vec<u8>,
+}
+
+const VARINT_TYPE: u64 = 0;
+const BITS64_TYPE: u64 = 1;
+const LENGTH_TYPE: u64 = 2;
+const BITS32_TYPE: u64 = 5;
+
+impl PBufWriter {
+    pub fn new() -> PBufWriter {
+        PBufWriter { data: Vec::new() }
+    }
+
+    fn write_tag(&mut self, field_number: u32, field_type: u64) {
+        assert!(field_type & !3 == 0);
+        let tag = (field_number as u64) << 3 | field_type;
+        self.data.append(&mut VarInt::encode_u64(tag));
+    }
+
+
+    pub fn write_int32(&mut self, field_number: u32, value: i32) {
+        self.write_uint64(field_number, value as u64);
+    }
+
+    pub fn write_int64(&mut self, field_number: u32, value: i64) {
+        self.write_uint64(field_number, value as u64);
+    }
+
+    pub fn write_uint32(&mut self, field_number: u32, value: u32) {
+        self.write_uint64(field_number, value as u64);
+    }
+
+    pub fn write_uint64(&mut self, field_number: u32, value: u64) {
+        self.write_tag(field_number, VARINT_TYPE);
+        self.data.append(&mut VarInt::encode_u64(value));
+    }
+
+    // pub fn write_sint32(&mut self, field_number: u32, value: i32) {
+    //     println!("{} {}", field_number, value);
+    //     unimplemented!();
+    // }
+
+    // pub fn write_sint64(&mut self, field_number: u32, value: i64) {
+    //     println!("{} {}", field_number, value);
+    //     unimplemented!();
+    // }
+
+    pub fn write_bool(&mut self, field_number: u32, value: bool) {
+        self.write_uint64(field_number, value as u64);
+    }
+
+    pub fn write_fixed64(&mut self, field_number: u32, value: u64) {
+        self.write_tag(field_number, BITS64_TYPE);
+        self.data.append(&mut Vec::from(&value.to_be_bytes()[..]));
+    }
+
+    pub fn write_sfixed64(&mut self, field_number: u32, value: i64) {
+        self.write_tag(field_number, BITS64_TYPE);
+        self.data.append(&mut Vec::from(&value.to_be_bytes()[..]));
+    }
+
+    pub fn write_double(&mut self, field_number: u32, value: f64) {
+        self.write_tag(field_number, BITS64_TYPE);
+        self.data.append(&mut Vec::from(&value.to_be_bytes()[..]));
+    }
+
+    pub fn write_fixed32(&mut self, field_number: u32, value: i32) {
+        self.write_tag(field_number, BITS32_TYPE);
+        self.data.append(&mut Vec::from(&value.to_be_bytes()[..]));
+    }
+
+    pub fn write_sfixed32(&mut self, field_number: u32, value: i32) {
+        self.write_tag(field_number, BITS32_TYPE);
+        self.data.append(&mut Vec::from(&value.to_be_bytes()[..]));
+    }
+
+    pub fn write_float(&mut self, field_number: u32, value: f32) {
+        self.write_tag(field_number, BITS32_TYPE);
+        self.data.append(&mut Vec::from(&value.to_be_bytes()[..]));
+    }
+
+
+
+
+
+
+
+
+    // pub fn write_uint64(&mut self, field_number: u32, value: u64) {
+    //     let tag = (field_number as u64) << 3 | 0;
+    //     self.data.append(&mut VarInt::encode_u64(tag));
+    //     self.data.append(&mut VarInt::encode_u64(value));
+    // }
+
+    pub fn write_usize(&mut self, field_number: u32, value: usize) {
+        self.write_uint64(field_number, value as u64);
+    }
+
+    pub fn write_bytes(&mut self, field_number: u32, bytes: &[u8]) {
+        // let tag = (field_number as u64) << 3 | 0;
+        // self.data.append(&mut VarInt::encode_u64(tag));
+        self.write_tag(field_number, LENGTH_TYPE);
+        self.data.append(&mut VarInt::encode_usize(bytes.len()));
+        self.data.append(&mut Vec::from(bytes));
+    }
+
+    pub fn write_string(&mut self, field_number: u32, s: &str) {
+        self.write_bytes(field_number, s.as_bytes());
+    }
+}
+
 pub struct PBufReader<'a> {
     pub offset: usize,
     pub data: &'a [u8],
