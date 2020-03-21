@@ -17,20 +17,20 @@ use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, VarInt};
 
 #[derive(Debug)]
-enum KeyType {
+pub enum KeyType {
     RSA = 0,
     Ed25519 = 1,
     Secp256k1 = 2,
     ECDSA = 3,
 }
 
-struct PublicKey {
-    key_type: KeyType,
-    data: Vec<u8>,
+pub struct PublicKey {
+    pub key_type: KeyType,
+    pub data: Vec<u8>,
 }
 
 impl PublicKey {
-    fn from_pb(raw_data: &[u8]) -> Result<PublicKey, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<PublicKey, Box<dyn Error>> {
         let mut key_type: Option<KeyType> = None;
         let mut data: Option<Vec<u8>> = None;
 
@@ -66,6 +66,18 @@ impl PublicKey {
             key_type,
             data,
         })
+    }
+}
+
+pub struct PrivateKey {
+    pub key_type: KeyType,
+    pub data: Vec<u8>,
+}
+
+impl PrivateKey {
+    pub fn from_pb(raw_data: &[u8]) -> Result<PrivateKey, Box<dyn Error>> {
+        let k = PublicKey::from_pb(raw_data)?;
+        Ok(PrivateKey { key_type: k.key_type, data: k.data })
     }
 }
 

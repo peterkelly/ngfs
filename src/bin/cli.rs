@@ -14,7 +14,7 @@ use torrent::multibase::decode;
 use torrent::util::{BinaryData};
 use torrent::protobuf::{PBufReader, VarInt};
 use torrent::cid::CID;
-use torrent::p2p::p2p_test;
+use torrent::p2p::{p2p_test, PrivateKey};
 use rand::prelude::Rng;
 use rand::distributions::{Distribution, Uniform};
 
@@ -74,6 +74,17 @@ async fn varint_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn getkey_command(args: &[String]) -> Result<(), Box<dyn Error>> {
+    let filename = get_argument(args, 0, "filename")?;
+    let data = std::fs::read(filename)?;
+    println!("data.len = {}", data.len());
+    let private_key = PrivateKey::from_pb(&data)?;
+    println!("Got private key (type {:?}, {} bytes)", private_key.key_type, private_key.data.len());
+    std::fs::write("private_key.out", &private_key.data)?;
+
+
+    Ok(())
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -91,6 +102,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         "varint" => {
             varint_command(&args[2..]).await?;
+            Ok(())
+        }
+        "getkey" => {
+            getkey_command(&args[2..]).await?;
             Ok(())
         }
         _ => {
