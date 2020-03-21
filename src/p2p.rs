@@ -19,9 +19,9 @@ use super::protobuf::{PBufReader, VarInt};
 struct Propose {
     rand: Vec<u8>,
     pubkey: Vec<u8>,
-    exchanges: String,
-    ciphers: String,
-    hashes: String,
+    exchanges: Vec<String>,
+    ciphers: Vec<String>,
+    hashes: Vec<String>,
 }
 
 impl Propose {
@@ -68,9 +68,9 @@ impl Propose {
         Ok(Propose {
             rand,
             pubkey,
-            exchanges,
-            ciphers,
-            hashes,
+            exchanges: exchanges.split(',').map(|s| String::from(s)).collect(),
+            ciphers: ciphers.split(',').map(|s| String::from(s)).collect(),
+            hashes: hashes.split(',').map(|s| String::from(s)).collect(),
         })
     }
 }
@@ -232,9 +232,22 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     println!("    rand = {}", BinaryData(&propose.rand));
     println!("    pubkey = {}", BinaryData(&propose.pubkey));
-    println!("    exchanges = {}", propose.exchanges);
-    println!("    ciphers = {}", propose.ciphers);
-    println!("    hashes = {}", propose.hashes);
+    // println!("    exchanges = {}", propose.exchanges);
+    // println!("    ciphers = {}", propose.ciphers);
+    // println!("    hashes = {}", propose.hashes);
+
+    println!("    exchanges");
+    for item in propose.exchanges.iter() {
+        println!("        {}", item);
+    }
+    println!("    ciphers");
+    for item in propose.ciphers.iter() {
+        println!("        {}", item);
+    }
+    println!("    hashes");
+    for item in propose.hashes.iter() {
+        println!("        {}", item);
+    }
 
 
     // let cx = native_tls::TlsConnector::builder()
