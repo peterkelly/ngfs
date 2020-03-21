@@ -42,7 +42,13 @@ async fn cid_command(args: &[String]) -> Result<(), Box<dyn Error>> {
 
 async fn p2p_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let server_addr = get_argument(args, 0, "server_addr")?;
-    p2p_test(&server_addr).await?;
+    match p2p_test(&server_addr).await {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("p2p_test failed: {}", e);
+            std::process::exit(1);
+        }
+    }
     Ok(())
 }
 
