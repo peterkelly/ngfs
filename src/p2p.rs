@@ -736,8 +736,8 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     println!("Trying decrption with remote_keys:");
     test_decryption(message_enc, message_mac, &remote_keys)?;
 
-    println!("Trying decrption with local_keys:");
-    test_decryption(message_enc, message_mac, &local_keys)?;
+    // println!("Trying decrption with local_keys:");
+    // test_decryption(message_enc, message_mac, &local_keys)?;
 
     // let hmac_signer = HmacSha256::new(&k1.mac_key);
 
@@ -757,10 +757,14 @@ fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Res
     // println!("expected  = {}", BinaryData(&local_propose.rand));
 
     let mut message_hmac = HmacSha256::new(&keys.mac_key);
-    message_hmac.update(&plaintext);
+    message_hmac.update(&message_enc);
     let computed_mac = message_hmac.finish();
     println!("    message_mac  = ({} bytes) {}", message_mac.len(), BinaryData(message_mac));
     println!("    computed_mac = ({} bytes) {}", computed_mac.len(), BinaryData(&computed_mac));
+
+    if message_mac != computed_mac {
+        return general_error("MAC mismatch");
+    }
 
     Ok(())
 }
