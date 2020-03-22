@@ -17,6 +17,7 @@ use rand::prelude::Rng;
 use super::result::{GeneralError, general_error};
 use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, PBufWriter, VarInt};
+use super::hmac::HmacSha256;
 
 use openssl::bn::BigNumContext;
 use openssl::ec::*;
@@ -475,7 +476,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
     let mut ctx = BigNumContext::new()?;
     let point = EcPoint::from_bytes(&group, &remote_exchange.epubkey, &mut ctx)?;
-    let remote_eckey = EcKey::from_public_key(&group, &point);
+    let remote_eckey = EcKey::from_public_key(&group, &point)?;
 
     let mut remote_corpus: Vec<u8> = Vec::new();
     remote_corpus.append(&mut remote_propose_bytes.clone());
@@ -524,6 +525,28 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     let next_data = recv_length_prefixed_binary(&mut stream).await?;
     println!("Received: {}", BinaryData(&next_data));
+
+    // let point = local_eckey_public_point.to_owned(&group);
+    let mut shared_secret_point = EcPoint::new(&group)?;
+    shared_secret_point.mul(&group, &remote_eckey.public_key(), &local_eckey.private_key(), &mut ctx)?;
+    let shared_secret_bytes = shared_secret_point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
+    println!("shared_secret_bytes.len() = {}", shared_secret_bytes.len());
+    println!("shared_secret_bytes = {}", BinaryData(&shared_secret_bytes));
+
+    let cipher_key_size = 32; // for AES-256
+    let iv_size = 16; // for AES-256
+    let mac_size = 20; // in all cases, as per spec
+    let output_size = 2 * (cipher_key_size + iv_size + mac_size);
+    println!("need output_size of {}", output_size);
+
+    let mut hmac = HmacSha256::new(&shared_secret_bytes);
+    hmac.update("key expansion".as_bytes());
+    let mut a: [u8; 32] = hmac.finish();
+    // let mut a: Vec<u8> = Vec::from("key expansion".as_bytes());
+    while a.len() < output_size {
+        println!("a.len() = {}, output_size = {}", a.len(), output_size);
+        break;
+    }
 
     Ok(())
 }

@@ -7,6 +7,7 @@ pub mod detrand;
 pub mod multibase;
 pub mod cid;
 pub mod p2p;
+pub mod hmac;
 
 #[cfg(test)]
 mod tests {
