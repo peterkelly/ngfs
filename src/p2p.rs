@@ -455,11 +455,6 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     //
     // let remote_public_key = Rsa::public_key_from_der()
 
-    let remote_rsa_public_key = Rsa::public_key_from_der(&remote_propose_pubkey.data)?;
-    // println!("got remote_rsa_public_key");
-    // println!("n = {}", BinaryData(&remote_rsa_public_key.n().to_vec()));
-    // println!("e = {}", remote_rsa_public_key.e());
-
 
     // Send our proposal
     let local_public_key = PublicKey {
@@ -539,18 +534,24 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let point = EcPoint::from_bytes(&group, &remote_exchange.epubkey, &mut ctx)?;
     let remote_eckey = EcKey::from_public_key(&group, &point)?;
 
-    let mut remote_corpus: Vec<u8> = Vec::new();
-    remote_corpus.append(&mut remote_propose_bytes.clone());
-    remote_corpus.append(&mut local_propose_bytes.clone());
-    remote_corpus.append(&mut remote_exchange.epubkey.clone());
+    // let mut remote_corpus: Vec<u8> = Vec::new();
+    // remote_corpus.append(&mut remote_propose_bytes.clone());
+    // remote_corpus.append(&mut local_propose_bytes.clone());
+    // remote_corpus.append(&mut remote_exchange.epubkey.clone());
 
-    let remote_pkey = PKey::from_rsa(remote_rsa_public_key)?;
+    // Verify remote exchange message
+    let remote_pkey_rsa = Rsa::public_key_from_der(&remote_propose_pubkey.data)?;
+    let remote_pkey = PKey::from_rsa(remote_pkey_rsa)?;
     let mut remote_verifier = Verifier::new(MessageDigest::sha256(), &remote_pkey)?;
-    remote_verifier.update(&remote_corpus)?;
-    let remote_verify_ok = remote_verifier.verify(&remote_exchange.signature)?;
-    println!("remote_verify_ok = {}", remote_verify_ok);
-    // let sig = EcdsaSig::from_der(&remote_exchange.signature)?;
-    // println!("Created EcdsaSig");
+    remote_verifier.update(&remote_propose_bytes)?;
+    remote_verifier.update(&local_propose_bytes)?;
+    remote_verifier.update(&remote_exchange.epubkey)?;
+    if !remote_verifier.verify(&remote_exchange.signature)? {
+        return general_error("Invalid signature for remote exchange message");
+    }
+
+
+    // Send out local exchange message
 
     let local_eckey = EcKey::generate(&group)?;
     let local_eckey_public_point = local_eckey.public_key();
@@ -563,20 +564,12 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     println!("local_y = {}", BinaryData(&local_y.to_vec()));
 
 
-    let mut local_corpus: Vec<u8> = Vec::new();
-    local_corpus.append(&mut local_propose_bytes.clone());
-    local_corpus.append(&mut remote_propose_bytes.clone());
-    local_corpus.append(&mut local_eckey_public_bytes.clone());
-
     let local_pkey = PKey::from_rsa(local_rsa_private_key.clone())?;
     let mut signer = Signer::new(MessageDigest::sha256(), &local_pkey)?;
-    signer.update(&local_corpus)?;
+    signer.update(&local_propose_bytes)?;
+    signer.update(&remote_propose_bytes)?;
+    signer.update(&local_eckey_public_bytes)?;
     let signature = signer.sign_to_vec()?;
-
-    let mut local_verifier = Verifier::new(MessageDigest::sha256(), &local_pkey)?;
-    local_verifier.update(&local_corpus)?;
-    let local_verify_ok = local_verifier.verify(&signature)?;
-    println!("local_verify_ok = {}", local_verify_ok);
 
     let local_exchange = Exchange {
         epubkey: local_eckey_public_bytes,
@@ -585,16 +578,15 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let local_exchange_bytes = local_exchange.to_pb();
     send_length_prefixed_bytes(&mut stream, &local_exchange_bytes).await?;
 
-    // let mut newbuf: [u8; 16384] = [0; 16384];
-    // let r = stream.read(&mut newbuf).await?;
-    // println!("r = {}", r);
-    // let received = &newbuf[..r];
 
-    // let point = local_eckey_public_point.to_owned(&group);
+
+
+
+
+
+
+
     let mut shared_secret_point = EcPoint::new(&group)?;
-
-
-
     let mut remote_x: BigNum = BigNum::new()?;
     let mut remote_y: BigNum = BigNum::new()?;
     remote_eckey.public_key().affine_coordinates_gfp(&group, &mut remote_x, &mut remote_y, &mut ctx)?;
