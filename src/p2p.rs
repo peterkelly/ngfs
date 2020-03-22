@@ -444,6 +444,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     // Receive the server's proposal
     let remote_propose_bytes = recv_length_prefixed_binary(&mut stream).await?;
+    println!("remote_propose_bytes = {}", BinaryData(&remote_propose_bytes));
     let remote_propose = Propose::from_pb(&remote_propose_bytes)?;
     println!();
     println!("Propose");
@@ -466,6 +467,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     };
     let local_propose = make_propose(&mut rng, &local_public_key);
     let local_propose_bytes = local_propose.to_pb();
+    println!("local_propose_bytes = {}", BinaryData(&local_propose_bytes));
     send_length_prefixed_bytes(&mut stream, &local_propose_bytes).await?;
     println!("Sent our proposal with nonce {}", BinaryData(&local_propose.rand));
 
@@ -632,7 +634,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
         Preference::Remote => {
             (k2, k1)
         }
-        _ => {
+        Preference::Local => {
             (k1, k2)
         }
     };
