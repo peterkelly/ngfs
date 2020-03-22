@@ -17,7 +17,7 @@ use rand::prelude::Rng;
 use super::result::{GeneralError, general_error};
 use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, PBufWriter, VarInt};
-use super::hmac::HmacSha256;
+use super::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
 
 use openssl::bn::BigNumContext;
 use openssl::ec::*;
@@ -26,8 +26,15 @@ use openssl::pkey::PKey;
 use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
 use openssl::sign::{Signer, Verifier};
+use openssl::sha::Sha256;
+use openssl::symm::{Crypter, Cipher, Mode};
 // use openssl::ec::PointConversionForm;
 
+
+enum Preference {
+    Remote,
+    Local,
+}
 
 #[derive(Debug, Clone)]
 pub enum KeyType {
@@ -447,9 +454,9 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     // let remote_public_key = Rsa::public_key_from_der()
 
     let remote_rsa_public_key = Rsa::public_key_from_der(&remote_propose.pubkey.data)?;
-    println!("got remote_rsa_public_key");
-    println!("n = {}", BinaryData(&remote_rsa_public_key.n().to_vec()));
-    println!("e = {}", remote_rsa_public_key.e());
+    // println!("got remote_rsa_public_key");
+    // println!("n = {}", BinaryData(&remote_rsa_public_key.n().to_vec()));
+    // println!("e = {}", remote_rsa_public_key.e());
 
 
     // Send our proposal
@@ -460,14 +467,39 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let local_propose = make_propose(&mut rng, &local_public_key);
     let local_propose_bytes = local_propose.to_pb();
     send_length_prefixed_bytes(&mut stream, &local_propose_bytes).await?;
-    println!("Sent our proposal");
+    println!("Sent our proposal with nonce {}", BinaryData(&local_propose.rand));
+
+    // oh1 := sha256(concat(remotePeerPubKeyBytes, myNonce))
+    let mut oh1_hasher = Sha256::new();
+    oh1_hasher.update(&remote_propose.pubkey.data);
+    oh1_hasher.update(&local_propose.rand);
+    let oh1 = oh1_hasher.finish();
+
+    // oh2 := sha256(concat(myPubKeyBytes, remotePeerNonce))
+    let mut oh2_hasher = Sha256::new();
+    oh2_hasher.update(&local_propose.pubkey.data);
+    oh2_hasher.update(&remote_propose.rand);
+    let oh2 = oh2_hasher.finish();
+
+    println!("oh1 = {}", BinaryData(&oh1));
+    println!("oh2 = {}", BinaryData(&oh2));
+
+    let preference: Preference = if oh1 == oh2 {
+        return general_error("Talking to self");
+    }
+    else if oh1 < oh2 {
+        Preference::Remote
+    }
+    else {
+        Preference::Local
+    };
 
     // Receive the server's key exchange
     let data = recv_length_prefixed_binary(&mut stream).await?;
-    println!("Received remote exchange");
+    // println!("Received remote exchange");
     let remote_exchange = Exchange::from_pb(&data)?;
-    println!("    epubkey = {}", BinaryData(&remote_exchange.epubkey));
-    println!("    signature = {}", BinaryData(&remote_exchange.signature));
+    // println!("    epubkey = {}", BinaryData(&remote_exchange.epubkey));
+    // println!("    signature = {}", BinaryData(&remote_exchange.signature));
 
     // get bytes from somewhere, i.e. this will not produce a valid key
     let public_key: Vec<u8> = vec![];
@@ -523,9 +555,6 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     // println!("r = {}", r);
     // let received = &newbuf[..r];
 
-    let next_data = recv_length_prefixed_binary(&mut stream).await?;
-    println!("Received: {}", BinaryData(&next_data));
-
     // let point = local_eckey_public_point.to_owned(&group);
     let mut shared_secret_point = EcPoint::new(&group)?;
     shared_secret_point.mul(&group, &remote_eckey.public_key(), &local_eckey.private_key(), &mut ctx)?;
@@ -535,18 +564,134 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     let cipher_key_size = 32; // for AES-256
     let iv_size = 16; // for AES-256
-    let mac_size = 20; // in all cases, as per spec
-    let output_size = 2 * (cipher_key_size + iv_size + mac_size);
-    println!("need output_size of {}", output_size);
+    let mac_key_size = 20; // in all cases, as per spec
+    let output_size = 2 * (cipher_key_size + iv_size + mac_key_size);
+    // println!("need output_size of {}", output_size);
 
     let mut hmac = HmacSha256::new(&shared_secret_bytes);
     hmac.update("key expansion".as_bytes());
     let mut a: [u8; 32] = hmac.finish();
     // let mut a: Vec<u8> = Vec::from("key expansion".as_bytes());
-    while a.len() < output_size {
-        println!("a.len() = {}, output_size = {}", a.len(), output_size);
-        break;
+    let mut count = 0;
+    let mut output: Vec<u8> = Vec::new();
+    while output.len() < output_size {
+        // println!("output.len() = {}, output_size = {}", output.len(), output_size);
+        // compute digest b by feeding a and the seed value into the HMAC:
+        // b := hmac_digest(concat(a, "key expansion"))
+        // let mut b_input: Vec<u8> = Vec::new();
+        // b_input.append(&mut Vec::from(&a[..]));
+        // b_input.append(&mut Vec::from("key expansion".as_bytes()));
+        // hmac.update(&b_input);
+        hmac.update(&a[..]);
+        hmac.update("key expansion".as_bytes());
+        let b: [u8; 32] = hmac.finish();
+        output.append(&mut Vec::from(&b[..]));
+        count += 1;
+        if count > 10 {
+            break;
+        }
+        hmac.update(&a[..]);
+        a = hmac.finish();
     }
+    // println!("finished with output.len() = {}", output.len());
+    output.resize_with(output_size, Default::default);
+    // println!("finished with output.len() = {}", output.len());
+
+    // println!("{}", offset);
+    let mut output_offset = 0;
+
+    let k1_iv: Vec<u8> = Vec::from(&output[output_offset..output_offset + iv_size]);
+    output_offset += iv_size;
+
+    let k1_cipher_key: Vec<u8> = Vec::from(&output[output_offset..output_offset + cipher_key_size]);
+    output_offset += cipher_key_size;
+
+    let k1_mac_key: Vec<u8> = Vec::from(&output[output_offset..output_offset + mac_key_size]);
+    output_offset += mac_key_size;
+
+    let k2_iv: Vec<u8> = Vec::from(&output[output_offset..output_offset + iv_size]);
+    output_offset += iv_size;
+
+    let k2_cipher_key: Vec<u8> = Vec::from(&output[output_offset..output_offset + cipher_key_size]);
+    output_offset += cipher_key_size;
+
+    let k2_mac_key: Vec<u8> = Vec::from(&output[output_offset..output_offset + mac_key_size]);
+    output_offset += mac_key_size;
+    assert!(output_offset == output_size);
+
+    let k1 = AESKey { iv: k1_iv, cipher_key: k1_cipher_key, mac_key: k1_mac_key };
+    let k2 = AESKey { iv: k2_iv, cipher_key: k2_cipher_key, mac_key: k2_mac_key };
+    // match preference {
+    //     Preference::Remote => {
+    //         std::mem::swap(&mut k1, &mut k2);
+    //     }
+    //     Preference::Local => {
+    //     }
+    // };
+    let (local_keys, remote_keys) = match preference {
+        Preference::Remote => {
+            (k2, k1)
+        }
+        _ => {
+            (k1, k2)
+        }
+    };
+
+    assert!(remote_keys.iv.len() == iv_size);
+    assert!(remote_keys.cipher_key.len() == cipher_key_size);
+    assert!(remote_keys.mac_key.len() == mac_key_size);
+
+    assert!(local_keys.iv.len() == iv_size);
+    assert!(local_keys.cipher_key.len() == cipher_key_size);
+    assert!(local_keys.mac_key.len() == mac_key_size);
+
+
+    let msg_parts = recv_length_prefixed_binary(&mut stream).await?;
+    println!("Received: {}", BinaryData(&msg_parts));
+    if msg_parts.len() < SHA256_DIGEST_SIZE {
+        return general_error("Encrypted data is smaller than digest size");
+    }
+    let message_enc = &msg_parts[..msg_parts.len() - SHA256_DIGEST_SIZE];
+    let message_mac = &msg_parts[msg_parts.len() - SHA256_DIGEST_SIZE..];
+
+    println!("message_enc = ({} bytes) {}", message_enc.len(), BinaryData(message_enc));
+    println!("message_mac = ({} bytes) {}", message_mac.len(), BinaryData(message_mac));
+
+
+    println!("Trying decrption with remote_keys:");
+    test_decryption(message_enc, message_mac, &remote_keys)?;
+
+    println!("Trying decrption with local_keys:");
+    test_decryption(message_enc, message_mac, &local_keys)?;
+
+    // let hmac_signer = HmacSha256::new(&k1.mac_key);
 
     Ok(())
+}
+
+fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Result<(), Box<dyn Error>> {
+    let cipher: Cipher = Cipher::aes_256_ctr();
+    let block_size = cipher.block_size();
+    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, &keys.cipher_key, Some(&keys.iv))?;
+    let mut plaintext: Vec<u8> = vec![0; message_enc.len() + block_size];
+    let mut decrpyted_count = decrypter.update(message_enc, &mut plaintext)?;
+    println!("    decrpyted_count = {}", decrpyted_count);
+    println!("    plaintext.len() = {}", plaintext.len());
+    plaintext.truncate(decrpyted_count);
+    println!("    plaintext = {}", BinaryData(&plaintext));
+    // println!("expected  = {}", BinaryData(&local_propose.rand));
+
+    let mut message_hmac = HmacSha256::new(&keys.mac_key);
+    message_hmac.update(&plaintext);
+    let computed_mac = message_hmac.finish();
+    println!("    message_mac  = ({} bytes) {}", message_mac.len(), BinaryData(message_mac));
+    println!("    computed_mac = ({} bytes) {}", computed_mac.len(), BinaryData(&computed_mac));
+
+    Ok(())
+}
+
+struct AESKey {
+    iv: Vec<u8>,
+    cipher_key: Vec<u8>,
+    mac_key: Vec<u8>,
 }

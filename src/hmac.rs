@@ -1,7 +1,7 @@
 use openssl::sha::Sha256;
 
-const SHA256_BLOCK_SIZE: usize = 64;
-// const SHA256_DIGEST_SIZE: usize = 32;
+pub const SHA256_BLOCK_SIZE: usize = 64;
+pub const SHA256_DIGEST_SIZE: usize = 32;
 
 pub struct HmacSha256 {
     k_xor_ipad: [u8; SHA256_BLOCK_SIZE],
