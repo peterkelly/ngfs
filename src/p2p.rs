@@ -19,7 +19,7 @@ use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, PBufWriter, VarInt};
 use super::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
 
-use openssl::bn::BigNumContext;
+use openssl::bn::{BigNum, BigNumRef, BigNumContext};
 use openssl::ec::*;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
@@ -111,7 +111,7 @@ impl PrivateKey {
 
 struct Propose {
     rand: Vec<u8>,
-    pubkey: PublicKey,
+    pubkey: Vec<u8>,
     exchanges: Vec<String>,
     ciphers: Vec<String>,
     hashes: Vec<String>,
@@ -160,7 +160,7 @@ impl Propose {
 
         Ok(Propose {
             rand,
-            pubkey: PublicKey::from_pb(&pubkey)?,
+            pubkey: pubkey,
             exchanges: exchanges.split(',').map(|s| String::from(s)).collect(),
             ciphers: ciphers.split(',').map(|s| String::from(s)).collect(),
             hashes: hashes.split(',').map(|s| String::from(s)).collect(),
@@ -170,7 +170,7 @@ impl Propose {
     pub fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.rand);
-        writer.write_bytes(2, &self.pubkey.to_pb());
+        writer.write_bytes(2, &self.pubkey);
         writer.write_string(3, &join_strings(&self.exchanges, ","));
         writer.write_string(4, &join_strings(&self.ciphers, ","));
         writer.write_string(5, &join_strings(&self.hashes, ","));
@@ -350,7 +350,7 @@ fn make_propose(rng: &mut impl Rng, pubkey: &PublicKey) -> Propose {
 
     Propose {
         rand: Vec::from(rand_bytes),
-        pubkey: pubkey.clone(),
+        pubkey: pubkey.to_pb(),
         exchanges,
         ciphers,
         hashes,
@@ -391,11 +391,11 @@ async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8
     Ok(receive_exact(stream, length).await?)
 }
 
-fn print_propose(propose: &Propose) {
+fn print_propose(propose: &Propose, pubkey: &PublicKey) {
     println!("    rand = {}", BinaryData(&propose.rand));
     println!("    pubkey =");
-    println!("        type = {:?}", propose.pubkey.key_type);
-    println!("        data = {}", BinaryData(&propose.pubkey.data));
+    println!("        type = {:?}", pubkey.key_type);
+    println!("        data = {}", BinaryData(&pubkey.data));
     println!("    exchanges");
     for item in propose.exchanges.iter() {
         println!("        {}", item);
@@ -446,15 +446,16 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let remote_propose_bytes = recv_length_prefixed_binary(&mut stream).await?;
     println!("remote_propose_bytes = {}", BinaryData(&remote_propose_bytes));
     let remote_propose = Propose::from_pb(&remote_propose_bytes)?;
+    let remote_propose_pubkey = PublicKey::from_pb(&remote_propose.pubkey)?;
     println!();
     println!("Propose");
-    print_propose(&remote_propose);
+    print_propose(&remote_propose, &remote_propose_pubkey);
 
     // std::fs::write("remote-public-key", &remote_propose.pubkey.data)?;
     //
     // let remote_public_key = Rsa::public_key_from_der()
 
-    let remote_rsa_public_key = Rsa::public_key_from_der(&remote_propose.pubkey.data)?;
+    let remote_rsa_public_key = Rsa::public_key_from_der(&remote_propose_pubkey.data)?;
     // println!("got remote_rsa_public_key");
     // println!("n = {}", BinaryData(&remote_rsa_public_key.n().to_vec()));
     // println!("e = {}", remote_rsa_public_key.e());
@@ -473,23 +474,48 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     // oh1 := sha256(concat(remotePeerPubKeyBytes, myNonce))
     let mut oh1_hasher = Sha256::new();
-    oh1_hasher.update(&remote_propose.pubkey.data);
+    // println!("oh1 part1 = {}", BinaryData(&remote_propose.pubkey));
+    // println!("oh1 part2 = {}", BinaryData(&local_propose.rand));
+    // let mut oh1_both: Vec<u8> = Vec::new();
+    // oh1_both.append(&mut Vec::from(&remote_propose.pubkey[..]));
+    // oh1_both.append(&mut Vec::from(&local_propose.rand[..]));
+    // println!("oh1 both = {}", BinaryData(&oh1_both));
+    oh1_hasher.update(&remote_propose.pubkey);
     oh1_hasher.update(&local_propose.rand);
-    let oh1 = oh1_hasher.finish();
+
+    // oh1_hasher.update(&oh1_both);
+    let oh1_raw = oh1_hasher.finish();
+    let mut oh1: [u8; 34] = [0; 34];
+    oh1[0] = 0x12;
+    oh1[1] = 0x20;
+    oh1[2..34].copy_from_slice(&oh1_raw);
 
     // oh2 := sha256(concat(myPubKeyBytes, remotePeerNonce))
     let mut oh2_hasher = Sha256::new();
-    oh2_hasher.update(&local_propose.pubkey.data);
+    // println!("oh2 part1 = {}", BinaryData(&local_propose.pubkey));
+    // println!("oh2 part2 = {}", BinaryData(&remote_propose.rand));
+    // let mut oh2_both: Vec<u8> = Vec::new();
+    // oh2_both.append(&mut Vec::from(&local_propose.pubkey[..]));
+    // oh2_both.append(&mut Vec::from(&remote_propose.rand[..]));
+    // println!("oh2 both = {}", BinaryData(&oh2_both));
+    oh2_hasher.update(&local_propose.pubkey);
     oh2_hasher.update(&remote_propose.rand);
-    let oh2 = oh2_hasher.finish();
+    // oh2_hasher.update(&oh2_both);
+    let oh2_raw = oh2_hasher.finish();
+
+    let mut oh2: [u8; 34] = [0; 34];
+    oh2[0] = 0x12;
+    oh2[1] = 0x20;
+    oh2[2..34].copy_from_slice(&oh2_raw);
+
 
     println!("oh1 = {}", BinaryData(&oh1));
     println!("oh2 = {}", BinaryData(&oh2));
 
-    let preference: Preference = if oh1 == oh2 {
+    let preference: Preference = if oh1_raw == oh2_raw {
         return general_error("Talking to self");
     }
-    else if oh1 < oh2 {
+    else if oh1_raw < oh2_raw {
         Preference::Remote
     }
     else {
@@ -509,6 +535,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     // create an EcKey from the binary form of a EcPoint
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
     let mut ctx = BigNumContext::new()?;
+    println!("remote_exchange.epubkey = {}", BinaryData(&remote_exchange.epubkey));
     let point = EcPoint::from_bytes(&group, &remote_exchange.epubkey, &mut ctx)?;
     let remote_eckey = EcKey::from_public_key(&group, &point)?;
 
@@ -528,6 +555,12 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let local_eckey = EcKey::generate(&group)?;
     let local_eckey_public_point = local_eckey.public_key();
     let local_eckey_public_bytes = local_eckey_public_point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
+
+    let mut local_x: BigNum = BigNum::new()?;
+    let mut local_y: BigNum = BigNum::new()?;
+    local_eckey.public_key().affine_coordinates_gfp(&group, &mut local_x, &mut local_y, &mut ctx)?;
+    println!("local_x = {}", BinaryData(&local_x.to_vec()));
+    println!("local_y = {}", BinaryData(&local_y.to_vec()));
 
 
     let mut local_corpus: Vec<u8> = Vec::new();
@@ -559,8 +592,36 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     // let point = local_eckey_public_point.to_owned(&group);
     let mut shared_secret_point = EcPoint::new(&group)?;
+
+
+
+    let mut remote_x: BigNum = BigNum::new()?;
+    let mut remote_y: BigNum = BigNum::new()?;
+    remote_eckey.public_key().affine_coordinates_gfp(&group, &mut remote_x, &mut remote_y, &mut ctx)?;
+
+    println!("remote_x = {}", BinaryData(&remote_x.to_vec()));
+    println!("remote_y = {}", BinaryData(&remote_y.to_vec()));
+
+
+    // println!("x_prime = {}", x_prime.to_dec_str()?);
+    // println!("y_prime = {}", y_prime.to_dec_str()?);
+    // println!("x_bin   = {}", x_bin.to_dec_str()?);
+    // println!("y_bin   = {}", y_bin.to_dec_str()?);
+
+
+
+
+
+
     shared_secret_point.mul(&group, &remote_eckey.public_key(), &local_eckey.private_key(), &mut ctx)?;
-    let shared_secret_bytes = shared_secret_point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
+    let mut shared_secret_x: BigNum = BigNum::new()?;
+    let mut shared_secret_y: BigNum = BigNum::new()?;
+    shared_secret_point.affine_coordinates_gfp(&group, &mut shared_secret_x, &mut shared_secret_y, &mut ctx)?;
+
+    // let local_eckey_public_bytes = local_eckey_public_point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
+    let shared_secret_bytes = shared_secret_x.to_vec();
+
+    // let shared_secret_bytes = shared_secret_point.to_bytes(&group, PointConversionForm::UNCOMPRESSED, &mut ctx)?;
     println!("shared_secret_bytes.len() = {}", shared_secret_bytes.len());
     println!("shared_secret_bytes = {}", BinaryData(&shared_secret_bytes));
 
@@ -574,7 +635,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     hmac.update("key expansion".as_bytes());
     let mut a: [u8; 32] = hmac.finish();
     // let mut a: Vec<u8> = Vec::from("key expansion".as_bytes());
-    let mut count = 0;
+    // let mut count = 0;
     let mut output: Vec<u8> = Vec::new();
     while output.len() < output_size {
         // println!("output.len() = {}, output_size = {}", output.len(), output_size);
@@ -588,16 +649,17 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
         hmac.update("key expansion".as_bytes());
         let b: [u8; 32] = hmac.finish();
         output.append(&mut Vec::from(&b[..]));
-        count += 1;
-        if count > 10 {
-            break;
-        }
+        // count += 1;
+        // if count > 10 {
+        //     break;
+        // }
         hmac.update(&a[..]);
         a = hmac.finish();
     }
     // println!("finished with output.len() = {}", output.len());
     output.resize_with(output_size, Default::default);
     // println!("finished with output.len() = {}", output.len());
+    println!("output = {}", BinaryData(&output));
 
     // println!("{}", offset);
     let mut output_offset = 0;
@@ -623,6 +685,8 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     let k1 = AESKey { iv: k1_iv, cipher_key: k1_cipher_key, mac_key: k1_mac_key };
     let k2 = AESKey { iv: k2_iv, cipher_key: k2_cipher_key, mac_key: k2_mac_key };
+
+
     // match preference {
     //     Preference::Remote => {
     //         std::mem::swap(&mut k1, &mut k2);
@@ -638,6 +702,15 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
             (k1, k2)
         }
     };
+
+
+    println!("local_keys.iv = {}", &BinaryData(&local_keys.iv));
+    println!("local_keys.cipher_key = {}", &BinaryData(&local_keys.cipher_key));
+    println!("local_keys.mac_key = {}", &BinaryData(&local_keys.mac_key));
+
+    println!("remote_keys.iv = {}", &BinaryData(&remote_keys.iv));
+    println!("remote_keys.cipher_key = {}", &BinaryData(&remote_keys.cipher_key));
+    println!("remote_keys.mac_key = {}", &BinaryData(&remote_keys.mac_key));
 
     assert!(remote_keys.iv.len() == iv_size);
     assert!(remote_keys.cipher_key.len() == cipher_key_size);
