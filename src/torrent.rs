@@ -116,7 +116,7 @@ impl Torrent {
 
         let mut pieces = Vec::<PieceHash>::new();
         let mut i = 0;
-        while i + 20 < pieces_data.len() {
+        while i + 20 <= pieces_data.len() {
             let mut data: [u8; 20] = [0; 20];
             data.copy_from_slice(&pieces_data[i..i + 20]);
             pieces.push(PieceHash { data });
