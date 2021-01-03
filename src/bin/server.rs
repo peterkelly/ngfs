@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Next up we create a TCP listener which will listen for incoming
     // connections. This TCP listener is bound to the address we determined
     // above and must be associated with an event loop.
-    let mut listener = TcpListener::bind(&addr).await?;
+    let listener = TcpListener::bind(&addr).await?;
     println!("Listening on: {}", addr);
 
     let stats_mutex = Arc::new(Mutex::new(Stats::new()));

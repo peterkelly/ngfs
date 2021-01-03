@@ -9,7 +9,7 @@ use std::error::Error;
 use tokio::net::{lookup_host};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
-use tokio::prelude::*;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 // use native_tls;
 // use tokio_tls;
 use openssl::rsa::Rsa;

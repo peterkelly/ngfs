@@ -1,7 +1,7 @@
 // https://tokio.rs/docs/getting-started/hello-world/
 
 use tokio::net::TcpStream;
-use tokio::prelude::*;
+use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() {

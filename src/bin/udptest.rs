@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn client(server_addr: &SocketAddr, client_addr: &SocketAddr) -> Result<(), Box<dyn Error>> {
-    let mut sock = UdpSocket::bind(client_addr).await?;
+    let sock = UdpSocket::bind(client_addr).await?;
     println!("Client: Created socket");
     sock.send_to(b"hello", server_addr).await?;
     println!("Client: Sent data");
@@ -41,7 +41,7 @@ async fn client(server_addr: &SocketAddr, client_addr: &SocketAddr) -> Result<()
 }
 
 async fn server(server_addr: &SocketAddr) -> Result<(), Box<dyn Error>> {
-    let mut sock = UdpSocket::bind(server_addr).await?;
+    let sock = UdpSocket::bind(server_addr).await?;
     println!("Server: Created socket");
 
     loop {

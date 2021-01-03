@@ -8,8 +8,8 @@ edition = "2018"
 
 [dependencies]
 rust-crypto = "0.2.36"
-tokio = { version = "0.2", features = ["full"] }
-futures = "0.3"
-rand = "0.7.3"
+tokio = { version = "1.0.1", features = ["full"] }
+futures = "0.3.8"
+rand = "0.8.0"
 openssl-sys = "0.9.54"
 openssl = "0.10.28"

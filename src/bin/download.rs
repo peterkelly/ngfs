@@ -20,7 +20,7 @@ use std::task::{Poll, Context};
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::net::{UdpSocket, lookup_host};
-use tokio::prelude::*;
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
