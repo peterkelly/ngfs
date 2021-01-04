@@ -67,3 +67,34 @@ pub fn escape_string(s: &str) -> String {
     escaped.push('\"');
     return escaped.into_iter().collect();
 }
+
+pub struct DebugHexDump<'a>(pub &'a [u8]);
+
+impl<'a> fmt::Debug for DebugHexDump<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !f.alternate() {
+            for i in 0..self.0.len() {
+                f.write_fmt(format_args!("{:02x}", self.0[i]))?;
+                if i + 1 < self.0.len() {
+                    f.write_str(" ")?;
+                }
+            }
+        }
+        else {
+            for i in 0..self.0.len() {
+                f.write_fmt(format_args!("{:02x}", self.0[i]))?;
+
+                if (i + 1) == self.0.len() || (i + 1) % 16 == 0 {
+                    f.write_str("\n")?;
+                }
+                else if (i + 1) % 8 == 0 {
+                    f.write_str("   ")?;
+                }
+                else{
+                    f.write_str(" ")?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
