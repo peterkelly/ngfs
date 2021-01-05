@@ -23,6 +23,16 @@ use torrent::util::{escape_string, DebugHexDump};
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
+#[derive(Debug)]
+enum SenderMessage {
+    Data(Vec<u8>),
+    Done,
+}
+
+#[derive(Debug)]
+enum RecevierMessage {
+    Done,
+}
 
 struct State {
     sock: Arc<UdpSocket>,
@@ -31,9 +41,35 @@ struct State {
 }
 
 async fn send_task_inner(state: Arc<State>,
-                         sender_rx: UnboundedReceiver<SenderMessage>,
+                         mut sender_rx: UnboundedReceiver<SenderMessage>,
                          receiver_tx: UnboundedSender<RecevierMessage>) -> Result<(), Box<dyn Error>> {
-    println!("Send task started");
+    let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
+
+    loop {
+        println!("**** Sender: Start of loop iteration");
+        let msg = sender_rx.recv().await;
+        match msg {
+            Some(SenderMessage::Data(data)) => {
+                println!("**** Sender: Asked to send {} bytes", data.len());
+                let r = state.sock.send(&data).await?;
+                println!("**** Sender: Sent {} bytes", r);
+
+                // {
+                //     let mut conn = state.conn.lock().unwrap();
+                //     let write_len = conn.send(&mut buf)?;
+                // }
+            }
+            Some(SenderMessage::Done) => {
+                println!("**** Sender: received Done message");
+                break;
+            }
+            None => {
+                println!("**** Sender: msg is None");
+                break;
+            }
+        }
+    }
+    println!("**** Sender: Finished");
     Ok(())
 }
 
@@ -47,38 +83,121 @@ async fn send_task(state: Arc<State>, sender_rx: UnboundedReceiver<SenderMessage
     }
 }
 
+async fn conn_send_loop(state: &Arc<State>, sender_tx: &UnboundedSender<SenderMessage>) -> Result<(), Box<dyn Error>> {
+    let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
+    loop {
+        let write_len = {
+            let mut conn = state.conn.lock().unwrap();
+            match conn.send(&mut buf) {
+                Ok(write_len) => {
+                    println!("conn.send() returned {}", write_len);
+                    write_len
+                }
+                Err(e) => {
+                    println!("conn.send() had error {}", e);
+                    if e == quiche::Error::Done {
+                        return Ok(())
+                    }
+                    else {
+                        return Err(e.into())
+                    }
+                }
+            }
+        };
+
+        match sender_tx.send(SenderMessage::Data(Vec::from(&buf[0..write_len]))) {
+            Ok(()) => (),
+            Err(e) => {
+                println!("sender_tx.send() failed: {}", e);
+                return Err(e.into());
+            }
+        };
+    }
+}
+
+async fn recv_one(state: &Arc<State>) -> Result<(), Box<dyn Error>> {
+    let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
+    let (len, addr) = state.sock.recv_from(&mut buf).await?;
+    println!("Receiver: Got {} bytes from {}", len, addr);
+
+    {
+        let mut conn = state.conn.lock().unwrap();
+        let processed = conn.recv(&mut buf[0..len])?;
+        println!("Receiver: Processed {} bytes (established? {}, closed? {})",
+            processed, conn.is_established(), conn.is_closed());
+
+    }
+    Ok(())
+}
 
 async fn recv_task_inner(state: Arc<State>,
                          sender_tx: UnboundedSender<SenderMessage>,
                          mut receiver_rx: UnboundedReceiver<RecevierMessage>,
                          ) -> Result<(), Box<dyn Error>> {
     println!("Receive task started");
-    let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
 
 
-    let udp_recv_future = state.sock.recv_from(&mut buf);
-    let mpsc_recv_future = receiver_rx.recv();
+    loop {
+        recv_one(&state).await?;
+        {
+            let mut conn = state.conn.lock().unwrap();
 
-    pin_mut!(udp_recv_future);
-    pin_mut!(mpsc_recv_future);
-
-    match select(udp_recv_future, mpsc_recv_future).await {
-        Either::Left((a, b)) => {
-            let res: Result<(usize, SocketAddr), std::io::Error> = a;
-            let z: Pin<&mut dyn futures::Future<Output = Option<RecevierMessage>>> = b;
+            if conn.is_closed() {
+                println!("Receiver: Connection closed");
+                return Ok(());
+            }
         }
-        Either::Right((a, b)) => {
-            let res: Option<RecevierMessage> = a;
-            let z: Pin<&mut dyn futures::Future<Output = Result<(usize, SocketAddr), std::io::Error>>> = b;
-        }
+        conn_send_loop(&state, &sender_tx).await?;
+
+
+
+        // let s: String = String::from_utf8_lossy(&buf[0..len]).into();
+        // println!("Received {} bytes from {}: {}", len, addr, escape_string(&s));
     }
+
+    // loop {
+
+    //     let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
+
+    //     let udp_recv_future = state.sock.recv_from(&mut buf);
+    //     let mpsc_recv_future = receiver_rx.recv();
+    //     pin_mut!(udp_recv_future);
+    //     pin_mut!(mpsc_recv_future);
+
+    //     match select(udp_recv_future, mpsc_recv_future).await {
+    //         Either::Left((a, b)) => {
+    //             let res: Result<(usize, SocketAddr), std::io::Error> = a;
+    //             let z: Pin<&mut dyn futures::Future<Output = Option<RecevierMessage>>> = b;
+
+    //             match res {
+    //                 Ok((len, addr)) => {
+    //                     let s: String = String::from_utf8_lossy(&buf[0..len]).into();
+    //                     println!("Received {} bytes from {}: {}", len, addr, escape_string(&s));
+    //                 }
+    //                 Err(e) => {
+    //                     eprintln!("recv_from() call failed: {}", e);
+    //                     return Ok(())
+    //                 }
+    //             }
+    //         }
+    //         Either::Right((a, b)) => {
+    //             let res: Option<RecevierMessage> = a;
+    //             let z: Pin<&mut dyn futures::Future<Output = Result<(usize, SocketAddr), std::io::Error>>> = b;
+
+    //             match res {
+    //                 None => return Ok(()),
+    //                 Some(RecevierMessage::Done) => return Ok(()),
+    //             }
+    //         }
+    //     }
+    // }
 
     // loop {
 
     //     let (len, addr) = state.sock.recv_from(&mut buf).await?;
     //     println!("Received {} bytes", len);
     // }
-    Ok(())
+    // Ok(())
 }
 
 async fn recv_task(state: Arc<State>,
@@ -91,16 +210,6 @@ async fn recv_task(state: Arc<State>,
         }
     }
 }
-
-enum SenderMessage {
-    Data(Vec<u8>),
-    Done,
-}
-
-enum RecevierMessage {
-    Done,
-}
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -137,6 +246,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let sock = UdpSocket::bind("0.0.0.0:0").await?;
     println!("Bound socket");
+    sock.connect("quic.tech:4433").await?;
+    println!("Connected socket");
 
 
     let conn: Pin<Box<quiche::Connection>> = quiche::connect(Some("quic.tech:4433"), &scid, &mut config)?;
@@ -148,19 +259,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
         conn: Arc::new(Mutex::new(conn)),
     });
 
+
     let (sender_tx, mut sender_rx) = mpsc::unbounded_channel::<SenderMessage>();
     let (receiver_tx, mut receiver_rx) = mpsc::unbounded_channel::<RecevierMessage>();
 
+
+    conn_send_loop(&state, &sender_tx.clone()).await?;
 
     let send_state = state.clone();
     let recv_state = state.clone();
 
     let send_handle = tokio::spawn(send_task(send_state, sender_rx, receiver_tx));
-    let recv_handle = tokio::spawn(recv_task(recv_state, sender_tx, receiver_rx));
+    let recv_handle = tokio::spawn(recv_task(recv_state, sender_tx.clone(), receiver_rx));
+
+    sender_tx.send(SenderMessage::Data(Vec::from("Hello\n".as_bytes())))?;
 
     let (r1, r2) = join(send_handle, recv_handle).await;
     r1?;
     r2?;
+
+    sender_tx.send(SenderMessage::Done)?;
 
 
     Ok(())
