@@ -12,7 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::future::Future;
 use std::pin::{Pin};
 use std::task::{Context, Poll};
+use std::net::SocketAddr;
 use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use ring::rand::{SystemRandom, SecureRandom};
 use quiche;
 
@@ -27,13 +30,16 @@ struct State {
     conn: Arc<Mutex<Pin<Box<quiche::Connection>>>>,
 }
 
-async fn send_task_inner(state: Arc<State>) -> Result<(), Box<dyn Error>> {
+async fn send_task_inner(state: Arc<State>,
+                         sender_rx: UnboundedReceiver<SenderMessage>,
+                         receiver_tx: UnboundedSender<RecevierMessage>) -> Result<(), Box<dyn Error>> {
     println!("Send task started");
     Ok(())
 }
 
-async fn send_task(state: Arc<State>) {
-    match send_task_inner(state).await {
+async fn send_task(state: Arc<State>, sender_rx: UnboundedReceiver<SenderMessage>,
+                   receiver_tx: UnboundedSender<RecevierMessage>) {
+    match send_task_inner(state, sender_rx, receiver_tx).await {
         Ok(_) => (),
         Err(e) => {
             eprintln!("Send task error: {}", e);
@@ -42,18 +48,43 @@ async fn send_task(state: Arc<State>) {
 }
 
 
-async fn recv_task_inner(state: Arc<State>) -> Result<(), Box<dyn Error>> {
+async fn recv_task_inner(state: Arc<State>,
+                         sender_tx: UnboundedSender<SenderMessage>,
+                         mut receiver_rx: UnboundedReceiver<RecevierMessage>,
+                         ) -> Result<(), Box<dyn Error>> {
     println!("Receive task started");
     let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
-    loop {
-        let (len, addr) = state.sock.recv_from(&mut buf).await?;
-        println!("Received {} bytes", len);
+
+
+    let udp_recv_future = state.sock.recv_from(&mut buf);
+    let mpsc_recv_future = receiver_rx.recv();
+
+    pin_mut!(udp_recv_future);
+    pin_mut!(mpsc_recv_future);
+
+    match select(udp_recv_future, mpsc_recv_future).await {
+        Either::Left((a, b)) => {
+            let res: Result<(usize, SocketAddr), std::io::Error> = a;
+            let z: Pin<&mut dyn futures::Future<Output = Option<RecevierMessage>>> = b;
+        }
+        Either::Right((a, b)) => {
+            let res: Option<RecevierMessage> = a;
+            let z: Pin<&mut dyn futures::Future<Output = Result<(usize, SocketAddr), std::io::Error>>> = b;
+        }
     }
-    // Ok(())
+
+    // loop {
+
+    //     let (len, addr) = state.sock.recv_from(&mut buf).await?;
+    //     println!("Received {} bytes", len);
+    // }
+    Ok(())
 }
 
-async fn recv_task(state: Arc<State>) {
-    match recv_task_inner(state).await {
+async fn recv_task(state: Arc<State>,
+                   sender_tx: UnboundedSender<SenderMessage>,
+                   receiver_rx: UnboundedReceiver<RecevierMessage>) {
+    match recv_task_inner(state, sender_tx, receiver_rx).await {
         Ok(_) => (),
         Err(e) => {
             eprintln!("Receive task error: {}", e);
@@ -61,6 +92,14 @@ async fn recv_task(state: Arc<State>) {
     }
 }
 
+enum SenderMessage {
+    Data(Vec<u8>),
+    Done,
+}
+
+enum RecevierMessage {
+    Done,
+}
 
 
 #[tokio::main]
@@ -109,11 +148,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         conn: Arc::new(Mutex::new(conn)),
     });
 
+    let (sender_tx, mut sender_rx) = mpsc::unbounded_channel::<SenderMessage>();
+    let (receiver_tx, mut receiver_rx) = mpsc::unbounded_channel::<RecevierMessage>();
+
+
     let send_state = state.clone();
     let recv_state = state.clone();
 
-    let send_handle = tokio::spawn(send_task(send_state));
-    let recv_handle = tokio::spawn(recv_task(recv_state));
+    let send_handle = tokio::spawn(send_task(send_state, sender_rx, receiver_tx));
+    let recv_handle = tokio::spawn(recv_task(recv_state, sender_tx, receiver_rx));
 
     let (r1, r2) = join(send_handle, recv_handle).await;
     r1?;
