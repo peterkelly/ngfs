@@ -46,30 +46,25 @@ async fn send_task_inner(state: Arc<State>,
     let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
 
     loop {
-        println!("**** Sender: Start of loop iteration");
+        // println!("**** Sender: Start of loop iteration");
         let msg = sender_rx.recv().await;
         match msg {
             Some(SenderMessage::Data(data)) => {
-                println!("**** Sender: Asked to send {} bytes", data.len());
+                // println!("**** Sender: Asked to send {} bytes", data.len());
                 let r = state.sock.send(&data).await?;
                 println!("**** Sender: Sent {} bytes", r);
-
-                // {
-                //     let mut conn = state.conn.lock().unwrap();
-                //     let write_len = conn.send(&mut buf)?;
-                // }
             }
             Some(SenderMessage::Done) => {
-                println!("**** Sender: received Done message");
+                // println!("**** Sender: received Done message");
                 break;
             }
             None => {
-                println!("**** Sender: msg is None");
+                // println!("**** Sender: msg is None");
                 break;
             }
         }
     }
-    println!("**** Sender: Finished");
+    // println!("**** Sender: Finished");
     Ok(())
 }
 
@@ -90,12 +85,12 @@ async fn conn_send_loop(state: &Arc<State>, sender_tx: &UnboundedSender<SenderMe
             let mut conn = state.conn.lock().unwrap();
             match conn.send(&mut buf) {
                 Ok(write_len) => {
-                    println!("conn.send() returned {}", write_len);
+                    // println!("conn.send() returned {}", write_len);
                     write_len
                 }
                 Err(e) => {
-                    println!("conn.send() had error {}", e);
                     if e == quiche::Error::Done {
+                        // println!("conn.send() had error {}", e);
                         return Ok(())
                     }
                     else {
@@ -126,6 +121,9 @@ async fn recv_one(state: &Arc<State>) -> Result<(), Box<dyn Error>> {
         println!("Receiver: Processed {} bytes (established? {}, closed? {})",
             processed, conn.is_established(), conn.is_closed());
 
+        // let s: String = String::from_utf8_lossy(&buf[0..len]).into();
+        // println!("Receiver: content {}", escape_string(&s));
+
     }
     Ok(())
 }
@@ -138,15 +136,56 @@ async fn recv_task_inner(state: Arc<State>,
 
 
     loop {
+        let old_established = { state.conn.lock().unwrap().is_established() };
+
         recv_one(&state).await?;
         {
             let mut conn = state.conn.lock().unwrap();
 
             if conn.is_closed() {
-                println!("Receiver: Connection closed");
+                println!("================ CONNECTION CLOSED ================");
                 return Ok(());
             }
         }
+        let new_established = { state.conn.lock().unwrap().is_established() };
+
+
+        if !old_established && new_established {
+            println!("================ CONNECTION ESTABLISHED ================");
+            {
+                let mut conn = state.conn.lock().unwrap();
+                conn.stream_send(0, "GET /\r\n".as_bytes(), true)?;
+            };
+        }
+
+        {
+            let mut conn = state.conn.lock().unwrap();
+            if conn.is_established() {
+                for s in conn.readable() {
+                    loop {
+                        let mut read_buf: [u8; 65536] = [0; 65536];
+                        match conn.stream_recv(s, &mut read_buf) {
+                            Ok((len, fin)) => {
+                                let data_string: String = String::from_utf8_lossy(&read_buf[0..len]).into();
+                                println!("stream_recv() s {} returned {} bytes, fin? {}: {}", s, len, fin,
+                                    escape_string(&data_string));
+                                println!("-- {:?}", DebugHexDump(&read_buf[0..len]));
+                                if fin {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                if e == quiche::Error::Done {
+                                    break;
+                                }
+                                println!("stream_recv() error: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         conn_send_loop(&state, &sender_tx).await?;
 
 
@@ -246,11 +285,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let sock = UdpSocket::bind("0.0.0.0:0").await?;
     println!("Bound socket");
-    sock.connect("quic.tech:4433").await?;
+    sock.connect("quic.tech:8443").await?;
     println!("Connected socket");
 
 
-    let conn: Pin<Box<quiche::Connection>> = quiche::connect(Some("quic.tech:4433"), &scid, &mut config)?;
+    let conn: Pin<Box<quiche::Connection>> = quiche::connect(Some("quic.tech:8443"), &scid, &mut config)?;
     println!("Created connection");
 
     let mut state = Arc::new(State {
