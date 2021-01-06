@@ -14,4 +14,4 @@ rand = "0.8.0"
 openssl-sys = "0.9.54"
 openssl = "0.10.28"
 quiche = "0.6.0"
-ring = "0.16"
+ring = { version = "0.16", features = ["alloc", "dev_urandom_fallback", "std"] }
