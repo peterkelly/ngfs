@@ -5,8 +5,11 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use openssl::x509::{X509Builder, X509, X509NameRef, X509NameEntryRef};
+use openssl::x509::{X509Builder, X509, X509NameRef, X509NameEntryRef, X509NameBuilder, X509Extension};
 use openssl::asn1::{Asn1Time, Asn1TimeRef};
+use openssl::rsa::Rsa;
+use openssl::pkey::PKey;
+use openssl::hash::MessageDigest;
 // use ring::{
 //     rand,
 //     signature::{self, KeyPair},
@@ -14,7 +17,7 @@ use openssl::asn1::{Asn1Time, Asn1TimeRef};
 use ring::rand;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use torrent::result::GeneralError;
-use torrent::util::{BinaryData, from_hex};
+use torrent::util::{BinaryData, from_hex, DebugHexDump};
 
 use std::error::Error;
 
@@ -63,49 +66,163 @@ fn test_load_key_pair() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn colon_hex_str(data: &[u8]) -> String {
+    let mut res = String::new();
+    for (i, b) in data.iter().enumerate() {
+        res.push_str(&format!("{:02x}", b));
+        if i + 1 < data.len() {
+            res.push(':');
+        }
+    }
+    res
+}
+
+fn show_certificate(filename: &str) -> Result<(), Box<dyn Error>> {
     // let der_filename = std::env::args().nth(1).ok_or_else(|| "No filename specified")?;
-    // let der_data = std::fs::read(der_filename)?;
-    // let certificate = X509::from_der(&der_data)?;
+    let der_data = std::fs::read(filename)?;
+    let certificate = X509::from_der(&der_data)?;
 
-    // // println!("subject_name = {:?}", certificate.subject_name());
-    // // println!("Got certificate");
+    // println!("subject_name = {:?}", certificate.subject_name());
+    // println!("Got certificate");
 
-    // println!("subject_name");
-    // for entry in certificate.subject_name().entries() {
-    //     println!("    {}", name_entry_ref_to_string(entry)?);
-    // }
+    println!("subject_name");
+    for entry in certificate.subject_name().entries() {
+        println!("    {}", name_entry_ref_to_string(entry)?);
+    }
 
-    // if let Some(subject_alt_names) = certificate.subject_alt_names() {
-    //     println!("    alt_name");
-    //     for alt_name in subject_alt_names.iter() {
-    //         println!("        email {:?}", alt_name.email());
-    //         println!("        dnsname {:?}", alt_name.dnsname());
-    //         println!("        uri {:?}", alt_name.uri());
-    //         println!("        ipaddress {:?}", alt_name.ipaddress());
-    //     }
-    // }
-
-
-    // println!("issuer_name");
-    // for entry in certificate.issuer_name().entries() {
-    //     println!("    {}", name_entry_ref_to_string(entry)?);
-    // }
+    if let Some(subject_alt_names) = certificate.subject_alt_names() {
+        println!("    alt_name");
+        for alt_name in subject_alt_names.iter() {
+            println!("        email {:?}", alt_name.email());
+            println!("        dnsname {:?}", alt_name.dnsname());
+            println!("        uri {:?}", alt_name.uri());
+            println!("        ipaddress {:?}", alt_name.ipaddress());
+        }
+    }
 
 
+    println!("issuer_name");
+    for entry in certificate.issuer_name().entries() {
+        println!("    {}", name_entry_ref_to_string(entry)?);
+    }
 
-    test_generate_key_pair()?;
-    test_load_key_pair()?;
+    println!("version = {}", certificate.version());
+    // println!("serial = {}", certificate.serial_number().to_bn()?.to_hex_str()?);
+    println!("serial = {}", colon_hex_str(&certificate.serial_number().to_bn()?.to_vec()));
+    println!("signature_algorithm = {:?}", certificate.signature_algorithm().object().nid());
 
-    // let mut builder = X509Builder::new()?;
-    // builder.set_not_before(&Asn1Time::days_from_now(0)?.as_ref())?;
-    // builder.set_not_after(&Asn1Time::days_from_now(365)?.as_ref())?;
-    // let certificate: X509 = builder.build();
+    let public_key = certificate.public_key()?;
 
-    // let der_data = certificate.to_der()?;
-    // let pem_data = certificate.to_pem()?;
-    // std::fs::write("cert.der", der_data)?;
-    // std::fs::write("cert.pem", pem_data)?;
-    // println!("Done");
+    match public_key.id() {
+        openssl::pkey::Id::RSA => {
+            println!("Public key: RSA");
+            let rsa = public_key.rsa()?;
+
+            let rsa_der_bytes = rsa.public_key_to_der()?;
+            println!("    size = {}", rsa.size());
+            // println!("{:?}", DebugHexDump(&rsa_der_bytes));
+            println!("{:?}", colon_hex_str(&rsa.n().to_vec()));
+            println!("Got rsa key");
+        }
+        openssl::pkey::Id::HMAC => {
+            println!("Public key: HMAC");
+        }
+        openssl::pkey::Id::DSA => {
+            println!("Public key: DSA");
+        }
+        openssl::pkey::Id::DH => {
+            println!("Public key: DH");
+        }
+        openssl::pkey::Id::EC => {
+            println!("Public key: EC");
+        }
+        _ => {
+            println!("Public key: Unknown type");
+        }
+    }
+
+
+    // println!("RSA = {:?}", openssl::pkey::Id::RSA);
+    // println!("HMAC = {:?}", openssl::pkey::Id::HMAC);
+    // println!("DSA = {:?}", openssl::pkey::Id::DSA);
+    // println!("DH = {:?}", openssl::pkey::Id::DH);
+    // println!("EC = {:?}", openssl::pkey::Id::EC);
+
     Ok(())
+}
+
+fn generate_certificate() -> Result<(), Box<dyn Error>> {
+    let rng = rand::SystemRandom::new();
+    let seed: [u8; 32] = rand::generate(&rng)?.expose();
+    let key_pair = Ed25519KeyPair::from_seed_unchecked(&seed)?;
+    println!("Generated key pair");
+    println!("seed = {}", BinaryData(&seed));
+    let public_key_bytes_ref = key_pair.public_key().as_ref();
+    if public_key_bytes_ref.len() != 32 {
+        return Err(GeneralError::new(format!("Public key has invalid encoding")));
+    }
+    let mut public_key: [u8; 32] = [0; 32];
+    public_key.copy_from_slice(public_key_bytes_ref);
+    println!("public key = {}", BinaryData(&public_key));
+
+
+    let rsa = Rsa::generate(2048)?;
+    let pkey = PKey::from_rsa(rsa)?;
+
+    let mut issuer_name_builder = X509NameBuilder::new()?;
+    issuer_name_builder.append_entry_by_text("C", "UK")?;
+
+    let mut subject_name_builder = X509NameBuilder::new()?;
+    subject_name_builder.append_entry_by_text("C", "US")?;
+    subject_name_builder.append_entry_by_text("ST", "California")?;
+    subject_name_builder.append_entry_by_text("L", "Los Angeles")?;
+    subject_name_builder.append_entry_by_text("CN", "mydomain")?;
+
+    let libp2p_oid = "1.3.6.1.4.1.53594.1.1";
+    let libp2p_value = "the value";
+    let ext = X509Extension::new(None, None, &libp2p_oid, &libp2p_value)?;
+
+
+    let mut builder = X509Builder::new()?;
+    builder.set_not_before(&Asn1Time::days_from_now(0)?.as_ref())?;
+    builder.set_not_after(&Asn1Time::days_from_now(365)?.as_ref())?;
+    builder.set_pubkey(&pkey)?;
+    builder.set_subject_name(&subject_name_builder.build())?;
+    builder.set_issuer_name(&issuer_name_builder.build())?;
+    builder.append_extension(ext)?;
+    builder.sign(&pkey, MessageDigest::sha256())?;
+    let certificate: X509 = builder.build();
+
+    let der_data = certificate.to_der()?;
+    let pem_data = certificate.to_pem()?;
+    std::fs::write("cert.der", der_data)?;
+    std::fs::write("cert.pem", pem_data)?;
+    println!("Done");
+
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let command = std::env::args().nth(1).ok_or_else(|| "No command specified")?;
+    match command.as_str() {
+        "show" => {
+            let filename = std::env::args().nth(2).ok_or_else(|| "No filename specified")?;
+            show_certificate(&filename)?;
+        }
+        "generate" => {
+            generate_certificate()?;
+        }
+        _ => {
+            eprintln!("Unknown command: {}", command);
+            std::process::exit(1);
+        }
+    };
+
+    Ok(())
+
+
+
+    // test_generate_key_pair()?;
+    // test_load_key_pair()?;
+
 }

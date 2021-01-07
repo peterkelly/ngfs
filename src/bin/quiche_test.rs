@@ -21,7 +21,8 @@ use quiche;
 
 use torrent::util::{escape_string, DebugHexDump};
 
-const MAX_DATAGRAM_SIZE: usize = 1350;
+// const MAX_DATAGRAM_SIZE: usize = 1350;
+const MAX_DATAGRAM_SIZE: usize = 65536;
 
 #[derive(Debug)]
 enum SenderMessage {
@@ -112,8 +113,10 @@ async fn conn_send_loop(state: &Arc<State>, sender_tx: &UnboundedSender<SenderMe
 
 async fn recv_one(state: &Arc<State>) -> Result<(), Box<dyn Error>> {
     let mut buf: [u8; MAX_DATAGRAM_SIZE] = [0; MAX_DATAGRAM_SIZE];
+    println!("Before recv_from()");
     let (len, addr) = state.sock.recv_from(&mut buf).await?;
     println!("Receiver: Got {} bytes from {}", len, addr);
+    println!("{:#?}", DebugHexDump(&buf[0..len]));
 
     {
         let mut conn = state.conn.lock().unwrap();
@@ -258,7 +261,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     config.verify_peer(false);
 
     config
-        .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
+        // .set_application_protos(b"\x05hq-29\x05hq-28\x05hq-27\x08http/0.9")
+        .set_application_protos(b"\x05hq-32")
+        // .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
         .unwrap();
 
     config.set_max_idle_timeout(5000);
@@ -271,6 +276,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     config.set_initial_max_streams_bidi(100);
     config.set_initial_max_streams_uni(100);
     config.set_disable_active_migration(true);
+    config.load_cert_chain_from_pem_file("test.crt")?;
+    config.load_priv_key_from_pem_file("test.key")?;
 
 
 
@@ -285,11 +292,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let sock = UdpSocket::bind("0.0.0.0:0").await?;
     println!("Bound socket");
-    sock.connect("quic.tech:8443").await?;
+
+    // let server_addr = "quic.tech:8443";
+    let server_addr = "127.0.0.1:4001";
+
+
+    sock.connect(server_addr).await?;
     println!("Connected socket");
 
 
-    let conn: Pin<Box<quiche::Connection>> = quiche::connect(Some("quic.tech:8443"), &scid, &mut config)?;
+    let conn: Pin<Box<quiche::Connection>> = quiche::connect(Some(server_addr), &scid, &mut config)?;
     println!("Created connection");
 
     let mut state = Arc::new(State {
@@ -311,7 +323,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let send_handle = tokio::spawn(send_task(send_state, sender_rx, receiver_tx));
     let recv_handle = tokio::spawn(recv_task(recv_state, sender_tx.clone(), receiver_rx));
 
-    sender_tx.send(SenderMessage::Data(Vec::from("Hello\n".as_bytes())))?;
+    // sender_tx.send(SenderMessage::Data(Vec::from("Hello\n".as_bytes())))?;
 
     let (r1, r2) = join(send_handle, recv_handle).await;
     r1?;
