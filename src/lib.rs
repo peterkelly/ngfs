@@ -8,6 +8,8 @@ pub mod multibase;
 pub mod cid;
 pub mod p2p;
 pub mod hmac;
+pub mod binary;
+pub mod tls;
 
 #[cfg(test)]
 mod tests {
