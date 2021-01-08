@@ -57,6 +57,14 @@ impl<'a> BinaryReader<'a> {
         }
     }
 
+    pub fn remaining(&self) -> usize {
+        self.buf.len().saturating_sub(self.offset)
+    }
+
+    pub fn remaining_data(&self) -> &[u8] {
+        &self.buf[self.offset..]
+    }
+
     fn check_available(&self, size: usize) -> Result<usize, BinaryReadError> {
         match self.offset.checked_add(size) {
             Some(next) if next <= self.buf.len() => Ok(next),

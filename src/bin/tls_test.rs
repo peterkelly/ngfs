@@ -81,15 +81,25 @@ async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Re
     let mut data_full: [u8; 65536] = [0; 65536];
     let mut data = &mut data_full[0..length];
     socket.read_exact(data).await?;
+    // let data = data;
     println!("Data:");
     println!("{:#?}", DebugHexDump(data));
 
     let plaintext = TLSPlaintext {
         content_type: content_type,
         legacy_record_version: protocol_version,
-        fragment: Vec::from(data),
+        fragment: data.to_vec(),
     };
     println!("Created TLSPlaintext struct");
+
+    let mut full: Vec<u8> = Vec::new();
+    full.append(&mut record_header.to_vec());
+    full.append(&mut data.to_vec());
+
+    std::fs::write("handshake.bin", &full)?;
+
+    let mut reader = BinaryReader::new(&plaintext.fragment);
+    let handshake = Handshake::from_binary(&mut reader)?;
 
 
 
