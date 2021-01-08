@@ -16,6 +16,7 @@ pub trait FromBinary {
 pub enum BinaryReadError {
     UnexpectedEOF { offset: usize, expected: usize },
     SizeOverflow { offset: usize, requested: usize },
+    ExpectedEOF { offset: usize, remaining: usize },
 }
 
 impl fmt::Display for BinaryReadError {
@@ -26,6 +27,9 @@ impl fmt::Display for BinaryReadError {
             }
             BinaryReadError::SizeOverflow { offset, requested } => {
                 write!(f, "Arithmetic overflow at offset {}; requested {} bytes", offset, requested)
+            }
+            BinaryReadError::ExpectedEOF { offset, remaining } => {
+                write!(f, "Unexpected additional {} bytes at offset {}", remaining, offset)
             }
         }
     }
@@ -61,6 +65,10 @@ impl<'a> BinaryReader<'a> {
             buf: buf,
             offset: offset,
         }
+    }
+
+    pub fn abs_offset(&self) -> usize {
+        self.offset
     }
 
     pub fn remaining(&self) -> usize {

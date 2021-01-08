@@ -7,7 +7,7 @@
 
 use std::error::Error;
 use std::fmt;
-use super::super::binary::BinaryReader;
+use super::super::binary::{BinaryReader, FromBinary};
 use super::super::result::GeneralError;
 use super::super::util::{DebugHexDump, BinaryData, escape_string};
 
@@ -101,21 +101,23 @@ pub enum Handshake {
     Unknown(u8, Vec<u8>),
 }
 
-impl Handshake {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for Handshake {
+    type Output = Self;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         let handshake_type = reader.read_u8()?;
         let length = reader.read_u24()? as usize;
         match handshake_type {
-            1 => Ok(Handshake::ClientHello(ClientHello::from_binary(reader)?)),
-            2 => Ok(Handshake::ServerHello(ServerHello::from_binary(reader)?)),
-            5 => Ok(Handshake::EndOfEarlyData(EndOfEarlyData::from_binary(reader)?)),
-            8 => Ok(Handshake::EncryptedExtensions(EncryptedExtensions::from_binary(reader)?)),
-            13 => Ok(Handshake::CertificateRequest(CertificateRequest::from_binary(reader)?)),
-            11 => Ok(Handshake::Certificate(Certificate::from_binary(reader)?)),
-            15 => Ok(Handshake::CertificateVerify(CertificateVerify::from_binary(reader)?)),
-            20 => Ok(Handshake::Finished(Finished::from_binary(reader)?)),
-            4 => Ok(Handshake::NewSessionTicket(NewSessionTicket::from_binary(reader)?)),
-            24 => Ok(Handshake::KeyUpdate(KeyUpdate::from_binary(reader)?)),
+            1 => Ok(Handshake::ClientHello(reader.read_item()?)),
+            2 => Ok(Handshake::ServerHello(reader.read_item()?)),
+            5 => Ok(Handshake::EndOfEarlyData(reader.read_item()?)),
+            8 => Ok(Handshake::EncryptedExtensions(reader.read_item()?)),
+            13 => Ok(Handshake::CertificateRequest(reader.read_item()?)),
+            11 => Ok(Handshake::Certificate(reader.read_item()?)),
+            15 => Ok(Handshake::CertificateVerify(reader.read_item()?)),
+            20 => Ok(Handshake::Finished(reader.read_item()?)),
+            4 => Ok(Handshake::NewSessionTicket(reader.read_item()?)),
+            24 => Ok(Handshake::KeyUpdate(reader.read_item()?)),
             _ => Ok(Handshake::Unknown(handshake_type, Vec::from(reader.read_fixed(length)?))),
         }
     }
@@ -126,14 +128,24 @@ pub struct ProtocolName {
     pub data: Vec<u8>,
 }
 
+impl FromBinary for ProtocolName {
+    type Output = ProtocolName;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let name_len = reader.read_u8()? as usize;
+        let name_data = reader.read_fixed(name_len)?;
+        Ok(ProtocolName { data: name_data.to_vec() })
+    }
+}
+
 #[derive(Debug)]
 pub enum Extension {
     ApplicationLayerProtocolNegotiation(Vec<ProtocolName>),
     Unknown(u16, Vec<u8>),
 }
 
-impl Extension {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for Extension {
+    type Output = Extension;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         let extension_type = reader.read_u16()?;
         let extension_len = reader.read_u16()? as usize;
         let mut nested_reader = reader.read_nested(extension_len)?;
@@ -144,6 +156,7 @@ impl Extension {
                 let mut list_reader = nested_reader.read_nested(list_len)?;
                 let mut names: Vec<ProtocolName> = Vec::new();
                 while list_reader.remaining() > 0 {
+                    // names.push(list_reader.read_item())?
                     let name_len = list_reader.read_u8()? as usize;
                     let name_data = list_reader.read_fixed(name_len)?;
                     names.push(ProtocolName { data: name_data.to_vec() });
@@ -192,8 +205,9 @@ pub struct ClientHello {
     pub extensions: Vec<Extension>,
 }
 
-impl ClientHello {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for ClientHello {
+    type Output = ClientHello;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         let legacy_version = reader.read_u16()?;
         let random = Vec::from(reader.read_fixed(32)?);
 
@@ -215,12 +229,14 @@ impl ClientHello {
             legacy_compression_methods.push(legacy_compression_methods_reader.read_u8()?);
         }
 
+        println!("Before reading extension list; offset = {}", reader.abs_offset());
         let extensions_len = reader.read_u16()? as usize;
         let mut extensions_reader = reader.read_nested(extensions_len)?;
         let mut extensions: Vec<Extension> = Vec::new();
 
         while extensions_reader.remaining() > 0 {
-            extensions.push(Extension::from_binary(&mut extensions_reader)?);
+            println!("Before extension; offset = {}", extensions_reader.abs_offset());
+            extensions.push(extensions_reader.read_item()?);
         }
 
 
@@ -241,7 +257,9 @@ impl ClientHello {
 
         // Err(GeneralError::new("ClientHello::from_binary(): Not implemented"))
     }
+}
 
+impl ClientHello {
     pub fn dump(&self, indent: &str) {
         println!("legacy_version = {:04x}", self.legacy_version);
         println!("random = {}", BinaryData(&self.random));
@@ -267,8 +285,10 @@ impl ClientHello {
 pub struct ServerHello {
 }
 
-impl ServerHello {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for ServerHello {
+    type Output = ServerHello;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("ServerHello::from_binary(): Not implemented"))
     }
 }
@@ -276,8 +296,10 @@ impl ServerHello {
 pub struct EndOfEarlyData {
 }
 
-impl EndOfEarlyData {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for EndOfEarlyData {
+    type Output = EndOfEarlyData;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("EndOfEarlyData::from_binary(): Not implemented"))
     }
 }
@@ -285,8 +307,10 @@ impl EndOfEarlyData {
 pub struct EncryptedExtensions {
 }
 
-impl EncryptedExtensions {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for EncryptedExtensions {
+    type Output = EncryptedExtensions;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("EncryptedExtensions::from_binary(): Not implemented"))
     }
 }
@@ -294,8 +318,10 @@ impl EncryptedExtensions {
 pub struct CertificateRequest {
 }
 
-impl CertificateRequest {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for CertificateRequest {
+    type Output = CertificateRequest;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("CertificateRequest::from_binary(): Not implemented"))
     }
 }
@@ -303,8 +329,10 @@ impl CertificateRequest {
 pub struct Certificate {
 }
 
-impl Certificate {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for Certificate {
+    type Output = Certificate;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("Certificate::from_binary(): Not implemented"))
     }
 }
@@ -312,8 +340,10 @@ impl Certificate {
 pub struct CertificateVerify {
 }
 
-impl CertificateVerify {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for CertificateVerify {
+    type Output = CertificateVerify;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("CertificateVerify::from_binary(): Not implemented"))
     }
 }
@@ -321,8 +351,10 @@ impl CertificateVerify {
 pub struct Finished {
 }
 
-impl Finished {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for Finished {
+    type Output = Finished;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("Finished::from_binary(): Not implemented"))
     }
 }
@@ -330,8 +362,10 @@ impl Finished {
 pub struct NewSessionTicket {
 }
 
-impl NewSessionTicket {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for NewSessionTicket {
+    type Output = NewSessionTicket;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(GeneralError::new("NewSessionTicket::from_binary(): Not implemented"))
     }
 }
@@ -339,8 +373,10 @@ impl NewSessionTicket {
 pub struct KeyUpdate {
 }
 
-impl KeyUpdate {
-    pub fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+impl FromBinary for KeyUpdate {
+    type Output = KeyUpdate;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         unimplemented!()
     }
 }

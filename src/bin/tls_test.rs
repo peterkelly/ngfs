@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use torrent::util::{escape_string, BinaryData, DebugHexDump};
-use torrent::binary::BinaryReader;
+use torrent::binary::{BinaryReader, FromBinary};
 use torrent::tls::types::*;
 
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
@@ -98,8 +98,9 @@ async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Re
 
     std::fs::write("handshake.bin", &full)?;
 
+    println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
     let mut reader = BinaryReader::new(&plaintext.fragment);
-    let handshake = Handshake::from_binary(&mut reader)?;
+    let handshake = reader.read_item::<Handshake>()?;
 
 
 
