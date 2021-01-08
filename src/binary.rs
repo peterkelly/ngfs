@@ -17,6 +17,7 @@ pub enum BinaryReadError {
     UnexpectedEOF { offset: usize, expected: usize },
     SizeOverflow { offset: usize, requested: usize },
     ExpectedEOF { offset: usize, remaining: usize },
+    NothingConsumed { offset: usize },
 }
 
 impl fmt::Display for BinaryReadError {
@@ -30,6 +31,9 @@ impl fmt::Display for BinaryReadError {
             }
             BinaryReadError::ExpectedEOF { offset, remaining } => {
                 write!(f, "Unexpected additional {} bytes at offset {}", remaining, offset)
+            }
+            BinaryReadError::NothingConsumed { offset } => {
+                write!(f, "Reader consumed no data at offset {}", offset)
             }
         }
     }
@@ -161,7 +165,12 @@ impl<'a> BinaryReader<'a> {
         let mut inner = self.read_nested(len)?;
         let mut res: Vec<T> = Vec::new();
         while inner.remaining() > 0 {
+            let old_offset = inner.offset;
             res.push(T::from_binary(&mut inner)?);
+            let new_offset = inner.offset;
+            if old_offset == new_offset {
+                return Err(BinaryReadError::NothingConsumed { offset: old_offset }.into())
+            }
         }
         Ok(res)
     }

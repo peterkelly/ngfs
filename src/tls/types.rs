@@ -34,59 +34,6 @@ impl ContentType {
     }
 }
 
-pub enum HandshakeType {
-    HelloRequestReserved,
-    ClientHello,
-    ServerHello,
-    HelloVerifyRequestReserved,
-    NewSessionTicket,
-    EndOfEarlyData,
-    HelloRetryRequestReserved,
-    EncryptedExtensions,
-    Certificate,
-    ServerKeyExchangeReserved,
-    CertificateRequest,
-    ServerHelloDoneReserved,
-    CertificateVerify,
-    ClientKeyExchangeReserved,
-    Finished,
-    CertificateUrlReserved,
-    CertificateStatusReserved,
-    SupplementalDataReserved,
-    KeyUpdate,
-    MessageHash,
-    Unknown(u8),
-}
-
-impl HandshakeType {
-    pub fn from_raw(byte: u8) -> HandshakeType {
-        match byte {
-            0 => HandshakeType::HelloRequestReserved,
-            1 => HandshakeType::ClientHello,
-            2 => HandshakeType::ServerHello,
-            3 => HandshakeType::HelloVerifyRequestReserved,
-            4 => HandshakeType::NewSessionTicket,
-            5 => HandshakeType::EndOfEarlyData,
-            6 => HandshakeType::HelloRetryRequestReserved,
-            8 => HandshakeType::EncryptedExtensions,
-            11 => HandshakeType::Certificate,
-            12 => HandshakeType::ServerKeyExchangeReserved,
-            13 => HandshakeType::CertificateRequest,
-            14 => HandshakeType::ServerHelloDoneReserved,
-            15 => HandshakeType::CertificateVerify,
-            16 => HandshakeType::ClientKeyExchangeReserved,
-            20 => HandshakeType::Finished,
-            21 => HandshakeType::CertificateUrlReserved,
-            22 => HandshakeType::CertificateStatusReserved,
-            23 => HandshakeType::SupplementalDataReserved,
-            24 => HandshakeType::KeyUpdate,
-            254 => HandshakeType::MessageHash,
-            _ => HandshakeType::Unknown(byte),
-        }
-    }
-}
-
-
 pub enum Handshake {
     ClientHello(ClientHello),
     ServerHello(ServerHello),
@@ -123,7 +70,15 @@ impl FromBinary for Handshake {
     }
 }
 
-#[derive(Debug)]
+impl Handshake {
+    pub fn print(&self, indent: &str) {
+        match self {
+            Handshake::ClientHello(inner) => inner.print(indent),
+            _ => unimplemented!()
+        }
+    }
+}
+
 pub struct ProtocolName {
     pub data: Vec<u8>,
 }
@@ -137,9 +92,257 @@ impl FromBinary for ProtocolName {
     }
 }
 
-#[derive(Debug)]
+pub enum SignatureScheme {
+    RsaPkcs1Sha256,
+    RsaPkcs1Sha384,
+    RsaPkcs1Sha512,
+    EcdsaSecp256r1Sha256,
+    EcdsaSecp384r1Sha384,
+    EcdsaSecp521r1Sha512,
+    RsaPssRsaeSha256,
+    RsaPssRsaeSha384,
+    RsaPssRsaeSha512,
+    Ed25519,
+    Ed448,
+    RsaPssPssSha256,
+    RsaPssPssSha384,
+    RsaPssPssSha512,
+    RsaPkcs1Sha1,
+    EcdsaSha1,
+    Unknown(u16),
+}
+
+impl SignatureScheme {
+    pub fn from_raw(code: u16) -> SignatureScheme {
+        match code {
+            0x0401 => SignatureScheme::RsaPkcs1Sha256,
+            0x0501 => SignatureScheme::RsaPkcs1Sha384,
+            0x0601 => SignatureScheme::RsaPkcs1Sha512,
+
+            0x0403 => SignatureScheme::EcdsaSecp256r1Sha256,
+            0x0503 => SignatureScheme::EcdsaSecp384r1Sha384,
+            0x0603 => SignatureScheme::EcdsaSecp521r1Sha512,
+
+            0x0804 => SignatureScheme::RsaPssRsaeSha256,
+            0x0805 => SignatureScheme::RsaPssRsaeSha384,
+            0x0806 => SignatureScheme::RsaPssRsaeSha512,
+
+            0x0807 => SignatureScheme::Ed25519,
+            0x0808 => SignatureScheme::Ed448,
+
+            0x0809 => SignatureScheme::RsaPssPssSha256,
+            0x080a => SignatureScheme::RsaPssPssSha384,
+            0x080b => SignatureScheme::RsaPssPssSha512,
+
+            0x0201 => SignatureScheme::RsaPkcs1Sha1,
+            0x0203 => SignatureScheme::EcdsaSha1,
+            _ => SignatureScheme::Unknown(code),
+        }
+    }
+}
+
+impl fmt::Display for SignatureScheme {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SignatureScheme::RsaPkcs1Sha256 => write!(f, "RsaPkcs1Sha256"),
+            SignatureScheme::RsaPkcs1Sha384 => write!(f, "RsaPkcs1Sha384"),
+            SignatureScheme::RsaPkcs1Sha512 => write!(f, "RsaPkcs1Sha512"),
+            SignatureScheme::EcdsaSecp256r1Sha256 => write!(f, "EcdsaSecp256r1Sha256"),
+            SignatureScheme::EcdsaSecp384r1Sha384 => write!(f, "EcdsaSecp384r1Sha384"),
+            SignatureScheme::EcdsaSecp521r1Sha512 => write!(f, "EcdsaSecp521r1Sha512"),
+            SignatureScheme::RsaPssRsaeSha256 => write!(f, "RsaPssRsaeSha256"),
+            SignatureScheme::RsaPssRsaeSha384 => write!(f, "RsaPssRsaeSha384"),
+            SignatureScheme::RsaPssRsaeSha512 => write!(f, "RsaPssRsaeSha512"),
+            SignatureScheme::Ed25519 => write!(f, "Ed25519"),
+            SignatureScheme::Ed448 => write!(f, "Ed448"),
+            SignatureScheme::RsaPssPssSha256 => write!(f, "RsaPssPssSha256"),
+            SignatureScheme::RsaPssPssSha384 => write!(f, "RsaPssPssSha384"),
+            SignatureScheme::RsaPssPssSha512 => write!(f, "RsaPssPssSha512"),
+            SignatureScheme::RsaPkcs1Sha1 => write!(f, "RsaPkcs1Sha1"),
+            SignatureScheme::EcdsaSha1 => write!(f, "EcdsaSha1"),
+            SignatureScheme::Unknown(code) => write!(f, "{:04x}", code),
+        }
+    }
+}
+
+impl FromBinary for SignatureScheme {
+    type Output = SignatureScheme;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        Ok(SignatureScheme::from_raw(reader.read_u16()?))
+    }
+}
+
+pub enum ServerName {
+    HostName(String),
+    Other(u8, Vec<u8>),
+}
+
+impl FromBinary for ServerName {
+    type Output = ServerName;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let name_type = reader.read_u8()?;
+        let name_len = reader.read_u16()? as usize;
+        let mut name_reader = reader.read_nested(name_len)?;
+        match name_type {
+            0 => {
+                let data = name_reader.read_fixed(name_len)?;
+                let s = String::from_utf8(data.to_vec())?;
+                Ok(ServerName::HostName(s))
+            }
+            _ => {
+                let data = name_reader.read_fixed(name_len)?;
+                Ok(ServerName::Other(name_type, data.to_vec()))
+            }
+        }
+    }
+}
+
+pub enum NamedCurve {
+    Sect163k1, // (1) - defined in rfc4492, deprecated by rfc8422
+    Sect163r1, // (2) - defined in rfc4492, deprecated by rfc8422
+    Sect163r2, // (3) - defined in rfc4492, deprecated by rfc8422
+    Sect193r1, // (4) - defined in rfc4492, deprecated by rfc8422
+    Sect193r2, // (5) - defined in rfc4492, deprecated by rfc8422
+    Sect233k1, // (6) - defined in rfc4492, deprecated by rfc8422
+    Sect233r1, // (7) - defined in rfc4492, deprecated by rfc8422
+    Sect239k1, // (8) - defined in rfc4492, deprecated by rfc8422
+    Sect283k1, // (9) - defined in rfc4492, deprecated by rfc8422
+    Sect283r1, // (10) - defined in rfc4492, deprecated by rfc8422
+    Sect409k1, // (11) - defined in rfc4492, deprecated by rfc8422
+    Sect409r1, // (12) - defined in rfc4492, deprecated by rfc8422
+    Sect571k1, // (13) - defined in rfc4492, deprecated by rfc8422
+    Sect571r1, // (14) - defined in rfc4492, deprecated by rfc8422
+    Secp160k1, // (15) - defined in rfc4492, deprecated by rfc8422
+    Secp160r1, // (16) - defined in rfc4492, deprecated by rfc8422
+    Secp160r2, // (17) - defined in rfc4492, deprecated by rfc8422
+    Secp192k1, // (18) - defined in rfc4492, deprecated by rfc8422
+    Secp192r1, // (19) - defined in rfc4492, deprecated by rfc8422
+    Secp224k1, // (20) - defined in rfc4492, deprecated by rfc8422
+    Secp224r1, // (21) - defined in rfc4492, deprecated by rfc8422
+    Secp256k1, // (22) - defined in rfc4492, deprecated by rfc8422
+    Secp256r1, // (23)
+    Secp384r1, // (24)
+    Secp521r1, // (25)
+    X25519, // (29),
+    X448, // (30),
+    ArbitraryExplicitPrimeCurves, // (0xFF01) - defined in rfc4492, deprecated by rfc8422
+    ArbitraryExplicitChar2Curves, // (0xFF02) - defined in rfc4492, deprecated by rfc8422
+    Other(u16),
+}
+
+impl FromBinary for NamedCurve {
+    type Output = NamedCurve;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let code = reader.read_u16()?;
+        match code {
+            1 => Ok(NamedCurve::Sect163k1),
+            2 => Ok(NamedCurve::Sect163r1),
+            3 => Ok(NamedCurve::Sect163r2),
+            4 => Ok(NamedCurve::Sect193r1),
+            5 => Ok(NamedCurve::Sect193r2),
+            6 => Ok(NamedCurve::Sect233k1),
+            7 => Ok(NamedCurve::Sect233r1),
+            8 => Ok(NamedCurve::Sect239k1),
+            9 => Ok(NamedCurve::Sect283k1),
+            10 => Ok(NamedCurve::Sect283r1),
+            11 => Ok(NamedCurve::Sect409k1),
+            12 => Ok(NamedCurve::Sect409r1),
+            13 => Ok(NamedCurve::Sect571k1),
+            14 => Ok(NamedCurve::Sect571r1),
+            15 => Ok(NamedCurve::Secp160k1),
+            16 => Ok(NamedCurve::Secp160r1),
+            17 => Ok(NamedCurve::Secp160r2),
+            18 => Ok(NamedCurve::Secp192k1),
+            19 => Ok(NamedCurve::Secp192r1),
+            20 => Ok(NamedCurve::Secp224k1),
+            21 => Ok(NamedCurve::Secp224r1),
+            22 => Ok(NamedCurve::Secp256k1),
+            23 => Ok(NamedCurve::Secp256r1),
+            24 => Ok(NamedCurve::Secp384r1),
+            25 => Ok(NamedCurve::Secp521r1),
+            29 => Ok(NamedCurve::X25519),
+            30 => Ok(NamedCurve::X448),
+            0xFF01 => Ok(NamedCurve::ArbitraryExplicitPrimeCurves),
+            0xFF02 => Ok(NamedCurve::ArbitraryExplicitChar2Curves),
+            _ => Ok(NamedCurve::Other(code))
+        }
+    }
+}
+
+impl fmt::Display for NamedCurve {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NamedCurve::Sect163k1 => write!(f, "Sect163k1 (deprecated)"),
+            NamedCurve::Sect163r1 => write!(f, "Sect163r1 (deprecated)"),
+            NamedCurve::Sect163r2 => write!(f, "Sect163r2 (deprecated)"),
+            NamedCurve::Sect193r1 => write!(f, "Sect193r1 (deprecated)"),
+            NamedCurve::Sect193r2 => write!(f, "Sect193r2 (deprecated)"),
+            NamedCurve::Sect233k1 => write!(f, "Sect233k1 (deprecated)"),
+            NamedCurve::Sect233r1 => write!(f, "Sect233r1 (deprecated)"),
+            NamedCurve::Sect239k1 => write!(f, "Sect239k1 (deprecated)"),
+            NamedCurve::Sect283k1 => write!(f, "Sect283k1 (deprecated)"),
+            NamedCurve::Sect283r1 => write!(f, "Sect283r1 (deprecated)"),
+            NamedCurve::Sect409k1 => write!(f, "Sect409k1 (deprecated)"),
+            NamedCurve::Sect409r1 => write!(f, "Sect409r1 (deprecated)"),
+            NamedCurve::Sect571k1 => write!(f, "Sect571k1 (deprecated)"),
+            NamedCurve::Sect571r1 => write!(f, "Sect571r1 (deprecated)"),
+            NamedCurve::Secp160k1 => write!(f, "Secp160k1 (deprecated)"),
+            NamedCurve::Secp160r1 => write!(f, "Secp160r1 (deprecated)"),
+            NamedCurve::Secp160r2 => write!(f, "Secp160r2 (deprecated)"),
+            NamedCurve::Secp192k1 => write!(f, "Secp192k1 (deprecated)"),
+            NamedCurve::Secp192r1 => write!(f, "Secp192r1 (deprecated)"),
+            NamedCurve::Secp224k1 => write!(f, "Secp224k1 (deprecated)"),
+            NamedCurve::Secp224r1 => write!(f, "Secp224r1 (deprecated)"),
+            NamedCurve::Secp256k1 => write!(f, "Secp256k1 (deprecated)"),
+            NamedCurve::Secp256r1 => write!(f, "Secp256r1"),
+            NamedCurve::Secp384r1 => write!(f, "Secp384r1"),
+            NamedCurve::Secp521r1 => write!(f, "Secp521r1"),
+            NamedCurve::X25519 => write!(f, "X25519"),
+            NamedCurve::X448 => write!(f, "X448"),
+            NamedCurve::ArbitraryExplicitPrimeCurves => write!(f, "ArbitraryExplicitPrimeCurves (deprecated)"),
+            NamedCurve::ArbitraryExplicitChar2Curves => write!(f, "ArbitraryExplicitChar2Curves (deprecated)"),
+            NamedCurve::Other(code) => write!(f, "{}", code),
+        }
+    }
+}
+
+pub enum ECPointFormat {
+    Uncompressed, // (0)
+    ANSIX962CompressedPrime, // (1), defined in rfc4492 but now deprecated
+    ANSIX962CompressedChar2, // (2), defined in rfc4492 but now deprecated
+    Other(u8),
+}
+
+impl FromBinary for ECPointFormat {
+    type Output = ECPointFormat;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let code = reader.read_u8()?;
+        match code {
+            0 => Ok(ECPointFormat::Uncompressed),
+            1 => Ok(ECPointFormat::ANSIX962CompressedPrime),
+            2 => Ok(ECPointFormat::ANSIX962CompressedChar2),
+            _ => Ok(ECPointFormat::Other(code)),
+        }
+    }
+}
+
+impl fmt::Display for ECPointFormat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ECPointFormat::Uncompressed => write!(f, "Uncompressed"),
+            ECPointFormat::ANSIX962CompressedPrime => write!(f, "ANSIX962CompressedPrime"),
+            ECPointFormat::ANSIX962CompressedChar2 => write!(f, "ANSIX962CompressedChar2"),
+            ECPointFormat::Other(code) => write!(f, "{}", code)
+        }
+    }
+}
+
 pub enum Extension {
     ApplicationLayerProtocolNegotiation(Vec<ProtocolName>),
+    SignatureAlgorithms(Vec<SignatureScheme>),
+    ServerName(Vec<ServerName>),
+    EllipticCurves(Vec<NamedCurve>),
+    ECPointFormats(Vec<ECPointFormat>),
     Unknown(u16, Vec<u8>),
 }
 
@@ -151,17 +354,28 @@ impl FromBinary for Extension {
         let mut nested_reader = reader.read_nested(extension_len)?;
 
         match extension_type {
+            0 => {
+                let server_name = nested_reader.read_len16_list::<ServerName>()?;
+                Ok(Extension::ServerName(server_name))
+            }
+            10 => {
+                let named_curve = nested_reader.read_len16_list::<NamedCurve>()?;
+                Ok(Extension::EllipticCurves(named_curve))
+
+                // Ok(Extension::EllipticCurves(Vec::new()))
+            }
+            11 => {
+                let ec_point_formats = nested_reader.read_len8_list::<ECPointFormat>()?;
+                Ok(Extension::ECPointFormats(ec_point_formats))
+                // Ok(Extension::ECPointFormats(Vec::new()))
+            }
             16 => {
-                let list_len = nested_reader.read_u16()? as usize;
-                let mut list_reader = nested_reader.read_nested(list_len)?;
-                let mut names: Vec<ProtocolName> = Vec::new();
-                while list_reader.remaining() > 0 {
-                    // names.push(list_reader.read_item())?
-                    let name_len = list_reader.read_u8()? as usize;
-                    let name_data = list_reader.read_fixed(name_len)?;
-                    names.push(ProtocolName { data: name_data.to_vec() });
-                }
+                let mut names = nested_reader.read_len16_list::<ProtocolName>()?;
                 Ok(Extension::ApplicationLayerProtocolNegotiation(names))
+            }
+            13 => {
+                let schemes = nested_reader.read_len16_list::<SignatureScheme>()?;
+                Ok(Extension::SignatureAlgorithms(schemes))
             }
             _ => {
                 Ok(Extension::Unknown(extension_type, nested_reader.remaining_data().to_vec()))
@@ -170,32 +384,58 @@ impl FromBinary for Extension {
     }
 }
 
-impl fmt::Display for Extension {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Extension::ApplicationLayerProtocolNegotiation(names) => {
-                write!(f, "protocols ({})", names.len())?;
-                for (i, name) in names.iter().enumerate() {
-                    if i == 0 {
-                        write!(f, " ")?;
-                    }
-                    else {
-                        write!(f, ", ")?;
-                    }
-                    let s: String = String::from_utf8_lossy(&name.data).into();
-                    write!(f, "{}", escape_string(&s))?;
+impl Extension {
+    pub fn print(&self, indent: &str) {
+        let child_indent = format!("{}    ", indent);
 
+        match self {
+            Extension::EllipticCurves(items) => {
+                println!("{}Elliptic curves:", indent);
+                for item in items.iter() {
+                    println!("{}    {}", indent, item);
                 }
-                Ok(())
+            }
+            Extension::ECPointFormats(items) => {
+                println!("{}Elliptic curve point formats:", indent);
+                for item in items.iter() {
+                    println!("{}    {}", indent, item);
+                }
+            }
+            Extension::ServerName(server_name_list) => {
+                println!("{}Server names:", indent);
+                for sn in server_name_list.iter() {
+                    match sn {
+                        ServerName::HostName(name) => {
+                            println!("{}    {}", indent, escape_string(&name));
+                        }
+                        ServerName::Other(name_type, data) => {
+                            println!("{}    <other {}>", indent, name_type);
+                        }
+                    }
+                }
+            }
+            Extension::ApplicationLayerProtocolNegotiation(names) => {
+                println!("{}Protocols:", indent);
+                for name in names.iter() {
+                    let s: String = String::from_utf8_lossy(&name.data).into();
+                    println!("{}    {}", indent, escape_string(&s));
+                }
+            }
+            Extension::SignatureAlgorithms(schemes) => {
+                println!("{}Signature algorithms:", indent);
+                // write!(f, "signature algorithms:")?;
+                for scheme in schemes.iter() {
+                    println!("{}    {}", indent, scheme);
+                }
             }
             Extension::Unknown(type_, data) => {
-                write!(f, "type {} = 0x{:04x} data {}", type_, type_, BinaryData(&data))
+                println!("{}type {} = 0x{:04x} data {}", indent, type_, type_, BinaryData(&data))
             }
         }
+
     }
 }
 
-#[derive(Debug)]
 pub struct ClientHello {
     pub legacy_version: u16,
     pub random: Vec<u8>,
@@ -229,15 +469,7 @@ impl FromBinary for ClientHello {
             legacy_compression_methods.push(legacy_compression_methods_reader.read_u8()?);
         }
 
-        println!("Before reading extension list; offset = {}", reader.abs_offset());
-        let extensions_len = reader.read_u16()? as usize;
-        let mut extensions_reader = reader.read_nested(extensions_len)?;
-        let mut extensions: Vec<Extension> = Vec::new();
-
-        while extensions_reader.remaining() > 0 {
-            println!("Before extension; offset = {}", extensions_reader.abs_offset());
-            extensions.push(extensions_reader.read_item()?);
-        }
+        let extensions = reader.read_len16_list::<Extension>()?;
 
 
         let res = ClientHello {
@@ -250,8 +482,8 @@ impl FromBinary for ClientHello {
         };
 
 
-        println!("ClientHello: {:?}", res);
-        res.dump("");
+        // println!("ClientHello: {:?}", res);
+        res.print("|");
 
         Ok(res)
 
@@ -260,24 +492,25 @@ impl FromBinary for ClientHello {
 }
 
 impl ClientHello {
-    pub fn dump(&self, indent: &str) {
-        println!("legacy_version = {:04x}", self.legacy_version);
-        println!("random = {}", BinaryData(&self.random));
-        println!("legacy_session_id = {}", BinaryData(&self.legacy_session_id));
-        print!("cipher_suites =");
+    pub fn print(&self, indent: &str) {
+        let child_indent = format!("{}    ", indent);
+        println!("{}legacy_version = {:04x}", indent, self.legacy_version);
+        println!("{}random = {}", indent, BinaryData(&self.random));
+        println!("{}legacy_session_id = {}", indent, BinaryData(&self.legacy_session_id));
+        print!("{}cipher_suites =", indent);
         for cs in self.cipher_suites.iter() {
             print!(" {:04x}", cs);
         }
         println!();
 
-        print!("legacy_compression_methods =");
+        print!("{}legacy_compression_methods =", indent);
         for cm in self.legacy_compression_methods.iter() {
             print!(" {:02x}", cm);
         }
         println!();
-        println!("Extensions:");
+        println!("{}Extensions:", indent);
         for ext in self.extensions.iter() {
-            println!("    {}", ext);
+            ext.print(&child_indent);
         }
     }
 }
