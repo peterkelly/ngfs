@@ -70,15 +70,6 @@ impl FromBinary for Handshake {
     }
 }
 
-impl Handshake {
-    pub fn print(&self, indent: &str) {
-        match self {
-            Handshake::ClientHello(inner) => inner.print(indent),
-            _ => unimplemented!()
-        }
-    }
-}
-
 pub struct ProtocolName {
     pub data: Vec<u8>,
 }
@@ -89,6 +80,13 @@ impl FromBinary for ProtocolName {
         let name_len = reader.read_u8()? as usize;
         let name_data = reader.read_fixed(name_len)?;
         Ok(ProtocolName { data: name_data.to_vec() })
+    }
+}
+
+impl fmt::Debug for ProtocolName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s: String = String::from_utf8_lossy(&self.data).into();
+        write!(f, "{}", escape_string(&s))
     }
 }
 
@@ -141,7 +139,7 @@ impl SignatureScheme {
     }
 }
 
-impl fmt::Display for SignatureScheme {
+impl fmt::Debug for SignatureScheme {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SignatureScheme::RsaPkcs1Sha256 => write!(f, "RsaPkcs1Sha256"),
@@ -197,6 +195,16 @@ impl FromBinary for ServerName {
     }
 }
 
+impl fmt::Debug for ServerName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ServerName::HostName(name) => write!(f, "{}", escape_string(&name)),
+            ServerName::Other(name_type, data) => write!(f, "<other {}>", name_type),
+        }
+    }
+}
+
+
 pub enum NamedGroup {
     // Unallocated_RESERVED, // (0x0000),
 
@@ -243,7 +251,7 @@ impl FromBinary for NamedGroup {
     }
 }
 
-impl fmt::Display for NamedGroup {
+impl fmt::Debug for NamedGroup {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             NamedGroup::Secp256r1 => write!(f, "Secp256r1"),
@@ -261,6 +269,7 @@ impl fmt::Display for NamedGroup {
     }
 }
 
+#[derive(Debug)]
 pub enum NamedCurve {
     Sect163k1, // (1) - defined in rfc4492, deprecated by rfc8422
     Sect163r1, // (2) - defined in rfc4492, deprecated by rfc8422
@@ -333,43 +342,7 @@ impl FromBinary for NamedCurve {
     }
 }
 
-impl fmt::Display for NamedCurve {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            NamedCurve::Sect163k1 => write!(f, "Sect163k1 (deprecated)"),
-            NamedCurve::Sect163r1 => write!(f, "Sect163r1 (deprecated)"),
-            NamedCurve::Sect163r2 => write!(f, "Sect163r2 (deprecated)"),
-            NamedCurve::Sect193r1 => write!(f, "Sect193r1 (deprecated)"),
-            NamedCurve::Sect193r2 => write!(f, "Sect193r2 (deprecated)"),
-            NamedCurve::Sect233k1 => write!(f, "Sect233k1 (deprecated)"),
-            NamedCurve::Sect233r1 => write!(f, "Sect233r1 (deprecated)"),
-            NamedCurve::Sect239k1 => write!(f, "Sect239k1 (deprecated)"),
-            NamedCurve::Sect283k1 => write!(f, "Sect283k1 (deprecated)"),
-            NamedCurve::Sect283r1 => write!(f, "Sect283r1 (deprecated)"),
-            NamedCurve::Sect409k1 => write!(f, "Sect409k1 (deprecated)"),
-            NamedCurve::Sect409r1 => write!(f, "Sect409r1 (deprecated)"),
-            NamedCurve::Sect571k1 => write!(f, "Sect571k1 (deprecated)"),
-            NamedCurve::Sect571r1 => write!(f, "Sect571r1 (deprecated)"),
-            NamedCurve::Secp160k1 => write!(f, "Secp160k1 (deprecated)"),
-            NamedCurve::Secp160r1 => write!(f, "Secp160r1 (deprecated)"),
-            NamedCurve::Secp160r2 => write!(f, "Secp160r2 (deprecated)"),
-            NamedCurve::Secp192k1 => write!(f, "Secp192k1 (deprecated)"),
-            NamedCurve::Secp192r1 => write!(f, "Secp192r1 (deprecated)"),
-            NamedCurve::Secp224k1 => write!(f, "Secp224k1 (deprecated)"),
-            NamedCurve::Secp224r1 => write!(f, "Secp224r1 (deprecated)"),
-            NamedCurve::Secp256k1 => write!(f, "Secp256k1 (deprecated)"),
-            NamedCurve::Secp256r1 => write!(f, "Secp256r1"),
-            NamedCurve::Secp384r1 => write!(f, "Secp384r1"),
-            NamedCurve::Secp521r1 => write!(f, "Secp521r1"),
-            NamedCurve::X25519 => write!(f, "X25519"),
-            NamedCurve::X448 => write!(f, "X448"),
-            NamedCurve::ArbitraryExplicitPrimeCurves => write!(f, "ArbitraryExplicitPrimeCurves (deprecated)"),
-            NamedCurve::ArbitraryExplicitChar2Curves => write!(f, "ArbitraryExplicitChar2Curves (deprecated)"),
-            NamedCurve::Other(code) => write!(f, "{}", code),
-        }
-    }
-}
-
+#[derive(Debug)]
 pub enum ECPointFormat {
     Uncompressed, // (0)
     ANSIX962CompressedPrime, // (1), defined in rfc4492 but now deprecated
@@ -386,17 +359,6 @@ impl FromBinary for ECPointFormat {
             1 => Ok(ECPointFormat::ANSIX962CompressedPrime),
             2 => Ok(ECPointFormat::ANSIX962CompressedChar2),
             _ => Ok(ECPointFormat::Other(code)),
-        }
-    }
-}
-
-impl fmt::Display for ECPointFormat {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ECPointFormat::Uncompressed => write!(f, "Uncompressed"),
-            ECPointFormat::ANSIX962CompressedPrime => write!(f, "ANSIX962CompressedPrime"),
-            ECPointFormat::ANSIX962CompressedChar2 => write!(f, "ANSIX962CompressedChar2"),
-            ECPointFormat::Other(code) => write!(f, "{}", code)
         }
     }
 }
@@ -419,7 +381,7 @@ impl FromBinary for PskKeyExchangeMode {
     }
 }
 
-impl fmt::Display for PskKeyExchangeMode {
+impl fmt::Debug for PskKeyExchangeMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             PskKeyExchangeMode::PskKe => write!(f, "PSK-only key establishment"),
@@ -444,14 +406,15 @@ impl FromBinary for KeyShareEntry {
     }
 }
 
-impl fmt::Display for KeyShareEntry {
+impl fmt::Debug for KeyShareEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.group, BinaryData(&self.key_exchange))
+        write!(f, "{:?} {}", self.group, BinaryData(&self.key_exchange))
     }
 }
 
 
 // https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
+#[derive(Debug)]
 pub enum Extension {
     ApplicationLayerProtocolNegotiation(Vec<ProtocolName>),
     SignatureAlgorithms(Vec<SignatureScheme>),
@@ -531,83 +494,39 @@ impl FromBinary for Extension {
     }
 }
 
-impl Extension {
-    pub fn print(&self, indent: &str) {
-        let child_indent = format!("{}    ", indent);
+#[allow(non_camel_case_types)]
+pub enum CipherSuite {
+    TLS_AES_128_GCM_SHA256, // {0x13,0x01} |
+    TLS_AES_256_GCM_SHA384, // {0x13,0x02} |
+    TLS_CHACHA20_POLY1305_SHA256, // {0x13,0x03} |
+    TLS_AES_128_CCM_SHA256, // {0x13,0x04} |
+    TLS_AES_128_CCM_8_SHA256, // {0x13,0x05} |
+    Unknown(u16),
+}
 
-        match self {
-            Extension::EllipticCurves(items) => {
-                println!("{}Elliptic curves:", indent);
-                for item in items.iter() {
-                    println!("{}    {}", indent, item);
-                }
-            }
-            Extension::ECPointFormats(items) => {
-                println!("{}Elliptic curve point formats:", indent);
-                for item in items.iter() {
-                    println!("{}    {}", indent, item);
-                }
-            }
-            Extension::ServerName(server_name_list) => {
-                println!("{}Server names:", indent);
-                for sn in server_name_list.iter() {
-                    match sn {
-                        ServerName::HostName(name) => {
-                            println!("{}    {}", indent, escape_string(&name));
-                        }
-                        ServerName::Other(name_type, data) => {
-                            println!("{}    <other {}>", indent, name_type);
-                        }
-                    }
-                }
-            }
-            Extension::ApplicationLayerProtocolNegotiation(names) => {
-                println!("{}Protocols:", indent);
-                for name in names.iter() {
-                    let s: String = String::from_utf8_lossy(&name.data).into();
-                    println!("{}    {}", indent, escape_string(&s));
-                }
-            }
-            Extension::SignatureAlgorithms(schemes) => {
-                println!("{}Signature algorithms:", indent);
-                for scheme in schemes.iter() {
-                    println!("{}    {}", indent, scheme);
-                }
-            }
-            Extension::EncryptThenMac => {
-                println!("{}EncryptThenMac", indent);
-            }
-            Extension::ExtendedMasterSecret => {
-                println!("{}ExtendedMasterSecret", indent);
-            }
-            Extension::NextProtocolNegotiation(data) => {
-                println!("{}NextProtocolNegotiation {}", indent, BinaryData(data));
-            }
-            Extension::PostHandshakeAuth => {
-                println!("{}PostHandshakeAuth", indent);
-            }
-            Extension::SupportedVersions(data) => {
-                println!("{}SupportedVersions {}", indent, BinaryData(data));
-            }
-            Extension::PskKeyExchangeModes(modes) => {
-                println!("{}PskKeyExchangeModes", indent);
-                for mode in modes.iter() {
-                    println!("{}    {}", indent, mode);
-                }
-            }
-            Extension::KeyShareClientHello(entries) => {
-                println!("{}Key share (ClientHello):", indent);
-                for entry in entries.iter() {
-                    println!("{}    {}", indent, entry);
-                }
-            }
-
-
-            Extension::Unknown(type_, data) => {
-                println!("{}type {} = 0x{:04x} data {}", indent, type_, type_, BinaryData(&data))
-            }
+impl CipherSuite {
+    pub fn from_raw(code: u16) -> CipherSuite {
+        match code {
+            0x1301 => CipherSuite::TLS_AES_128_GCM_SHA256,
+            0x1302 => CipherSuite::TLS_AES_256_GCM_SHA384,
+            0x1303 => CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+            0x1304 => CipherSuite::TLS_AES_128_CCM_SHA256,
+            0x1305 => CipherSuite::TLS_AES_128_CCM_8_SHA256,
+            _ => CipherSuite::Unknown(code),
         }
+    }
+}
 
+impl fmt::Debug for CipherSuite {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CipherSuite::TLS_AES_128_GCM_SHA256 => write!(f, "TLS_AES_128_GCM_SHA256"),
+            CipherSuite::TLS_AES_256_GCM_SHA384 => write!(f, "TLS_AES_256_GCM_SHA384"),
+            CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => write!(f, "TLS_CHACHA20_POLY1305_SHA256"),
+            CipherSuite::TLS_AES_128_CCM_SHA256 => write!(f, "TLS_AES_128_CCM_SHA256"),
+            CipherSuite::TLS_AES_128_CCM_8_SHA256 => write!(f, "TLS_AES_128_CCM_8_SHA256"),
+            CipherSuite::Unknown(code) => write!(f, "0x{:04x}", code),
+        }
     }
 }
 
@@ -615,7 +534,7 @@ pub struct ClientHello {
     pub legacy_version: u16,
     pub random: Vec<u8>,
     pub legacy_session_id: Vec<u8>,
-    pub cipher_suites: Vec<u16>,
+    pub cipher_suites: Vec<CipherSuite>,
     pub legacy_compression_methods: Vec<u8>,
     pub extensions: Vec<Extension>,
 }
@@ -632,9 +551,9 @@ impl FromBinary for ClientHello {
 
         let cipher_suites_len = reader.read_u16()? as usize;
         let mut cipher_suites_reader = reader.read_nested(cipher_suites_len)?;
-        let mut cipher_suites: Vec<u16> = Vec::new();
+        let mut cipher_suites: Vec<CipherSuite> = Vec::new();
         for i in 0..cipher_suites_len / 2 {
-            cipher_suites.push(cipher_suites_reader.read_u16()?);
+            cipher_suites.push(CipherSuite::from_raw(cipher_suites_reader.read_u16()?));
         }
 
         let legacy_compression_methods_len = reader.read_u8()? as usize;
@@ -658,7 +577,11 @@ impl FromBinary for ClientHello {
 
 
         // println!("ClientHello: {:?}", res);
-        res.print("|");
+        // res.print("|");
+
+
+        println!();
+        println!("{:#?}", res);
 
         Ok(res)
 
@@ -666,27 +589,16 @@ impl FromBinary for ClientHello {
     }
 }
 
-impl ClientHello {
-    pub fn print(&self, indent: &str) {
-        let child_indent = format!("{}    ", indent);
-        println!("{}legacy_version = {:04x}", indent, self.legacy_version);
-        println!("{}random = {}", indent, BinaryData(&self.random));
-        println!("{}legacy_session_id = {}", indent, BinaryData(&self.legacy_session_id));
-        print!("{}cipher_suites =", indent);
-        for cs in self.cipher_suites.iter() {
-            print!(" {:04x}", cs);
-        }
-        println!();
-
-        print!("{}legacy_compression_methods =", indent);
-        for cm in self.legacy_compression_methods.iter() {
-            print!(" {:02x}", cm);
-        }
-        println!();
-        println!("{}Extensions:", indent);
-        for ext in self.extensions.iter() {
-            ext.print(&child_indent);
-        }
+impl fmt::Debug for ClientHello {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ClientHello")
+            .field("legacy_version", &self.legacy_version)
+            .field("random", &BinaryData(&self.random))
+            .field("legacy_session_id", &BinaryData(&self.legacy_session_id))
+            .field("cipher_suites", &self.cipher_suites)
+            .field("legacy_compression_methods", &self.legacy_compression_methods)
+            .field("extensions", &self.extensions)
+            .finish()
     }
 }
 

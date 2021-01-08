@@ -11,6 +11,12 @@ impl<'a> fmt::Display for BinaryData<'a> {
     }
 }
 
+impl<'a> fmt::Debug for BinaryData<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 pub fn from_hex(s: &str) -> Option<Vec<u8>> {
     let raw = s.as_bytes();
     if raw.len() % 2 != 0 {
