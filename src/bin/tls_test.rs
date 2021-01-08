@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use torrent::util::{escape_string, BinaryData, DebugHexDump};
 use torrent::binary::{BinaryReader, FromBinary};
-use torrent::tls::types::*;
+use torrent::tls::types::handshake::*;
 
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
 const TLS_RECORD_SIZE: usize = 16384;
@@ -102,6 +102,7 @@ async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Re
     let mut reader = BinaryReader::new(&plaintext.fragment);
     let handshake = reader.read_item::<Handshake>()?;
 
+    println!("{:#?}", handshake);
 
 
     Ok(())
