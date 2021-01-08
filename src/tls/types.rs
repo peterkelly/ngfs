@@ -197,6 +197,70 @@ impl FromBinary for ServerName {
     }
 }
 
+pub enum NamedGroup {
+    // Unallocated_RESERVED, // (0x0000),
+
+    /* Elliptic Curve Groups (ECDHE) */
+    // Obsolete_RESERVED1(u16), // (0x0001..0x0016),
+    Secp256r1, // (0x0017),
+    Secp384r1, // (0x0018),
+    Secp521r1, // (0x0019),
+    // Obsolete_RESERVED2(u16), // (0x001A..0x001C),
+    X25519, // (0x001D),
+    X448, // (0x001E),
+
+    /* Finite Field Groups (DHE) */
+    Ffdhe2048, // (0x0100),
+    Ffdhe3072, // (0x0101),
+    Ffdhe4096, // (0x0102),
+    Ffdhe6144, // (0x0103),
+    Ffdhe8192, // (0x0104),
+
+    /* Reserved Code Points */
+    // Ffdhe_private_use, // (0x01FC..0x01FF),
+    // Ecdhe_private_use, // (0xFE00..0xFEFF),
+    // Obsolete_RESERVED3, // (0xFF01..0xFF02),
+    Unknown(u16),
+}
+
+impl FromBinary for NamedGroup {
+    type Output = NamedGroup;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let code = reader.read_u16()?;
+        match code {
+            0x0017 => Ok(NamedGroup::Secp256r1),
+            0x0018 => Ok(NamedGroup::Secp384r1),
+            0x0019 => Ok(NamedGroup::Secp521r1),
+            0x001D => Ok(NamedGroup::X25519),
+            0x001E => Ok(NamedGroup::X448),
+            0x0100 => Ok(NamedGroup::Ffdhe2048),
+            0x0101 => Ok(NamedGroup::Ffdhe3072),
+            0x0102 => Ok(NamedGroup::Ffdhe4096),
+            0x0103 => Ok(NamedGroup::Ffdhe6144),
+            0x0104 => Ok(NamedGroup::Ffdhe8192),
+            _ => Ok(NamedGroup::Unknown(code)),
+        }
+    }
+}
+
+impl fmt::Display for NamedGroup {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NamedGroup::Secp256r1 => write!(f, "Secp256r1"),
+            NamedGroup::Secp384r1 => write!(f, "Secp384r1"),
+            NamedGroup::Secp521r1 => write!(f, "Secp521r1"),
+            NamedGroup::X25519 => write!(f, "X25519"),
+            NamedGroup::X448 => write!(f, "X448"),
+            NamedGroup::Ffdhe2048 => write!(f, "Ffdhe2048"),
+            NamedGroup::Ffdhe3072 => write!(f, "Ffdhe3072"),
+            NamedGroup::Ffdhe4096 => write!(f, "Ffdhe4096"),
+            NamedGroup::Ffdhe6144 => write!(f, "Ffdhe6144"),
+            NamedGroup::Ffdhe8192 => write!(f, "Ffdhe8192"),
+            NamedGroup::Unknown(code) => write!(f, "{}", code),
+        }
+    }
+}
+
 pub enum NamedCurve {
     Sect163k1, // (1) - defined in rfc4492, deprecated by rfc8422
     Sect163r1, // (2) - defined in rfc4492, deprecated by rfc8422
@@ -337,6 +401,35 @@ impl fmt::Display for ECPointFormat {
     }
 }
 
+pub enum PskKeyExchangeMode {
+    PskKe, // (0),
+    PskDheKe, // (1),
+    Unknown(u8),
+}
+
+impl FromBinary for PskKeyExchangeMode {
+    type Output = PskKeyExchangeMode;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let code = reader.read_u8()?;
+        match code {
+            0 => Ok(PskKeyExchangeMode::PskKe),
+            1 => Ok(PskKeyExchangeMode::PskDheKe),
+            _ => Ok(PskKeyExchangeMode::Unknown(code)),
+        }
+    }
+}
+
+impl fmt::Display for PskKeyExchangeMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PskKeyExchangeMode::PskKe => write!(f, "PSK-only key establishment"),
+            PskKeyExchangeMode::PskDheKe => write!(f, "PSK with (EC)DHE key establishment"),
+            PskKeyExchangeMode::Unknown(code) => write!(f, "{}", code),
+        }
+    }
+}
+
+// https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
 pub enum Extension {
     ApplicationLayerProtocolNegotiation(Vec<ProtocolName>),
     SignatureAlgorithms(Vec<SignatureScheme>),
@@ -344,6 +437,13 @@ pub enum Extension {
     EllipticCurves(Vec<NamedCurve>),
     ECPointFormats(Vec<ECPointFormat>),
     Unknown(u16, Vec<u8>),
+    EncryptThenMac, // (22) RFC7366
+    ExtendedMasterSecret, // (23) RFC7627
+    NextProtocolNegotiation(Vec<u8>), // (13172), https://tools.ietf.org/id/draft-agl-tls-nextprotoneg-03.html
+    PostHandshakeAuth, // (49) rfc8446
+    SupportedVersions(Vec<u8>), // (43) rfc8446
+    PskKeyExchangeModes(Vec<PskKeyExchangeMode>), // (45) rfc8446
+    KeyShare(Vec<u8>), // (51), rfc8446
 }
 
 impl FromBinary for Extension {
@@ -376,6 +476,30 @@ impl FromBinary for Extension {
             13 => {
                 let schemes = nested_reader.read_len16_list::<SignatureScheme>()?;
                 Ok(Extension::SignatureAlgorithms(schemes))
+            }
+            22 => {
+                nested_reader.expect_eof()?;
+                Ok(Extension::EncryptThenMac)
+            }
+            23 => {
+                nested_reader.expect_eof()?;
+                Ok(Extension::ExtendedMasterSecret)
+            }
+            49 => {
+                nested_reader.expect_eof()?;
+                Ok(Extension::PostHandshakeAuth)
+            }
+            43 => {
+                Ok(Extension::SupportedVersions(nested_reader.remaining_data().to_vec()))
+            }
+            13172 => {
+                Ok(Extension::NextProtocolNegotiation(nested_reader.remaining_data().to_vec()))
+            }
+            45 => {
+                Ok(Extension::PskKeyExchangeModes(nested_reader.read_len8_list::<PskKeyExchangeMode>()?))
+            }
+            51 => {
+                Ok(Extension::KeyShare(nested_reader.remaining_data().to_vec()))
             }
             _ => {
                 Ok(Extension::Unknown(extension_type, nested_reader.remaining_data().to_vec()))
@@ -428,6 +552,32 @@ impl Extension {
                     println!("{}    {}", indent, scheme);
                 }
             }
+            Extension::EncryptThenMac => {
+                println!("{}EncryptThenMac", indent);
+            }
+            Extension::ExtendedMasterSecret => {
+                println!("{}ExtendedMasterSecret", indent);
+            }
+            Extension::NextProtocolNegotiation(data) => {
+                println!("{}NextProtocolNegotiation {}", indent, BinaryData(data));
+            }
+            Extension::PostHandshakeAuth => {
+                println!("{}PostHandshakeAuth", indent);
+            }
+            Extension::SupportedVersions(data) => {
+                println!("{}SupportedVersions {}", indent, BinaryData(data));
+            }
+            Extension::PskKeyExchangeModes(modes) => {
+                println!("{}PskKeyExchangeModes", indent);
+                for mode in modes.iter() {
+                    println!("{}    {}", indent, mode);
+                }
+            }
+            Extension::KeyShare(data) => {
+                println!("{}KeyShare {}", indent, BinaryData(data));
+            }
+
+
             Extension::Unknown(type_, data) => {
                 println!("{}type {} = 0x{:04x} data {}", indent, type_, type_, BinaryData(&data))
             }

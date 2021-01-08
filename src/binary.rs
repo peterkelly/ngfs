@@ -83,6 +83,16 @@ impl<'a> BinaryReader<'a> {
         &self.buf[self.offset..]
     }
 
+    pub fn expect_eof(&self) -> Result<(), BinaryReadError> {
+        let remaining = self.remaining();
+        if remaining > 0 {
+            Err(BinaryReadError::ExpectedEOF { offset: self.offset, remaining: remaining })
+        }
+        else {
+            Ok(())
+        }
+    }
+
     fn check_available(&self, size: usize) -> Result<usize, BinaryReadError> {
         match self.offset.checked_add(size) {
             Some(next) if next <= self.buf.len() => Ok(next),
