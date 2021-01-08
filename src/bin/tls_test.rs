@@ -12,6 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use torrent::util::{escape_string, BinaryData, DebugHexDump};
 use torrent::binary::{BinaryReader, FromBinary};
 use torrent::tls::types::handshake::*;
+use torrent::tls::types::extension::*;
 
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
 const TLS_RECORD_SIZE: usize = 16384;
@@ -30,6 +31,16 @@ const TLS_RECORD_SIZE: usize = 16384;
  //          Extension extensions<8..2^16-1>;
  //      } ClientHello;
 
+fn make_client_hello() -> ClientHello {
+    ClientHello {
+        legacy_version: 0x0303,
+        random: Vec::new(), // TODO
+        legacy_session_id: Vec::new(), // TODO
+        cipher_suites: Vec::new(), // TODO
+        legacy_compression_methods: Vec::new(), // TODO
+        extensions: Vec::new(), // TODO
+    }
+}
 
 
 async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn Error>> {

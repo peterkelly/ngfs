@@ -101,7 +101,7 @@ impl<'a> BinaryReader<'a> {
         }
     }
 
-    pub fn read_nested(&mut self, size: usize) -> Result<BinaryReader, BinaryReadError> {
+    pub fn read_nested(&mut self, size: usize) -> Result<BinaryReader<'a>, BinaryReadError> {
         let end = self.check_available(size)?;
         let res = BinaryReader::new_at(&self.buf[0..end], self.offset);
         self.offset = end;
