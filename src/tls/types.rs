@@ -429,6 +429,28 @@ impl fmt::Display for PskKeyExchangeMode {
     }
 }
 
+pub struct KeyShareEntry {
+    pub group: NamedGroup,
+    pub key_exchange: Vec<u8>,
+}
+
+impl FromBinary for KeyShareEntry {
+    type Output = KeyShareEntry;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let group = reader.read_item::<NamedGroup>()?;
+        let key_exchange_len = reader.read_u16()? as usize;
+        let key_exchange = reader.read_fixed(key_exchange_len)?.to_vec();
+        Ok(KeyShareEntry { group, key_exchange })
+    }
+}
+
+impl fmt::Display for KeyShareEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}", self.group, BinaryData(&self.key_exchange))
+    }
+}
+
+
 // https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
 pub enum Extension {
     ApplicationLayerProtocolNegotiation(Vec<ProtocolName>),
@@ -443,7 +465,7 @@ pub enum Extension {
     PostHandshakeAuth, // (49) rfc8446
     SupportedVersions(Vec<u8>), // (43) rfc8446
     PskKeyExchangeModes(Vec<PskKeyExchangeMode>), // (45) rfc8446
-    KeyShare(Vec<u8>), // (51), rfc8446
+    KeyShareClientHello(Vec<KeyShareEntry>), // (51), rfc8446
 }
 
 impl FromBinary for Extension {
@@ -499,7 +521,8 @@ impl FromBinary for Extension {
                 Ok(Extension::PskKeyExchangeModes(nested_reader.read_len8_list::<PskKeyExchangeMode>()?))
             }
             51 => {
-                Ok(Extension::KeyShare(nested_reader.remaining_data().to_vec()))
+                let entries = nested_reader.read_len16_list::<KeyShareEntry>()?;
+                Ok(Extension::KeyShareClientHello(entries))
             }
             _ => {
                 Ok(Extension::Unknown(extension_type, nested_reader.remaining_data().to_vec()))
@@ -547,7 +570,6 @@ impl Extension {
             }
             Extension::SignatureAlgorithms(schemes) => {
                 println!("{}Signature algorithms:", indent);
-                // write!(f, "signature algorithms:")?;
                 for scheme in schemes.iter() {
                     println!("{}    {}", indent, scheme);
                 }
@@ -573,8 +595,11 @@ impl Extension {
                     println!("{}    {}", indent, mode);
                 }
             }
-            Extension::KeyShare(data) => {
-                println!("{}KeyShare {}", indent, BinaryData(data));
+            Extension::KeyShareClientHello(entries) => {
+                println!("{}Key share (ClientHello):", indent);
+                for entry in entries.iter() {
+                    println!("{}    {}", indent, entry);
+                }
             }
 
 
