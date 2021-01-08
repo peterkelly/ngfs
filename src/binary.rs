@@ -7,6 +7,12 @@
 
 use std::fmt;
 
+pub trait FromBinary {
+    type Output;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self::Output, Box<dyn std::error::Error>>;
+}
+
 pub enum BinaryReadError {
     UnexpectedEOF { offset: usize, expected: usize },
     SizeOverflow { offset: usize, requested: usize },
@@ -127,5 +133,28 @@ impl<'a> BinaryReader<'a> {
         bytes.copy_from_slice(&self.buf[self.offset..next]);
         self.offset = next;
         Ok(u64::from_be_bytes(bytes))
+    }
+
+    pub fn read_item<T : FromBinary<Output = T>>(&mut self) -> Result<T, Box<dyn std::error::Error>> {
+        T::from_binary(self)
+    }
+
+    pub fn read_len8_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+        let len = self.read_u8()? as usize;
+        self.read_fixed_list(len)
+    }
+
+    pub fn read_len16_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+        let len = self.read_u16()? as usize;
+        self.read_fixed_list(len)
+    }
+
+    fn read_fixed_list<T : FromBinary<Output = T>>(&mut self, len: usize) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+        let mut inner = self.read_nested(len)?;
+        let mut res: Vec<T> = Vec::new();
+        while inner.remaining() > 0 {
+            res.push(T::from_binary(&mut inner)?);
+        }
+        Ok(res)
     }
 }
