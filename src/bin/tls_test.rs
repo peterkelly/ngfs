@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use torrent::util::{escape_string, BinaryData, DebugHexDump};
-use torrent::binary::{BinaryReader, FromBinary};
+use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use torrent::tls::types::handshake::*;
 use torrent::tls::types::extension::*;
 
@@ -34,7 +34,7 @@ const TLS_RECORD_SIZE: usize = 16384;
 fn make_client_hello() -> ClientHello {
     ClientHello {
         legacy_version: 0x0303,
-        random: Vec::new(), // TODO
+        random: Default::default(), // TODO
         legacy_session_id: Vec::new(), // TODO
         cipher_suites: Vec::new(), // TODO
         legacy_compression_methods: Vec::new(), // TODO
@@ -114,6 +114,16 @@ async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Re
     let handshake = reader.read_item::<Handshake>()?;
 
     println!("{:#?}", handshake);
+
+    println!("--------------------------");
+    let mut writer = BinaryWriter::new();
+    writer.write_item(&handshake)?;
+    // let serialized_data: Vec<u8> = writer.into();
+    let mut serialized_data: Vec<u8> = Vec::new();
+    serialized_data.extend_from_slice(&record_header);
+    serialized_data.extend_from_slice(&Vec::<u8>::from(writer));
+    std::fs::write("serialized.bin", &serialized_data)?;
+    println!("Wrote serialized.bin");
 
 
     Ok(())

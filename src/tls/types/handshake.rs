@@ -7,7 +7,7 @@
 
 use std::error::Error;
 use std::fmt;
-use super::super::super::binary::{BinaryReader, FromBinary};
+use super::super::super::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use super::super::super::result::GeneralError;
 use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
 use super::extension::*;
@@ -72,6 +72,23 @@ impl FromBinary for Handshake {
     }
 }
 
+impl ToBinary for Handshake {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Handshake::ClientHello(client_hello) => {
+                writer.write_u8(1);
+                let mut temp_writer = BinaryWriter::new();
+                client_hello.to_binary(&mut temp_writer)?;
+                let temp_data: Vec<u8> = temp_writer.into();
+                writer.write_u24(temp_data.len() as u32);
+                writer.write_raw(&temp_data);
+                Ok(())
+            }
+            _ => unimplemented!(), // TODO
+        }
+    }
+}
+
 
 #[allow(non_camel_case_types)]
 pub enum CipherSuite {
@@ -97,6 +114,20 @@ impl FromBinary for CipherSuite {
     }
 }
 
+impl ToBinary for CipherSuite {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            CipherSuite::TLS_AES_128_GCM_SHA256 => writer.write_u16(0x1301),
+            CipherSuite::TLS_AES_256_GCM_SHA384 => writer.write_u16(0x1302),
+            CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => writer.write_u16(0x1303),
+            CipherSuite::TLS_AES_128_CCM_SHA256 => writer.write_u16(0x1304),
+            CipherSuite::TLS_AES_128_CCM_8_SHA256 => writer.write_u16(0x1305),
+            CipherSuite::Unknown(code) => writer.write_u16(*code),
+        };
+        Ok(())
+    }
+}
+
 impl fmt::Debug for CipherSuite {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -112,7 +143,7 @@ impl fmt::Debug for CipherSuite {
 
 pub struct ClientHello {
     pub legacy_version: u16,
-    pub random: Vec<u8>,
+    pub random: [u8; 32],
     pub legacy_session_id: Vec<u8>,
     pub cipher_suites: Vec<CipherSuite>,
     pub legacy_compression_methods: Vec<u8>,
@@ -123,7 +154,9 @@ impl FromBinary for ClientHello {
     type Output = ClientHello;
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         let legacy_version = reader.read_u16()?;
-        let random = Vec::from(reader.read_fixed(32)?);
+        let random_slice = reader.read_fixed(32)?;
+        let mut random: [u8; 32] = Default::default();
+        random.copy_from_slice(random_slice);
 
         let legacy_session_id_len = reader.read_u8()? as usize;
         let legacy_session_id = Vec::from(reader.read_fixed(legacy_session_id_len)?);
@@ -151,6 +184,18 @@ impl FromBinary for ClientHello {
         };
 
         Ok(res)
+    }
+}
+
+impl ToBinary for ClientHello {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_u16(self.legacy_version);
+        writer.write_raw(&self.random);
+        writer.write_len8_bytes(&self.legacy_session_id)?;
+        writer.write_len16_list(&self.cipher_suites)?;
+        writer.write_len8_bytes(&self.legacy_compression_methods)?;
+        writer.write_len16_list(&self.extensions)?;
+        Ok(())
     }
 }
 
