@@ -165,6 +165,16 @@ impl<'a> BinaryReader<'a> {
         Ok(u64::from_be_bytes(bytes))
     }
 
+    pub fn read_len8_bytes(&mut self) -> Result<&[u8], BinaryError> {
+        let len = self.read_u8()? as usize;
+        self.read_fixed(len)
+    }
+
+    pub fn read_len16_bytes(&mut self) -> Result<&[u8], BinaryError> {
+        let len = self.read_u16()? as usize;
+        self.read_fixed(len)
+    }
+
     pub fn read_item<T : FromBinary<Output = T>>(&mut self) -> Result<T, Box<dyn std::error::Error>> {
         T::from_binary(self)
     }

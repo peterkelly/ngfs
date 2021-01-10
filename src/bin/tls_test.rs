@@ -88,22 +88,47 @@ fn make_client_hello() -> ClientHello {
     }
 }
 
-async fn test_client() -> Result<(), Box<dyn Error>> {
-    let client_hello = make_client_hello();
-    let handshake = Handshake::ClientHello(client_hello);
+fn handshake_to_record(handshake: &Handshake) -> Result<Vec<u8>, Box<dyn Error>> {
 
     let mut writer = BinaryWriter::new();
-    writer.write_item(&handshake)?;
+    writer.write_item(handshake)?;
 
     let output_record = TLSPlaintext {
         content_type: ContentType::Handshake,
         legacy_record_version: 0x0301,
         fragment: &Vec::<u8>::from(writer),
     };
+    Ok(output_record.to_vec())
+}
+
+async fn test_client() -> Result<(), Box<dyn Error>> {
+    let client_hello = make_client_hello();
+    let handshake = Handshake::ClientHello(client_hello);
+    let client_hello_data = handshake_to_record(&handshake)?;
 
     let serialized_filename = "record-constructed.bin";
-    std::fs::write(serialized_filename, &output_record.to_vec())?;
+    std::fs::write(serialized_filename, &client_hello_data)?;
     println!("Wrote {}", serialized_filename);
+
+    let mut stream = TcpStream::connect("localhost:443").await?;
+    stream.write_all(&client_hello_data).await?;
+    let mut buf: [u8; 65536] = [0; 65536];
+    let r = stream.read(&mut buf).await?;
+    println!("Read {} bytes", r);
+
+    let server_hello_data = &buf[0..r];
+
+    let server_hello_filename = "server_hello.bin";
+    std::fs::write(server_hello_filename, server_hello_data)?;
+    println!("Wrote {}", server_hello_filename);
+
+    let (plaintext, consumed) = TLSPlaintext::from_raw_data(server_hello_data)?;
+    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, consumed {}",
+            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), consumed);
+
+    let mut reader = BinaryReader::new(plaintext.fragment);
+    let server_handshake = reader.read_item::<Handshake>()?;
+    println!("{:#?}", server_handshake);
 
     Ok(())
 }

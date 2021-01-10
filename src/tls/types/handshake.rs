@@ -134,9 +134,7 @@ impl FromBinary for ClientHello {
         let random_slice = reader.read_fixed(32)?;
         let mut random: [u8; 32] = Default::default();
         random.copy_from_slice(random_slice);
-
-        let legacy_session_id_len = reader.read_u8()? as usize;
-        let legacy_session_id = Vec::from(reader.read_fixed(legacy_session_id_len)?);
+        let legacy_session_id = Vec::from(reader.read_len8_bytes()?);
 
         let cipher_suites = reader.read_len16_list::<CipherSuite>()?;
 
@@ -148,7 +146,13 @@ impl FromBinary for ClientHello {
             legacy_compression_methods.push(legacy_compression_methods_reader.read_u8()?);
         }
 
-        let extensions = reader.read_len16_list::<Extension>()?;
+        // let extensions = reader.read_len16_list::<Extension>()?;
+        let mut extensions: Vec<Extension> = Vec::new();
+        let extensions_len = reader.read_u16()? as usize;
+        let mut extensions_reader = reader.read_nested(extensions_len)?;
+        while extensions_reader.remaining() > 0 {
+            extensions.push(Extension::from_binary2(&mut extensions_reader, ExtensionContext::ClientHello)?);
+        }
 
 
         let res = ClientHello {
@@ -189,15 +193,60 @@ impl fmt::Debug for ClientHello {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct ServerHello {
+    pub legacy_version: u16,
+    pub random: [u8; 32],
+    pub legacy_session_id_echo: Vec<u8>,
+    pub cipher_suite: CipherSuite,
+    pub legacy_compression_method: u8,
+    pub extensions: Vec<Extension>,
+}
+
+impl fmt::Debug for ServerHello {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ServerHello")
+            .field("legacy_version", &self.legacy_version)
+            .field("random", &BinaryData(&self.random))
+            .field("legacy_session_id_echo", &BinaryData(&self.legacy_session_id_echo))
+            .field("cipher_suite", &self.cipher_suite)
+            .field("legacy_compression_method", &self.legacy_compression_method)
+            .field("extensions", &self.extensions)
+            .finish()
+    }
 }
 
 impl FromBinary for ServerHello {
     type Output = ServerHello;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("ServerHello::from_binary(): Not implemented"))
+        println!("ServerHello start: offset = 0x{:x}", reader.abs_offset());
+        let legacy_version = reader.read_u16()?;
+        let random_slice = reader.read_fixed(32)?;
+        let mut random: [u8; 32] = Default::default();
+        random.copy_from_slice(random_slice);
+        let legacy_session_id_echo = Vec::from(reader.read_len8_bytes()?);
+        let cipher_suite = reader.read_item::<CipherSuite>()?;
+
+        let legacy_compression_method = reader.read_u8()?;
+
+
+
+        let mut extensions: Vec<Extension> = Vec::new();
+        let extensions_len = reader.read_u16()? as usize;
+        let mut extensions_reader = reader.read_nested(extensions_len)?;
+        while extensions_reader.remaining() > 0 {
+            extensions.push(Extension::from_binary2(&mut extensions_reader, ExtensionContext::ServerHello)?);
+        }
+
+        Ok(ServerHello {
+            legacy_version,
+            random,
+            legacy_session_id_echo,
+            cipher_suite,
+            legacy_compression_method,
+            extensions,
+        })
     }
 }
 

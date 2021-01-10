@@ -5,6 +5,9 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
+use std::error::Error;
+use std::fmt;
+
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
 const TLS_RECORD_SIZE: usize = 16384;
 
@@ -42,15 +45,36 @@ impl ContentType {
     }
 }
 
+pub enum TLSPlaintextError {
+    InsufficientData,
+    InvalidLength,
+}
+
+impl fmt::Display for TLSPlaintextError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TLSPlaintextError::InsufficientData => write!(f, "InsufficientData"),
+            TLSPlaintextError::InvalidLength => write!(f, "InvalidLength"),
+        }
+    }
+}
+
+impl fmt::Debug for TLSPlaintextError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::error::Error for TLSPlaintextError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
 pub struct TLSPlaintext<'a> {
     pub content_type: ContentType,
     pub legacy_record_version: u16,
     pub fragment: &'a [u8],
-}
-
-pub enum TLSPlaintextError {
-    InsufficientData,
-    InvalidLength,
 }
 
 impl TLSPlaintext<'_> {

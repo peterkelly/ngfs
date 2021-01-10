@@ -508,11 +508,16 @@ pub enum Extension {
     SupportedVersions(Vec<u8>), // (43) rfc8446
     PskKeyExchangeModes(Vec<PskKeyExchangeMode>), // (45) rfc8446
     KeyShareClientHello(Vec<KeyShareEntry>), // (51), rfc8446
+    KeyShareServerHello(KeyShareEntry), // (51), rfc8446
 }
 
-impl FromBinary for Extension {
-    type Output = Extension;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+pub enum ExtensionContext {
+    ClientHello,
+    ServerHello,
+}
+
+impl Extension {
+    pub fn from_binary2(reader: &mut BinaryReader, ctx: ExtensionContext) -> Result<Self, Box<dyn Error>> {
         let extension_type = reader.read_u16()?;
         let extension_len = reader.read_u16()? as usize;
         let mut nested_reader = reader.read_nested(extension_len)?;
@@ -560,8 +565,16 @@ impl FromBinary for Extension {
                 Ok(Extension::PskKeyExchangeModes(nested_reader.read_len8_list::<PskKeyExchangeMode>()?))
             }
             51 => {
-                let entries = nested_reader.read_len16_list::<KeyShareEntry>()?;
-                Ok(Extension::KeyShareClientHello(entries))
+                match ctx {
+                    ExtensionContext::ServerHello => {
+                        let entry = nested_reader.read_item::<KeyShareEntry>()?;
+                        Ok(Extension::KeyShareServerHello(entry))
+                    }
+                    ExtensionContext::ClientHello => {
+                        let entries = nested_reader.read_len16_list::<KeyShareEntry>()?;
+                        Ok(Extension::KeyShareClientHello(entries))
+                    }
+                }
             }
             _ => {
                 Ok(Extension::Unknown(extension_type, nested_reader.remaining_data().to_vec()))
@@ -624,6 +637,10 @@ impl ToBinary for Extension {
             Extension::KeyShareClientHello(key_share_entries) => {
                 writer.write_u16(51);
                 writer.write_u16_nested(|w| w.write_len16_list(key_share_entries))
+            }
+            Extension::KeyShareServerHello(key_share) => {
+                writer.write_u16(51);
+                writer.write_u16_nested(|w| w.write_item(key_share))
             }
         }
     }
