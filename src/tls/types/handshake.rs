@@ -12,29 +12,6 @@ use super::super::super::result::GeneralError;
 use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
 use super::extension::*;
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum ContentType {
-    Invalid,
-    ChangeCipherSpec,
-    Alert,
-    Handshake,
-    ApplicationData,
-    Unknown(u8),
-}
-
-impl ContentType {
-    pub fn from_raw(byte: u8) -> ContentType {
-        match byte {
-            0 => ContentType::Invalid,
-            20 => ContentType::ChangeCipherSpec,
-            21 => ContentType::Alert,
-            22 => ContentType::Handshake,
-            23 => ContentType::ApplicationData,
-            _ => ContentType::Unknown(byte),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum Handshake {
     ClientHello(ClientHello),
@@ -321,8 +298,3 @@ impl FromBinary for KeyUpdate {
 }
 
 
-pub struct TLSPlaintext {
-    pub content_type: ContentType,
-    pub legacy_record_version: u16,
-    pub fragment: Vec<u8>,
-}

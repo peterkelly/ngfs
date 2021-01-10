@@ -13,9 +13,7 @@ use torrent::util::{escape_string, BinaryData, DebugHexDump};
 use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use torrent::tls::types::handshake::*;
 use torrent::tls::types::extension::*;
-
-// The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
-const TLS_RECORD_SIZE: usize = 16384;
+use torrent::tls::types::record::*;
 
  // uint16 ProtocolVersion;
  //      opaque Random[32];
@@ -42,91 +40,71 @@ fn make_client_hello() -> ClientHello {
     }
 }
 
+async fn test_client() -> Result<(), Box<dyn Error>> {
+    Ok(())
+}
+
+fn process_record<'a>(record: &'a TLSPlaintext, record_raw: &'a [u8]) -> Result<(), Box<dyn Error>> {
+    let received_filename = "record-received.bin";
+    std::fs::write(received_filename, record_raw)?;
+    println!("Wrote {}", received_filename);
+
+    let mut reader = BinaryReader::new(record.fragment);
+    let handshake = reader.read_item::<Handshake>()?;
+
+    println!("{:#?}", handshake);
+
+    // println!("--------------------------");
+    let mut writer = BinaryWriter::new();
+    writer.write_item(&handshake)?;
+
+    let output_record = TLSPlaintext {
+        content_type: ContentType::Handshake,
+        legacy_record_version: 0x0301,
+        fragment: &Vec::<u8>::from(writer),
+    };
+
+    let serialized_filename = "record-serialized.bin";
+    std::fs::write(serialized_filename, &output_record.to_vec())?;
+    println!("Wrote {}", serialized_filename);
+
+    Ok(())
+}
 
 async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn Error>> {
     println!("Received connection from {}", addr);
     println!("local_addr = {}", socket.local_addr()?);
     println!("peer_addr = {}", socket.peer_addr()?);
+    const READ_SIZE: usize = 1024;
+
+    let mut incoming_data: Vec<u8> = Vec::new();
+
+    loop {
 
 
+        let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
+        let r = socket.read(&mut buf).await?;
+        if r == 0 {
+            println!("Connection closed by peer");
+            return Ok(())
+        }
+        incoming_data.extend_from_slice(&buf[0..r]);
 
-    // let mut buf: [u8; TLS_RECORD_SIZE] = [0; TLS_RECORD_SIZE];
-    // let r = socket.read(&mut buf).await?;
-    // println!("Read {} bytes", r);
-    // // let s: String = String::from_utf8_lossy(&buf[0..r]).into();
-    // // println!("Text: {}", escape_string(&s));
-    // println!("Data:\n{:#?}", DebugHexDump(&buf[0..r]));
-    // std::fs::write("received.bin", &buf[0..r])?;
-    // let raw_data = &buf[0..r];
-
-    // if raw_data.len() < 5 {
-    //     return Err("Invalid record".into());
-    // }
-
-    let mut record_header: [u8; 5] = [0; 5];
-    let r = socket.read_exact(&mut record_header).await?;
-    // println!("Read {} bytes", r);
-
-    let content_type = ContentType::from_raw(record_header[0]);
-    println!("content_type = {:?}", content_type);
-
-    // let protocol_version_raw = raw_data.get(1..2).ok_or_else(|| "Missing protocol version");
-    let mut protocol_version_bytes: [u8; 2] = Default::default();
-    protocol_version_bytes.copy_from_slice(&record_header[1..3]);
-    let protocol_version = u16::from_be_bytes(protocol_version_bytes);
-    println!("protocol_version = {} 0x{:04x}", protocol_version, protocol_version);
-
-
-    let mut length_bytes: [u8; 2] = Default::default();
-    length_bytes.copy_from_slice(&record_header[3..5]);
-    let length = u16::from_be_bytes(length_bytes) as usize;
-    println!("length = {} 0x{:04x}", length, length);
-
-    if length > TLS_RECORD_SIZE {
-        // TODO: TLSPlaintext.fragment.  The length MUST NOT exceed 2^14 bytes.  An
-        // endpoint that receives a record that exceeds this length MUST
-        // terminate the connection with a "record_overflow" alert.
-        return Err("Record overflow".into());
+        match TLSPlaintext::from_raw_data(&incoming_data) {
+            Err(TLSPlaintextError::InsufficientData) => {
+                // need to read some more data from the socket before we can decode the record
+                continue;
+            }
+            Err(TLSPlaintextError::InvalidLength) => {
+                println!("Client sent record with invalid length");
+                return Ok(())
+            }
+            Ok((record, bytes_consumed)) => {
+                process_record(&record, &incoming_data[0..bytes_consumed])?;
+                incoming_data = incoming_data.split_off(bytes_consumed);
+            }
+        }
     }
-
-    let mut data_full: [u8; 65536] = [0; 65536];
-    let mut data = &mut data_full[0..length];
-    socket.read_exact(data).await?;
-    // let data = data;
-    println!("Data:");
-    println!("{:#?}", DebugHexDump(data));
-
-    let plaintext = TLSPlaintext {
-        content_type: content_type,
-        legacy_record_version: protocol_version,
-        fragment: data.to_vec(),
-    };
-    println!("Created TLSPlaintext struct");
-
-    let mut full: Vec<u8> = Vec::new();
-    full.append(&mut record_header.to_vec());
-    full.append(&mut data.to_vec());
-
-    std::fs::write("handshake.bin", &full)?;
-
-    println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
-    let mut reader = BinaryReader::new(&plaintext.fragment);
-    let handshake = reader.read_item::<Handshake>()?;
-
-    println!("{:#?}", handshake);
-
-    println!("--------------------------");
-    let mut writer = BinaryWriter::new();
-    writer.write_item(&handshake)?;
-    // let serialized_data: Vec<u8> = writer.into();
-    let mut serialized_data: Vec<u8> = Vec::new();
-    serialized_data.extend_from_slice(&record_header);
-    serialized_data.extend_from_slice(&Vec::<u8>::from(writer));
-    std::fs::write("serialized.bin", &serialized_data)?;
-    println!("Wrote serialized.bin");
-
-
-    Ok(())
 }
 
 async fn process_connection(socket: TcpStream, addr: SocketAddr) {
@@ -138,8 +116,7 @@ async fn process_connection(socket: TcpStream, addr: SocketAddr) {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn test_server() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.01:8080").await?;
     println!("Listening for connections");
     loop {
@@ -148,7 +125,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // let x: TcpStream = socket;
         // let y: SocketAddr = addr;
     }
+}
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let command = match std::env::args().nth(1) {
+        Some(command) => command,
+        None => {
+            eprintln!("No command specified");
+            std::process::exit(1);
+        }
+    };
 
-    // Ok(())
+    match command.as_str() {
+        "client" => test_client().await,
+        "server" => test_server().await,
+        _ => {
+            eprintln!("Unknown command: {}", command);
+            std::process::exit(1);
+        }
+    }
 }
