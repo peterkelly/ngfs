@@ -181,52 +181,81 @@ fn process_record<'a>(record: &'a TLSPlaintext, record_raw: &'a [u8]) -> Result<
     Ok(())
 }
 
-async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn Error>> {
-    println!("Received connection from {}", addr);
-    println!("local_addr = {}", socket.local_addr()?);
-    println!("peer_addr = {}", socket.peer_addr()?);
+pub enum ReceiverError {
+    ConnectionClosedByPeer,
+    InvalidRecordLength,
+    SocketRecv(String),
+}
+
+struct Receiver {
+    incoming_data: Vec<u8>,
+    to_remove: usize,
+    error: Option<ReceiverError>,
+    closed: bool,
+}
+
+impl Receiver {
+    fn new() -> Self {
+        Receiver {
+            incoming_data: Vec::new(),
+            to_remove: 0,
+            error: None,
+            closed: false,
+        }
+    }
+}
+
+async fn process_connection_inner(mut socket: TcpStream) -> Result<(), Box<dyn Error>> {
     const READ_SIZE: usize = 1024;
 
-    let mut incoming_data: Vec<u8> = Vec::new();
-    let mut to_remove: usize = 0;
+    // let mut incoming_data: Vec<u8> = Vec::new();
+    // let mut to_remove: usize = 0;
+    let mut receiver = Receiver::new();
 
     loop {
-        if to_remove > 0 {
-            incoming_data = incoming_data.split_off(to_remove);
-            to_remove = 0;
+        if receiver.to_remove > 0 {
+            receiver.incoming_data = receiver.incoming_data.split_off(receiver.to_remove);
+            receiver.to_remove = 0;
         }
 
-        match TLSPlaintext::from_raw_data(&incoming_data) {
+        match TLSPlaintext::from_raw_data(&receiver.incoming_data) {
             Err(TLSPlaintextError::InsufficientData) => {
                 // need to read some more data from the socket before we can decode the record
                 let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
                 let r = match socket.read(&mut buf).await {
                     Ok(0) => {
-                        println!("Connection closed by peer");
+                        receiver.error = Some(ReceiverError::ConnectionClosedByPeer);
+                        receiver.closed = true;
+                        // println!("Connection closed by peer");
                         return Ok(())
                     }
                     Ok(r) => r,
                     Err(e) => {
-                        return Err(e.into());
+                        receiver.error = Some(ReceiverError::SocketRecv(format!("{}", e)));
+                        receiver.closed = true;
+                        return Ok(());
                     }
                 };
-                incoming_data.extend_from_slice(&buf[0..r]);
+                receiver.incoming_data.extend_from_slice(&buf[0..r]);
             }
             Err(TLSPlaintextError::InvalidLength) => {
-                println!("Client sent record with invalid length");
+                receiver.error = Some(ReceiverError::InvalidRecordLength);
+                receiver.closed = true;
+                // println!("Client sent record with invalid length");
                 return Ok(())
             }
             Ok((record, bytes_consumed)) => {
-                let record_raw = Vec::from(&incoming_data[0..bytes_consumed]);
+                let record_raw = Vec::from(&receiver.incoming_data[0..bytes_consumed]);
                 process_record(&record, &record_raw)?;
-                to_remove = bytes_consumed;
+                receiver.to_remove = bytes_consumed;
             }
         }
     }
 }
 
 async fn process_connection(socket: TcpStream, addr: SocketAddr) {
-    match process_connection_inner(socket, addr).await {
+    println!("Received connection from {}", addr);
+    match process_connection_inner(socket).await {
         Ok(()) => {},
         Err(e) => {
             eprintln!("Error processing connection: {}", e);
