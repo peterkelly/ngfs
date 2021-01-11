@@ -188,30 +188,33 @@ async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Re
     const READ_SIZE: usize = 1024;
 
     let mut incoming_data: Vec<u8> = Vec::new();
+    let mut to_remove: usize = 0;
 
     loop {
-
-
-        let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
-        let r = socket.read(&mut buf).await?;
-        if r == 0 {
-            println!("Connection closed by peer");
-            return Ok(())
+        if to_remove > 0 {
+            incoming_data = incoming_data.split_off(to_remove);
+            to_remove = 0;
         }
-        incoming_data.extend_from_slice(&buf[0..r]);
 
         match TLSPlaintext::from_raw_data(&incoming_data) {
             Err(TLSPlaintextError::InsufficientData) => {
                 // need to read some more data from the socket before we can decode the record
-                continue;
+                let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
+                let r = socket.read(&mut buf).await?;
+                if r == 0 {
+                    println!("Connection closed by peer");
+                    return Ok(())
+                }
+                incoming_data.extend_from_slice(&buf[0..r]);
             }
             Err(TLSPlaintextError::InvalidLength) => {
                 println!("Client sent record with invalid length");
                 return Ok(())
             }
             Ok((record, bytes_consumed)) => {
-                process_record(&record, &incoming_data[0..bytes_consumed])?;
-                incoming_data = incoming_data.split_off(bytes_consumed);
+                let record_raw = Vec::from(&incoming_data[0..bytes_consumed]);
+                process_record(&record, &record_raw)?;
+                to_remove = bytes_consumed;
             }
         }
     }
