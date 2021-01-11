@@ -225,7 +225,7 @@ impl Receiver {
 }
 
 impl Receiver {
-    async fn next(&mut self, socket: &mut TcpStream) -> Result<(TLSPlaintext, Vec<u8>), ReceiverError> {
+    async fn next(&mut self, socket: &mut TcpStream) -> Result<Option<(TLSPlaintext, Vec<u8>)>, ReceiverError> {
         const READ_SIZE: usize = 1024;
         loop {
             if self.to_remove > 0 {
@@ -239,7 +239,7 @@ impl Receiver {
                     let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
                     let r = match socket.read(&mut buf).await {
                         Err(e) => return Err(ReceiverError::SocketRecv(format!("{}", e))),
-                        Ok(0) => return Err(ReceiverError::ConnectionClosedByPeer), // Not really an error
+                        Ok(0) => return Ok(None),
                         Ok(r) => r,
                     };
                     self.incoming_data.extend_from_slice(&buf[0..r]);
@@ -250,7 +250,7 @@ impl Receiver {
                 Ok((record, bytes_consumed)) => {
                     self.to_remove = bytes_consumed;
                     let record_raw = Vec::from(&self.incoming_data[0..bytes_consumed]);
-                    return Ok((record, record_raw));
+                    return Ok(Some((record, record_raw)));
                 }
             }
         }
@@ -258,10 +258,10 @@ impl Receiver {
 }
 
 async fn process_connection_inner(receiver: &mut Receiver, socket: &mut TcpStream) -> Result<(), Box<dyn Error>> {
-    loop {
-        let (record, record_raw) = receiver.next(socket).await?;
+    while let Some((record, record_raw)) = receiver.next(socket).await? {
         process_record(&record, &record_raw)?;
     }
+    Ok(())
 }
 
 async fn process_connection(mut socket: TcpStream, addr: SocketAddr) {
