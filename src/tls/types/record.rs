@@ -71,14 +71,14 @@ impl std::error::Error for TLSPlaintextError {
     }
 }
 
-pub struct TLSPlaintext<'a> {
+pub struct TLSPlaintext {
     pub content_type: ContentType,
     pub legacy_record_version: u16,
-    pub fragment: &'a [u8],
+    pub fragment: Vec<u8>,
 }
 
-impl TLSPlaintext<'_> {
-    pub fn from_raw_data<'x>(data: &'x [u8]) -> Result<(TLSPlaintext<'x>, usize), TLSPlaintextError> {
+impl TLSPlaintext {
+    pub fn from_raw_data(data: &[u8]) -> Result<(TLSPlaintext, usize), TLSPlaintextError> {
         if data.len() < 5 {
             return Err(TLSPlaintextError::InsufficientData);
         }
@@ -102,7 +102,7 @@ impl TLSPlaintext<'_> {
             return Err(TLSPlaintextError::InsufficientData);
         }
 
-        let fragment = &data[5..5 + length];
+        let fragment = Vec::from(&data[5..5 + length]);
 
         let record = TLSPlaintext {
             content_type,
@@ -118,7 +118,7 @@ impl TLSPlaintext<'_> {
         res.push(self.content_type.to_raw());
         res.extend_from_slice(&self.legacy_record_version.to_be_bytes());
         res.extend_from_slice(&(self.fragment.len() as u16).to_be_bytes());
-        res.extend_from_slice(self.fragment);
+        res.extend_from_slice(&self.fragment);
         res
     }
 }

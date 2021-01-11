@@ -96,7 +96,7 @@ fn handshake_to_record(handshake: &Handshake) -> Result<Vec<u8>, Box<dyn Error>>
     let output_record = TLSPlaintext {
         content_type: ContentType::Handshake,
         legacy_record_version: 0x0301,
-        fragment: &Vec::<u8>::from(writer),
+        fragment: Vec::<u8>::from(writer),
     };
     Ok(output_record.to_vec())
 }
@@ -126,7 +126,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
             plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
 
-    let mut reader = BinaryReader::new(plaintext.fragment);
+    let mut reader = BinaryReader::new(&plaintext.fragment);
     let server_handshake = reader.read_item::<Handshake>()?;
     println!("{:#?}", server_handshake);
     incoming_data = incoming_data.split_off(bytes_consumed);
@@ -159,7 +159,7 @@ fn process_record<'a>(record: &'a TLSPlaintext, record_raw: &'a [u8]) -> Result<
     std::fs::write(received_filename, record_raw)?;
     println!("Wrote {}", received_filename);
 
-    let mut reader = BinaryReader::new(record.fragment);
+    let mut reader = BinaryReader::new(&record.fragment);
     let handshake = reader.read_item::<Handshake>()?;
 
     println!("{:#?}", handshake);
@@ -171,7 +171,7 @@ fn process_record<'a>(record: &'a TLSPlaintext, record_raw: &'a [u8]) -> Result<
     let output_record = TLSPlaintext {
         content_type: ContentType::Handshake,
         legacy_record_version: 0x0301,
-        fragment: &Vec::<u8>::from(writer),
+        fragment: Vec::<u8>::from(writer),
     };
 
     let serialized_filename = "record-serialized.bin";
