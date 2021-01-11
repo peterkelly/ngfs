@@ -200,11 +200,16 @@ async fn process_connection_inner(mut socket: TcpStream, addr: SocketAddr) -> Re
             Err(TLSPlaintextError::InsufficientData) => {
                 // need to read some more data from the socket before we can decode the record
                 let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
-                let r = socket.read(&mut buf).await?;
-                if r == 0 {
-                    println!("Connection closed by peer");
-                    return Ok(())
-                }
+                let r = match socket.read(&mut buf).await {
+                    Ok(0) => {
+                        println!("Connection closed by peer");
+                        return Ok(())
+                    }
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                };
                 incoming_data.extend_from_slice(&buf[0..r]);
             }
             Err(TLSPlaintextError::InvalidLength) => {
