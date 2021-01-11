@@ -228,51 +228,53 @@ impl Receiver {
     }
 }
 
-const READ_SIZE: usize = 1024;
-async fn receiver_next(receiver: &mut Receiver, socket: &mut TcpStream) -> Option<(TLSPlaintext, Vec<u8>)> {
-    loop {
-        if receiver.to_remove > 0 {
-            receiver.incoming_data = receiver.incoming_data.split_off(receiver.to_remove);
-            receiver.to_remove = 0;
-        }
+impl Receiver {
+    async fn next(&mut self, socket: &mut TcpStream) -> Option<(TLSPlaintext, Vec<u8>)> {
+        const READ_SIZE: usize = 1024;
+        loop {
+            if self.to_remove > 0 {
+                self.incoming_data = self.incoming_data.split_off(self.to_remove);
+                self.to_remove = 0;
+            }
 
-        match TLSPlaintext::from_raw_data(&receiver.incoming_data) {
-            Err(TLSPlaintextError::InsufficientData) => {
-                // need to read some more data from the socket before we can decode the record
-                let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
-                let r = match socket.read(&mut buf).await {
-                    Ok(0) => {
-                        receiver.error = Some(ReceiverError::ConnectionClosedByPeer);
-                        receiver.closed = true;
-                        // println!("Connection closed by peer");
-                        return None;
-                    }
-                    Ok(r) => r,
-                    Err(e) => {
-                        receiver.error = Some(ReceiverError::SocketRecv(format!("{}", e)));
-                        receiver.closed = true;
-                        return None;
-                    }
-                };
-                receiver.incoming_data.extend_from_slice(&buf[0..r]);
-            }
-            Err(TLSPlaintextError::InvalidLength) => {
-                receiver.error = Some(ReceiverError::InvalidRecordLength);
-                receiver.closed = true;
-                // println!("Client sent record with invalid length");
-                return None;
-            }
-            Ok((record, bytes_consumed)) => {
-                receiver.to_remove = bytes_consumed;
-                let record_raw = Vec::from(&receiver.incoming_data[0..bytes_consumed]);
-                return Some((record, record_raw));
+            match TLSPlaintext::from_raw_data(&self.incoming_data) {
+                Err(TLSPlaintextError::InsufficientData) => {
+                    // need to read some more data from the socket before we can decode the record
+                    let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
+                    let r = match socket.read(&mut buf).await {
+                        Ok(0) => {
+                            self.error = Some(ReceiverError::ConnectionClosedByPeer);
+                            self.closed = true;
+                            // println!("Connection closed by peer");
+                            return None;
+                        }
+                        Ok(r) => r,
+                        Err(e) => {
+                            self.error = Some(ReceiverError::SocketRecv(format!("{}", e)));
+                            self.closed = true;
+                            return None;
+                        }
+                    };
+                    self.incoming_data.extend_from_slice(&buf[0..r]);
+                }
+                Err(TLSPlaintextError::InvalidLength) => {
+                    self.error = Some(ReceiverError::InvalidRecordLength);
+                    self.closed = true;
+                    // println!("Client sent record with invalid length");
+                    return None;
+                }
+                Ok((record, bytes_consumed)) => {
+                    self.to_remove = bytes_consumed;
+                    let record_raw = Vec::from(&self.incoming_data[0..bytes_consumed]);
+                    return Some((record, record_raw));
+                }
             }
         }
     }
 }
 
 async fn process_connection_inner(receiver: &mut Receiver, socket: &mut TcpStream) -> Result<(), Box<dyn Error>> {
-    while let Some((record, record_raw)) = receiver_next(receiver, socket).await {
+    while let Some((record, record_raw)) = receiver.next(socket).await {
         process_record(&record, &record_raw)?;
     }
     Ok(())
