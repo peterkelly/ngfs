@@ -116,19 +116,40 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let r = stream.read(&mut buf).await?;
     println!("Read {} bytes", r);
 
-    let server_hello_data = &buf[0..r];
+    let mut incoming_data: Vec<u8> = Vec::from(&buf[0..r]);
 
     let server_hello_filename = "server_hello.bin";
-    std::fs::write(server_hello_filename, server_hello_data)?;
+    std::fs::write(server_hello_filename, &incoming_data)?;
     println!("Wrote {}", server_hello_filename);
 
-    let (plaintext, consumed) = TLSPlaintext::from_raw_data(server_hello_data)?;
-    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, consumed {}",
-            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), consumed);
+    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
+    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
+            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
 
     let mut reader = BinaryReader::new(plaintext.fragment);
     let server_handshake = reader.read_item::<Handshake>()?;
     println!("{:#?}", server_handshake);
+    incoming_data = incoming_data.split_off(bytes_consumed);
+
+    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
+    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
+            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
+    incoming_data = incoming_data.split_off(bytes_consumed);
+
+    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
+    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
+            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
+    incoming_data = incoming_data.split_off(bytes_consumed);
+
+    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
+    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
+            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
+    incoming_data = incoming_data.split_off(bytes_consumed);
+
+    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
+    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
+            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
+    incoming_data = incoming_data.split_off(bytes_consumed);
 
     Ok(())
 }
