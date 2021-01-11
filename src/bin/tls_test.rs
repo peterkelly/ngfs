@@ -205,12 +205,11 @@ impl Receiver {
     }
 }
 
-async fn process_connection_inner(mut socket: TcpStream) -> Result<(), Box<dyn Error>> {
+async fn process_connection_inner(receiver: &mut Receiver, mut socket: TcpStream) {
     const READ_SIZE: usize = 1024;
 
     // let mut incoming_data: Vec<u8> = Vec::new();
     // let mut to_remove: usize = 0;
-    let mut receiver = Receiver::new();
 
     loop {
         if receiver.to_remove > 0 {
@@ -227,13 +226,13 @@ async fn process_connection_inner(mut socket: TcpStream) -> Result<(), Box<dyn E
                         receiver.error = Some(ReceiverError::ConnectionClosedByPeer);
                         receiver.closed = true;
                         // println!("Connection closed by peer");
-                        return Ok(())
+                        return;
                     }
                     Ok(r) => r,
                     Err(e) => {
                         receiver.error = Some(ReceiverError::SocketRecv(format!("{}", e)));
                         receiver.closed = true;
-                        return Ok(());
+                        return;
                     }
                 };
                 receiver.incoming_data.extend_from_slice(&buf[0..r]);
@@ -242,11 +241,18 @@ async fn process_connection_inner(mut socket: TcpStream) -> Result<(), Box<dyn E
                 receiver.error = Some(ReceiverError::InvalidRecordLength);
                 receiver.closed = true;
                 // println!("Client sent record with invalid length");
-                return Ok(())
+                return;
             }
             Ok((record, bytes_consumed)) => {
                 let record_raw = Vec::from(&receiver.incoming_data[0..bytes_consumed]);
-                process_record(&record, &record_raw)?;
+                match process_record(&record, &record_raw) {
+                    Ok(()) => (),
+                    Err(e) => {
+                        receiver.error = Some(ReceiverError::SocketRecv(format!("{}", e)));
+                        receiver.closed = true;
+                        return;
+                    }
+                }
                 receiver.to_remove = bytes_consumed;
             }
         }
@@ -255,12 +261,19 @@ async fn process_connection_inner(mut socket: TcpStream) -> Result<(), Box<dyn E
 
 async fn process_connection(socket: TcpStream, addr: SocketAddr) {
     println!("Received connection from {}", addr);
-    match process_connection_inner(socket).await {
-        Ok(()) => {},
-        Err(e) => {
-            eprintln!("Error processing connection: {}", e);
-        }
-    }
+    let mut receiver = Receiver::new();
+    process_connection_inner(&mut receiver, socket).await;
+    match receiver.error {
+        Some(ReceiverError::ConnectionClosedByPeer) => eprintln!("Connection closed by peer"),
+        Some(ReceiverError::InvalidRecordLength) => eprintln!("Invalid record length"),
+        Some(ReceiverError::SocketRecv(s)) => eprintln!("{}", s),
+        None => (),
+    };
+    //     Ok(()) => {},
+    //     Err(e) => {
+    //         eprintln!("Error processing connection: {}", e);
+    //     }
+    // }
 }
 
 async fn test_server() -> Result<(), Box<dyn Error>> {
