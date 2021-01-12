@@ -111,47 +111,41 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     std::fs::write(serialized_filename, &client_hello_data)?;
     println!("Wrote {}", serialized_filename);
 
-    let mut stream = TcpStream::connect("localhost:443").await?;
-    stream.write_all(&client_hello_data).await?;
-    let mut buf: [u8; 65536] = [0; 65536];
-    let r = stream.read(&mut buf).await?;
-    println!("Read {} bytes", r);
+    let mut socket = TcpStream::connect("localhost:443").await?;
+    socket.write_all(&client_hello_data).await?;
 
-    let mut incoming_data: Vec<u8> = Vec::from(&buf[0..r]);
+    let mut receiver = Receiver::new();
 
-    let server_hello_filename = "server_hello.bin";
-    std::fs::write(server_hello_filename, &incoming_data)?;
-    println!("Wrote {}", server_hello_filename);
+    while let Some((plaintext, plaintext_raw)) = receiver.next(&mut socket).await? {
+        // println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
+        //         plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), plaintext_raw.len());
+        match plaintext.content_type {
+            ContentType::Invalid => {
+                println!("Unsupported record type: Invalid");
+            }
+            ContentType::ChangeCipherSpec => {
+                println!("ChangeCipherSpec record: Ignoring");
+            }
+            ContentType::Alert => {
+                println!("Unsupported record type: Alert");
+            }
+            ContentType::Handshake => {
+                println!("Handshake record");
+                let mut reader = BinaryReader::new(&plaintext.fragment);
+                while reader.remaining() > 0 {
+                    let server_handshake = reader.read_item::<Handshake>()?;
+                    println!("{:#?}", server_handshake);
+                }
+            }
+            ContentType::ApplicationData => {
+                println!("Unsupported record type: ApplicationData");
+            }
+            ContentType::Unknown(code) => {
+                println!("Unsupported record type: {}", code);
+            }
 
-    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
-    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
-            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
-
-    let mut reader = BinaryReader::new(&plaintext.fragment);
-    let server_handshake = reader.read_item::<Handshake>()?;
-    println!("{:#?}", server_handshake);
-    incoming_data = incoming_data.split_off(bytes_consumed);
-
-    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
-    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
-            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
-    incoming_data = incoming_data.split_off(bytes_consumed);
-
-    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
-    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
-            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
-    incoming_data = incoming_data.split_off(bytes_consumed);
-
-    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
-    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
-            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
-    incoming_data = incoming_data.split_off(bytes_consumed);
-
-    let (plaintext, bytes_consumed) = TLSPlaintext::from_raw_data(&incoming_data)?;
-    println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
-            plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), bytes_consumed);
-    incoming_data = incoming_data.split_off(bytes_consumed);
-
+        }
+    }
     Ok(())
 }
 
