@@ -498,7 +498,7 @@ pub enum Extension {
     ApplicationLayerProtocolNegotiation(Vec<ProtocolName>),
     SignatureAlgorithms(Vec<SignatureScheme>),
     ServerName(Vec<ServerName>),
-    EllipticCurves(Vec<NamedCurve>),
+    SupportedGroups(Vec<NamedCurve>),
     ECPointFormats(Vec<ECPointFormat>),
     Unknown(u16, Vec<u8>),
     EncryptThenMac, // (22) RFC7366
@@ -529,7 +529,7 @@ impl Extension {
             }
             10 => {
                 let named_curve = nested_reader.read_len16_list::<NamedCurve>()?;
-                Ok(Extension::EllipticCurves(named_curve))
+                Ok(Extension::SupportedGroups(named_curve))
             }
             11 => {
                 let ec_point_formats = nested_reader.read_len8_list::<ECPointFormat>()?;
@@ -598,7 +598,7 @@ impl ToBinary for Extension {
                 writer.write_u16(0);
                 writer.write_u16_nested(|w| w.write_len16_list(server_names))
             }
-            Extension::EllipticCurves(named_curves) => {
+            Extension::SupportedGroups(named_curves) => {
                 writer.write_u16(10);
                 writer.write_u16_nested(|w| w.write_len16_list(named_curves))
             }

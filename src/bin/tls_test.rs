@@ -40,7 +40,7 @@ fn make_client_hello() -> ClientHello {
             ECPointFormat::Uncompressed,
             ECPointFormat::ANSIX962CompressedPrime,
             ECPointFormat::ANSIX962CompressedChar2]),
-        Extension::EllipticCurves(vec![
+        Extension::SupportedGroups(vec![
             NamedCurve::X25519,
             NamedCurve::Secp256r1,
             NamedCurve::X448,
