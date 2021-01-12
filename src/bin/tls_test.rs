@@ -102,6 +102,41 @@ fn handshake_to_record(handshake: &Handshake) -> Result<Vec<u8>, Box<dyn Error>>
     Ok(output_record.to_vec())
 }
 
+fn test_dh() -> Result<(), Box<dyn Error>> {
+    use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
+    use ring::rand::SystemRandom;
+    let rng = SystemRandom::new();
+    let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
+    let my_public_key = my_private_key.compute_public_key()?;
+    let my_public_key_bytes: &[u8] = my_public_key.as_ref();
+    println!("my_public_key_bytes    = {}", BinaryData(my_public_key_bytes));
+
+    let their_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
+    let their_public_key = their_private_key.compute_public_key()?;
+    let their_public_key_bytes: &[u8] = their_public_key.as_ref();
+    println!("their_public_key_bytes = {}", BinaryData(their_public_key_bytes));
+
+    let my_unparsed_public_key = UnparsedPublicKey::new(&X25519, my_public_key_bytes);
+    let their_unparsed_public_key = UnparsedPublicKey::new(&X25519, their_public_key_bytes);
+
+    let key_material1 = ring::agreement::agree_ephemeral(
+        my_private_key,
+        &their_unparsed_public_key,
+        ring::error::Unspecified,
+        |key_material| Ok(Vec::from(key_material)))?;
+
+    let key_material2 = ring::agreement::agree_ephemeral(
+        their_private_key,
+        &my_unparsed_public_key,
+        ring::error::Unspecified,
+        |key_material| Ok(Vec::from(key_material)))?;
+
+    println!("key_material1 = {}", BinaryData(&key_material1));
+    println!("key_material2 = {}", BinaryData(&key_material2));
+
+    Ok(())
+}
+
 async fn test_client() -> Result<(), Box<dyn Error>> {
     let client_hello = make_client_hello();
     let handshake = Handshake::ClientHello(client_hello);
@@ -294,6 +329,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match command.as_str() {
         "client" => test_client().await,
         "server" => test_server().await,
+        "dh" => test_dh(),
         _ => {
             eprintln!("Unknown command: {}", command);
             std::process::exit(1);
