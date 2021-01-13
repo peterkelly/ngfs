@@ -16,8 +16,13 @@ use torrent::tls::types::handshake::*;
 use torrent::tls::types::extension::*;
 use torrent::tls::types::record::*;
 use torrent::util::from_hex;
+use crypto::digest::Digest;
+use crypto::sha2::Sha384;
+use crypto::hkdf::{hkdf_extract, hkdf_expand};
+use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
+use ring::rand::SystemRandom;
 
-fn make_client_hello() -> ClientHello {
+fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     let random = from_hex("1a87a2e2f77536fcfa071500af3c7dffa5830e6c61214e2dee7623c2b925aed8").unwrap();
     let session_id = from_hex("7d954b019486e0dffaa7769a4b9d27d796eaee44b710f18d630f3292b6dc7560").unwrap();
     println!("random.len() = {}", random.len());
@@ -74,7 +79,8 @@ fn make_client_hello() -> ClientHello {
         Extension::KeyShareClientHello(vec![
             KeyShareEntry {
                 group: NamedGroup::X25519,
-                key_exchange: from_hex("13676e955e3f1e389274ffb25c6adb258a549c56779fd593613a73ea85acc669").unwrap().to_vec()
+                // key_exchange: from_hex("13676e955e3f1e389274ffb25c6adb258a549c56779fd593613a73ea85acc669").unwrap().to_vec()
+                key_exchange: Vec::from(my_public_key_bytes),
             }])
     ];
 
@@ -89,7 +95,7 @@ fn make_client_hello() -> ClientHello {
     }
 }
 
-fn handshake_to_record(handshake: &Handshake) -> Result<Vec<u8>, Box<dyn Error>> {
+fn handshake_to_record(handshake: &Handshake) -> Result<TLSPlaintext, Box<dyn Error>> {
 
     let mut writer = BinaryWriter::new();
     writer.write_item(handshake)?;
@@ -99,12 +105,10 @@ fn handshake_to_record(handshake: &Handshake) -> Result<Vec<u8>, Box<dyn Error>>
         legacy_record_version: 0x0301,
         fragment: Vec::<u8>::from(writer),
     };
-    Ok(output_record.to_vec())
+    Ok(output_record)
 }
 
 fn test_dh() -> Result<(), Box<dyn Error>> {
-    use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
-    use ring::rand::SystemRandom;
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
     let my_public_key = my_private_key.compute_public_key()?;
@@ -134,20 +138,139 @@ fn test_dh() -> Result<(), Box<dyn Error>> {
     println!("key_material1 = {}", BinaryData(&key_material1));
     println!("key_material2 = {}", BinaryData(&key_material2));
 
+    use crypto::sha2::Sha384;
+    let digest = crypto::sha2::Sha384::new();
+    let test_prk: Vec<u8> = Vec::new();
+    let test_info: Vec<u8> = Vec::new();
+    let mut test_okm: [u8; 32] = [0; 32];
+    crypto::hkdf::hkdf_expand(digest, &test_prk, &test_info, &mut test_okm);
+
     Ok(())
 }
 
+fn hkdf_expand_label(secret: &[u8], label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
+    let digest = Sha384::new();
+    let output_bytes = digest.output_bits() / 8;
+    let length_field = (output_bytes as u16).to_be_bytes();
+
+    let mut label_field: Vec<u8> = Vec::new();
+    label_field.extend_from_slice(&b"tls13 "[..]);
+    label_field.extend_from_slice(label_suffix);
+
+
+    let mut hkdf_label: Vec<u8> = Vec::new();
+    hkdf_label.extend_from_slice(&length_field);
+    hkdf_label.push(label_field.len() as u8);
+    hkdf_label.extend_from_slice(&label_field);
+    hkdf_label.push(context.len() as u8);
+    hkdf_label.extend_from_slice(context);
+
+    crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
+}
+
+fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
+    let mut digest = Sha384::new();
+    digest.input(transcript);
+    let mut result: Vec<u8> = vec![0; digest.output_bits() / 8];
+    digest.result(&mut result);
+    result
+}
+
+fn derive_secret(secret: &[u8], label: &[u8], messages: &[u8]) -> Vec<u8> {
+    let mut result: [u8; 48] = [0; 48];
+    let thash = transcript_hash(messages);
+    hkdf_expand_label(secret, label, &thash, &mut result);
+    Vec::from(result)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum State {
+    ClientHelloSent,
+    ServerHelloReceived,
+    Unknown1,
+}
+
+fn get_client_hello_x25519_key_share(client_hello: &ClientHello) -> Option<Vec<u8>> {
+    for extension in client_hello.extensions.iter() {
+        if let Extension::KeyShareClientHello(key_shares) = extension {
+            for ks in key_shares.iter() {
+                if ks.group == NamedGroup::X25519 {
+                    return Some(ks.key_exchange.clone());
+                }
+            }
+        }
+    }
+    return None;
+}
+
+fn get_server_hello_x25519_key_share(server_hello: &ServerHello) -> Option<Vec<u8>> {
+    for extension in server_hello.extensions.iter() {
+        if let Extension::KeyShareServerHello(ks) = extension {
+            if ks.group == NamedGroup::X25519 {
+                return Some(ks.key_exchange.clone());
+            }
+        }
+    }
+    return None;
+}
+
+fn get_x25519_shared_secret(my_private_key: EphemeralPrivateKey/*, client_hello: &ClientHello*/, server_hello: &ServerHello) -> Option<Vec<u8>> {
+    // let client_share = match get_client_hello_x25519_key_share(client_hello) {
+    //     Some(v) => v,
+    //     None => return None,
+    // };
+
+    let server_share = match get_server_hello_x25519_key_share(server_hello) {
+        Some(v) => v,
+        None => return None,
+    };
+
+
+    let their_unparsed_public_key = UnparsedPublicKey::new(&X25519, server_share);
+
+    let key_material1 = match ring::agreement::agree_ephemeral(
+        my_private_key,
+        &their_unparsed_public_key,
+        ring::error::Unspecified,
+        |key_material| Ok(Vec::from(key_material))) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("**** DH agreement failure: {} ****", e);
+            return None;
+        }
+    };
+
+    return Some(key_material1);
+}
+
 async fn test_client() -> Result<(), Box<dyn Error>> {
-    let client_hello = make_client_hello();
+    let rng = SystemRandom::new();
+    let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
+    let my_public_key = my_private_key.compute_public_key()?;
+    let my_public_key_bytes: &[u8] = my_public_key.as_ref();
+    println!("my_public_key_bytes    = {}", BinaryData(my_public_key_bytes));
+    let mut my_private_key: Option<EphemeralPrivateKey> = Some(my_private_key);
+
+    let client_hello = make_client_hello(my_public_key_bytes);
     let handshake = Handshake::ClientHello(client_hello);
-    let client_hello_data = handshake_to_record(&handshake)?;
+    let client_hello_plaintext_record: TLSPlaintext = handshake_to_record(&handshake)?;
+    let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
+    let client_hello_bytes: Vec<u8> = Vec::from(client_hello_plaintext_record.fragment);
+
+    let input_zero: [u8; 48] = [0; 48];
+    let input_psk: [u8; 48] = [0; 48];
+    let derived1 = derive_secret(&input_zero, b"derived", &[0; 0]);
 
     let serialized_filename = "record-constructed.bin";
-    std::fs::write(serialized_filename, &client_hello_data)?;
+    std::fs::write(serialized_filename, &client_hello_plaintext_record_bytes)?;
     println!("Wrote {}", serialized_filename);
 
     let mut socket = TcpStream::connect("localhost:443").await?;
-    socket.write_all(&client_hello_data).await?;
+    socket.write_all(&client_hello_plaintext_record_bytes).await?;
+
+    let mut state = State::ClientHelloSent;
+    let mut client_handshake_traffic_secret: Option<Vec<u8>> = None;
+    let mut server_handshake_traffic_secret: Option<Vec<u8>> = None;
 
     let mut receiver = Receiver::new();
 
@@ -167,12 +290,58 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
             ContentType::Handshake => {
                 println!("Handshake record");
                 let mut reader = BinaryReader::new(&plaintext.fragment);
+                let count = 0;
                 while reader.remaining() > 0 {
+                    let old_offset = reader.abs_offset();
                     let server_handshake = reader.read_item::<Handshake>()?;
+                    let new_offset = reader.abs_offset();
+
                     println!("{:#?}", server_handshake);
+
+                    if state == State::ClientHelloSent {
+                        match server_handshake {
+                            Handshake::ServerHello(server_hello) => {
+                                let server_hello_bytes: Vec<u8> = Vec::from(&plaintext.fragment[old_offset..new_offset]);
+                                let my_private_key2 = my_private_key.take().unwrap();
+
+                                let secret = match get_x25519_shared_secret(my_private_key2, &server_hello) {
+                                    Some(r) => r,
+                                    None => {
+                                        return Err("Cannot get shared secret".into());
+                                    }
+                                };
+                                println!("Shared secret = {}", BinaryData(&secret));
+
+
+                                println!("Got expected server hello");
+                                let mut transcript: Vec<u8> = Vec::new();
+                                transcript.extend_from_slice(&client_hello_bytes);
+                                transcript.extend_from_slice(&server_hello_bytes);
+                                let client_handshake_traffic_secret_b = derive_secret(&derived1, b"c hs traffic", &transcript);
+                                let server_handshake_traffic_secret_b = derive_secret(&derived1, b"s hs traffic", &transcript);
+
+                                println!("client hs secret = {}", BinaryData(&client_handshake_traffic_secret_b));
+                                println!("server hs secret = {}", BinaryData(&server_handshake_traffic_secret_b));
+
+                                client_handshake_traffic_secret = Some(client_handshake_traffic_secret_b);
+                                server_handshake_traffic_secret = Some(server_handshake_traffic_secret_b);
+
+
+                                state = State::ServerHelloReceived;
+                            }
+                            _ => {
+                                println!("Received unexpected handshake type");
+                            }
+                        }
+                    }
+                    else {
+                        println!("Received handhake record in state {:?}; don't know what to do", state);
+                    }
+
                 }
             }
             ContentType::ApplicationData => {
+                let cipher = openssl::symm::Cipher::aes_256_gcm();
                 println!("Unsupported record type: ApplicationData");
             }
             ContentType::Unknown(code) => {

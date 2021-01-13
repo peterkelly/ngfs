@@ -197,6 +197,7 @@ impl fmt::Debug for ServerName {
 }
 
 
+#[derive(Eq, PartialEq)]
 pub enum NamedGroup {
     // Unallocated_RESERVED, // (0x0000),
 
