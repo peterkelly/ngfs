@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::fmt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use torrent::util::{escape_string, BinaryData, DebugHexDump};
+use torrent::util::{escape_string, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use torrent::tls::types::handshake::*;
 use torrent::tls::types::extension::*;
@@ -124,6 +124,48 @@ fn test_hexdump() -> Result<(), Box<dyn Error>> {
         data.push(i as u8);
     }
     println!("{:#?}--", DebugHexDump(&data));
+    Ok(())
+}
+
+fn test_aes() -> Result<(), Box<dyn Error>> {
+    let key_bytes: Vec<u8> = from_hex("573f321bc48531ac0340c91e4eb90ceb8da128255da285def0529f01a547034f").unwrap();
+    assert!(key_bytes.len() == 32);
+
+    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
+
+    // println!("AES_128_GCM       key_len = {}, tag_len = {}, nonce_len = {}",
+    //          AES_128_GCM.key_len(), AES_128_GCM.tag_len(), AES_128_GCM.nonce_len());
+
+    // println!("AES_256_GCM       key_len = {}, tag_len = {}, nonce_len = {}",
+    //          AES_256_GCM.key_len(), AES_256_GCM.tag_len(), AES_256_GCM.nonce_len());
+
+    // println!("CHACHA20_POLY1305 key_len = {}, tag_len = {}, nonce_len = {}",
+    //          CHACHA20_POLY1305.key_len(), CHACHA20_POLY1305.tag_len(), CHACHA20_POLY1305.nonce_len());
+
+    // AES_128_GCM       key_len = 16, tag_len = 16, nonce_len = 12
+    // AES_256_GCM       key_len = 32, tag_len = 16, nonce_len = 12
+    // CHACHA20_POLY1305 key_len = 32, tag_len = 16, nonce_len = 12
+
+    let key = LessSafeKey::new(UnboundKey::new(&AES_256_GCM, &key_bytes)?);
+    let nonce_bytes: [u8; 12] = [1; 12];
+    let enc_nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let input_plaintext: &[u8] = b"The quick brown fox jumps over the lazy dog";
+    let input_plaintext_len = input_plaintext.len();
+    println!("input_plaintext ({} bytes) =\n{:#?}", input_plaintext.len(), Indent(&DebugHexDump(&input_plaintext)));
+
+    let enc_aad = Aad::from(b"hello");
+    let mut work: Vec<u8> = Vec::new();
+    work.extend_from_slice(&input_plaintext);
+    key.seal_in_place_append_tag(enc_nonce, enc_aad, &mut work)?;
+    println!("ciphertext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
+
+    let dec_nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let dec_aad = Aad::from(b"hello");
+    key.open_in_place(dec_nonce, dec_aad, &mut work)?;
+    work.truncate(work.len() - AES_256_GCM.tag_len());
+    println!("output_plaintext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
+    println!("output == input ? {}", work == input_plaintext);
+
     Ok(())
 }
 
@@ -518,6 +560,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "client" => test_client().await,
         "server" => test_server().await,
         "dh" => test_dh(),
+        "aes" => test_aes(),
         "hexdump" => test_hexdump(),
         _ => {
             eprintln!("Unknown command: {}", command);

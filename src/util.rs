@@ -129,3 +129,20 @@ impl<'a> DebugHexDump<'a> {
         Ok(())
     }
 }
+
+pub struct Indent<'a>(pub &'a dyn fmt::Debug);
+
+impl<'a> fmt::Debug for Indent<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use std::fmt::Write;
+        let mut s = String::new();
+        write!(s, "{:#?}", self.0)?;
+        for (i, line) in s.lines().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "    {}", line)?;
+        }
+        Ok(())
+    }
+}
