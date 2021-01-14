@@ -87,20 +87,45 @@ impl<'a> fmt::Debug for DebugHexDump<'a> {
             }
         }
         else {
-            for i in 0..self.0.len() {
-                f.write_fmt(format_args!("{:02x}", self.0[i]))?;
-
-                if (i + 1) == self.0.len() || (i + 1) % 16 == 0 {
-                    f.write_str("\n")?;
+            let nlines = if self.0.len() == 0 { 1 } else { (self.0.len() + 15) / 16 };
+            for lineno in 0..nlines {
+                let start = lineno * 16;
+                write!(f, "{:08x}", start)?;
+                for i in start..start + 16 {
+                    if i % 8 == 0 {
+                        write!(f, " ")?;
+                    }
+                    if i < self.0.len() {
+                        write!(f, " {:02x}", self.0[i])?;
+                    }
+                    else {
+                        write!(f, "   ")?;
+                    }
                 }
-                else if (i + 1) % 8 == 0 {
-                    f.write_str("   ")?;
-                }
-                else{
-                    f.write_str(" ")?;
+                self.fmt_chars(start, f)?;
+                if lineno + 1 < nlines {
+                    write!(f, "\n")?;
                 }
             }
         }
+        Ok(())
+    }
+}
+
+impl<'a> DebugHexDump<'a> {
+    fn fmt_chars(&self, start: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let end = std::cmp::min(start + 16, self.0.len());
+        write!(f, "  |")?;
+        for i in start..end {
+            let byte = self.0[i];
+            if byte >= 32 && byte <= 126 {
+                write!(f, "{}", byte as char)?;
+            }
+            else {
+                write!(f, ".")?;
+            }
+        }
+        write!(f, "|")?;
         Ok(())
     }
 }

@@ -19,6 +19,7 @@ use torrent::util::from_hex;
 use crypto::digest::Digest;
 use crypto::sha2::Sha384;
 use crypto::hkdf::{hkdf_extract, hkdf_expand};
+use crypto::aes_gcm::AesGcm;
 use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::rand::SystemRandom;
 
@@ -106,6 +107,24 @@ fn handshake_to_record(handshake: &Handshake) -> Result<TLSPlaintext, Box<dyn Er
         fragment: Vec::<u8>::from(writer),
     };
     Ok(output_record)
+}
+
+fn test_hexdump() -> Result<(), Box<dyn Error>> {
+    let len_str: String = match std::env::args().nth(2) {
+        Some(v) => v,
+        None => {
+            eprintln!("Please specify length");
+            std::process::exit(1);
+        }
+    };
+
+    let len = len_str.parse::<usize>()?;
+    let mut data: Vec<u8> = Vec::new();
+    for i in 0..len {
+        data.push(i as u8);
+    }
+    println!("{:#?}--", DebugHexDump(&data));
+    Ok(())
 }
 
 fn test_dh() -> Result<(), Box<dyn Error>> {
@@ -499,6 +518,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "client" => test_client().await,
         "server" => test_server().await,
         "dh" => test_dh(),
+        "hexdump" => test_hexdump(),
         _ => {
             eprintln!("Unknown command: {}", command);
             std::process::exit(1);
