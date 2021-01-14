@@ -320,18 +320,31 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
     let input_zero: [u8; 48] = [0; 48];
     let input_psk: [u8; 48] = [0; 48];
-    let derived1 = derive_secret(&input_zero, b"derived", &[0; 0]);
+
+    // let salt1 = ring::hkdf::Salt::new(ring::hkdf::HKDF_SHA384, &input_zero);
+    // let prk1 = salt1.extract(&input_psk);
+
+    let digest = crypto::sha2::Sha384::new();
+    // let test_prk: Vec<u8> = Vec::new();
+    // let test_info: Vec<u8> = Vec::new();
+    let mut test_okm: [u8; 48] = [0; 48];
+    crypto::hkdf::hkdf_expand(digest, &input_psk, &input_zero, &mut test_okm);
+
+    let derived1 = derive_secret(&test_okm, b"derived", &[0; 0]);
 
     let serialized_filename = "record-constructed.bin";
     std::fs::write(serialized_filename, &client_hello_plaintext_record_bytes)?;
     println!("Wrote {}", serialized_filename);
 
-    let mut socket = TcpStream::connect("localhost:443").await?;
+    // let mut socket = TcpStream::connect("localhost:443").await?;
+    let mut socket = TcpStream::connect("localhost:4433").await?;
     socket.write_all(&client_hello_plaintext_record_bytes).await?;
 
     let mut state = State::ClientHelloSent;
     let mut client_handshake_traffic_secret: Option<Vec<u8>> = None;
     let mut server_handshake_traffic_secret: Option<Vec<u8>> = None;
+    // let mut client_sequence_no: u64 = 0;
+    let mut server_sequence_no: u64 = 0;
 
     let mut receiver = Receiver::new();
 
@@ -403,7 +416,82 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
             }
             ContentType::ApplicationData => {
                 let cipher = openssl::symm::Cipher::aes_256_gcm();
-                println!("Unsupported record type: ApplicationData");
+                if let Some(secret) = server_handshake_traffic_secret.clone() {
+                    println!("Application data:");
+                    println!("{:#?}", Indent(&DebugHexDump(&plaintext_raw)));
+
+
+                    let sequence_no_bytes: [u8; 8] = server_sequence_no.to_be_bytes();
+                    let mut nonce_bytes: [u8; 12] = [0; 12];
+                    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
+
+                    let mut server_write_key: [u8; 12] = [0; 12];
+                    let mut server_write_iv: [u8; 12] = [0; 12];
+
+
+                    // // fn hkdf_expand_label(secret: &[u8], label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
+                    // let key_length = 1; // TODO
+                    // let iv_length = 1; // TODO
+
+                    // // 7.3.  Traffic Key Calculation
+                    // let mut server_write_key = Vec::new();
+                    // for i in 0..key_length {
+                    //     server_write_key.push(0);
+                    // }
+
+                    // let mut server_write_iv = Vec::new();
+                    // for i in 0..iv_length {
+                    //     server_write_iv.push(0);
+                    // }
+
+                    hkdf_expand_label(&secret, b"key", b"", &mut server_write_key);
+                    hkdf_expand_label(&secret, b"iv", b"", &mut server_write_iv);
+                    println!("server_write_key = {:?}", DebugHexDump(&server_write_key));
+                    println!("server_write_iv  = {:?}", DebugHexDump(&server_write_iv));
+
+                    for i in 0..12 {
+                        nonce_bytes[i] ^= server_write_iv[i];
+                    }
+
+                    println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
+                    let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
+                    println!("bytes_consumed = {}", bytes_consumed);
+                    if bytes_consumed != plaintext_raw.len() {
+                        return Err("bytes_consumed != plaintext_raw.len()".into());
+                    }
+
+                    let mut additional_data: Vec<u8> = Vec::new();
+                    additional_data.extend_from_slice(&plaintext_raw[0..5]); // TODO: verify we have at least 5 bytes
+
+                    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
+
+                    let key = LessSafeKey::new(UnboundKey::new(&AES_256_GCM, &server_write_key)?);
+                    // let nonce_bytes: [u8; 12] = [1; 12];
+                    // let enc_nonce = Nonce::assume_unique_for_key(nonce_bytes);
+                    // let input_plaintext: &[u8] = b"The quick brown fox jumps over the lazy dog";
+                    // let input_plaintext_len = input_plaintext.len();
+                    // println!("input_plaintext ({} bytes) =\n{:#?}", input_plaintext.len(), Indent(&DebugHexDump(&input_plaintext)));
+
+                    let aad = Aad::from(additional_data);
+                    let mut work: Vec<u8> = Vec::new();
+                    work.extend_from_slice(&tls_ciphertext.encrypted_record);
+                    // key.seal_in_place_append_tag(enc_nonce, enc_aad, &mut work)?;
+                    // println!("ciphertext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
+
+                    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+                    // let dec_aad = Aad::from(b"hello");
+                    key.open_in_place(nonce, aad, &mut work)?;
+                    // work.truncate(work.len() - AES_256_GCM.tag_len());
+                    // println!("output_plaintext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
+                    // println!("output == input ? {}", work == input_plaintext);
+
+
+
+                    println!("Received ApplicationData");
+                }
+                else {
+                    println!("Received ApplicationData but don't have secret");
+                }
             }
             ContentType::Unknown(code) => {
                 println!("Unsupported record type: {}", code);

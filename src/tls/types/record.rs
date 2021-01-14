@@ -11,6 +11,8 @@ use std::fmt;
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
 const TLS_RECORD_SIZE: usize = 16384;
 
+const TLS_MAX_ENCRYPTED_RECORD_LEN: usize = (1 << 14) + 256;
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum ContentType {
     Invalid,
@@ -68,6 +70,51 @@ impl fmt::Debug for TLSPlaintextError {
 impl std::error::Error for TLSPlaintextError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
+    }
+}
+
+pub struct TLSCiphertext {
+    pub opaque_type: u8, // = application_data; /* 23 */
+    pub legacy_record_version: u16, // = 0x0303; /* TLS v1.2 */
+    // pub length: u16,
+    pub encrypted_record: Vec<u8>,
+}
+
+impl TLSCiphertext {
+    pub fn from_raw_data(data: &[u8]) -> Result<(TLSCiphertext, usize), TLSPlaintextError> {
+        if data.len() < 5 {
+            return Err(TLSPlaintextError::InsufficientData);
+        }
+
+        let opaque_type = data[0];
+
+        let mut legacy_record_version_bytes: [u8; 2] = Default::default();
+        legacy_record_version_bytes.copy_from_slice(&data[1..3]);
+        let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
+
+
+        let mut length_bytes: [u8; 2] = Default::default();
+        length_bytes.copy_from_slice(&data[3..5]);
+        let length = u16::from_be_bytes(length_bytes) as usize;
+
+        if length > TLS_MAX_ENCRYPTED_RECORD_LEN {
+            println!("Invalid ciphertext length {}", length);
+            return Err(TLSPlaintextError::InvalidLength);
+        }
+
+        if 5 + length > data.len() {
+            return Err(TLSPlaintextError::InsufficientData);
+        }
+
+        let encrypted_record = Vec::from(&data[5..5 + length]);
+
+        let record = TLSCiphertext {
+            opaque_type,
+            legacy_record_version,
+            encrypted_record,
+        };
+        let consumed = 5 + length;
+        Ok((record, consumed))
     }
 }
 
