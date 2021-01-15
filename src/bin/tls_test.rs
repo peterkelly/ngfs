@@ -22,7 +22,8 @@ use crypto::sha2::Sha384;
 use crypto::aes_gcm::AesGcm;
 use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::rand::SystemRandom;
-use ring::hkdf::{Prk, Okm};
+use ring::hkdf::{Prk, Okm, Salt};
+use ring::hkdf;
 
 fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     let random = from_hex("1a87a2e2f77536fcfa071500af3c7dffa5830e6c61214e2dee7623c2b925aed8").unwrap();
@@ -257,8 +258,110 @@ fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mu
     println!();
 
     // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
-    let okm1 = secret.expand(parts, ring::hkdf::HKDF_SHA384).unwrap();
+    let okm1: Okm<'_, hkdf::Algorithm> = secret.expand(parts, ring::hkdf::HKDF_SHA384).unwrap();
+    // let x: ring::hkdf::Okm<'_, ring::hkdf::Algorithm> = okm1;
+    // let x: () = okm1;
     okm1.fill(okm).unwrap();
+}
+
+fn hkdf_expand_label_prk(secret: &Prk, label_suffix: &[u8], context: &[u8]) -> Prk {
+    let digest = Sha384::new();
+    let output_bytes = digest.output_bits() / 8;
+    let length_field = (output_bytes as u16).to_be_bytes();
+
+    let mut label_field: Vec<u8> = Vec::new();
+    label_field.extend_from_slice(&b"tls13 "[..]);
+    label_field.extend_from_slice(label_suffix);
+
+
+    // let mut hkdf_label: Vec<u8> = Vec::new();
+    // hkdf_label.extend_from_slice(&length_field);
+    // hkdf_label.push(label_field.len() as u8);
+    // hkdf_label.extend_from_slice(&label_field);
+    // hkdf_label.push(context.len() as u8);
+    // hkdf_label.extend_from_slice(context);
+
+    // let parts: &[&[u8]] = &[&hkdf_label];
+
+    println!("hkdf_expand_label {}", String::from_utf8_lossy(label_suffix));
+    println!("    output_bytes = {}", output_bytes);
+    println!("    label_len    = {}", label_field.len());
+    println!("    context_len  = {}", context.len());
+    // println!("    info = {:?}", BinaryData(&hkdf_label));
+
+    let parts: &[&[u8]] = &[
+
+        &length_field,
+        &[label_field.len() as u8],
+        // &label_field,
+        &b"tls13 "[..],
+        label_suffix,
+        &[context.len() as u8],
+        context,
+        ];
+
+
+    print!("    info =");
+    for a in parts.iter() {
+        print!(" ");
+        for b in a.iter() {
+            print!("{:02x}", b);
+        }
+    }
+    println!();
+
+    // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
+    secret.expand(parts, ring::hkdf::HKDF_SHA384).unwrap().into()
+}
+
+fn hkdf_expand_label_salt(secret: &Prk, label_suffix: &[u8], context: &[u8]) -> Salt {
+    let digest = Sha384::new();
+    let output_bytes = digest.output_bits() / 8;
+    let length_field = (output_bytes as u16).to_be_bytes();
+
+    let mut label_field: Vec<u8> = Vec::new();
+    label_field.extend_from_slice(&b"tls13 "[..]);
+    label_field.extend_from_slice(label_suffix);
+
+
+    // let mut hkdf_label: Vec<u8> = Vec::new();
+    // hkdf_label.extend_from_slice(&length_field);
+    // hkdf_label.push(label_field.len() as u8);
+    // hkdf_label.extend_from_slice(&label_field);
+    // hkdf_label.push(context.len() as u8);
+    // hkdf_label.extend_from_slice(context);
+
+    // let parts: &[&[u8]] = &[&hkdf_label];
+
+    println!("hkdf_expand_label {}", String::from_utf8_lossy(label_suffix));
+    println!("    output_bytes = {}", output_bytes);
+    println!("    label_len    = {}", label_field.len());
+    println!("    context_len  = {}", context.len());
+    // println!("    info = {:?}", BinaryData(&hkdf_label));
+
+    let parts: &[&[u8]] = &[
+
+        &length_field,
+        &[label_field.len() as u8],
+        // &label_field,
+        &b"tls13 "[..],
+        label_suffix,
+        &[context.len() as u8],
+        context,
+        ];
+
+
+    print!("    info =");
+    for a in parts.iter() {
+        print!(" ");
+        for b in a.iter() {
+            print!("{:02x}", b);
+        }
+    }
+    println!();
+
+    // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
+    secret.expand(parts, ring::hkdf::HKDF_SHA384).unwrap().into()
 }
 
 fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
@@ -272,8 +375,26 @@ fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
 fn derive_secret(secret: &Prk, label: &[u8], messages: &[u8]) -> Vec<u8> {
     let mut result: [u8; 48] = [0; 48];
     let thash = transcript_hash(messages);
+    println!("derive_secret begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
     hkdf_expand_label(secret, label, &thash, &mut result);
+    println!("derive_secret end '{}'", String::from_utf8_lossy(label));
     Vec::from(result)
+}
+
+fn derive_secret_prk(secret: &Prk, label: &[u8], messages: &[u8]) -> Prk {
+    let thash = transcript_hash(messages);
+    println!("derive_secret_prk begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
+    let res = hkdf_expand_label_prk(secret, label, &thash);
+    println!("derive_secret_prk end '{}'", String::from_utf8_lossy(label));
+    res
+}
+
+fn derive_secret_salt(secret: &Prk, label: &[u8], messages: &[u8]) -> Salt {
+    let thash = transcript_hash(messages);
+    println!("derive_secret_salt begin '{}' {}", String::from_utf8_lossy(label), BinaryData(&thash));
+    let res = hkdf_expand_label_salt(secret, label, &thash);
+    println!("derive_secret_salt end '{}'", String::from_utf8_lossy(label));
+    res
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -336,6 +457,18 @@ fn get_x25519_shared_secret(my_private_key: EphemeralPrivateKey/*, client_hello:
     return Some(key_material1);
 }
 
+fn test_expand(prefix: &str, prk: &Prk) {
+    let info: &[&[u8]] = &[b"hello"];
+    let okm = prk.expand(info, ring::hkdf::HKDF_SHA384).unwrap();
+    let mut data: [u8; 48] = [0; 48];
+    okm.fill(&mut data).unwrap();
+    print!("test_expand {}: ", prefix);
+    for b in data.iter() {
+        print!("{:02x}", b);
+    }
+    println!();
+}
+
 async fn test_client() -> Result<(), Box<dyn Error>> {
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
@@ -366,11 +499,20 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     // let empty_digest_bytes: &[u8] = empty_digest.as_ref();
     // println!("empty_digest_bytes = {}", BinaryData(empty_digest_bytes));
     let salt1 = ring::hkdf::Salt::new(ring::hkdf::HKDF_SHA384, &input_zero);
-    let prk1 = salt1.extract(&input_psk);
+    let prk1: Prk = salt1.extract(&input_psk);
+    test_expand("prk1", &prk1);
 
-    let derived1 = derive_secret(&prk1, b"derived", &[]);
-    println!("derived1 = {}", BinaryData(&derived1));
-    let derived1_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &derived1);
+    // let derived1 = derive_secret(&prk1, b"derived", &[]);
+    // println!("derived1 = {}", BinaryData(&derived1));
+    // let derived1_prk: Prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &derived1);
+
+    // let derived1_prk: Prk = derive_secret_prk(&prk1, b"derived", &[]);
+    // test_expand("derived1_prk", &derived1_prk);
+
+    // let derived1_salt: Salt = derive_secret_salt(&prk1, b"derived", &[]);
+    // let derived1_prk: Prk = derived1_salt.extract(&input_psk);
+    // let derived1_prk: Prk = derived1_salt.extract(&[]);
+    // test_expand("derived1_prk", &derived1_prk);
 
     let serialized_filename = "record-constructed.bin";
     std::fs::write(serialized_filename, &client_hello_plaintext_record_bytes)?;
@@ -399,6 +541,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
             }
             ContentType::ChangeCipherSpec => {
                 cipher_change_bytes = Some(Vec::from(plaintext.fragment));
+                println!("now cipher_change_bytes = {:?}", cipher_change_bytes);
                 println!("ChangeCipherSpec record: Ignoring");
             }
             ContentType::Alert => {
@@ -429,16 +572,28 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                                 };
                                 println!("Shared secret = {}", BinaryData(&secret));
 
+                                // let derived2_prk: Prk = derive_secret_prk(&derived1_prk, b"derived", &secret);
+                                // let derived2_prk: Prk = derive_secret_prk(&prk1, b"derived", &secret);
+                                // test_expand("derived2_prk", &derived2_prk);
+
+                                let derived2_salt = derive_secret_salt(&prk1, b"derived", &[]);
+                                let derived2_prk: Prk = derived2_salt.extract(&secret);
+                                test_expand("derived2_prk", &derived2_prk);
+
 
                                 println!("Got expected server hello");
                                 let mut transcript: Vec<u8> = Vec::new();
                                 transcript.extend_from_slice(&client_hello_bytes);
                                 if let Some(ccb) = cipher_change_bytes.clone() {
+                                    println!("-------------- adding ccb to transcript ---------------");
                                     transcript.extend_from_slice(&ccb);
                                 }
+                                else {
+                                    println!("-------------- NOT adding ccb to transcript ---------------");
+                                }
                                 transcript.extend_from_slice(&server_hello_bytes);
-                                let client_handshake_traffic_secret_b = derive_secret(&derived1_prk, b"c hs traffic", &transcript);
-                                let server_handshake_traffic_secret_b = derive_secret(&derived1_prk, b"s hs traffic", &transcript);
+                                let client_handshake_traffic_secret_b = derive_secret(&derived2_prk, b"c hs traffic", &transcript);
+                                let server_handshake_traffic_secret_b = derive_secret(&derived2_prk, b"s hs traffic", &transcript);
 
                                 println!("client hs secret = {}", BinaryData(&client_handshake_traffic_secret_b));
                                 println!("server hs secret = {}", BinaryData(&server_handshake_traffic_secret_b));
