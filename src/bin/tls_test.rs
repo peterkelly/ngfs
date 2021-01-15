@@ -220,14 +220,41 @@ fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mu
     label_field.extend_from_slice(label_suffix);
 
 
-    let mut hkdf_label: Vec<u8> = Vec::new();
-    hkdf_label.extend_from_slice(&length_field);
-    hkdf_label.push(label_field.len() as u8);
-    hkdf_label.extend_from_slice(&label_field);
-    hkdf_label.push(context.len() as u8);
-    hkdf_label.extend_from_slice(context);
+    // let mut hkdf_label: Vec<u8> = Vec::new();
+    // hkdf_label.extend_from_slice(&length_field);
+    // hkdf_label.push(label_field.len() as u8);
+    // hkdf_label.extend_from_slice(&label_field);
+    // hkdf_label.push(context.len() as u8);
+    // hkdf_label.extend_from_slice(context);
 
-    let parts: &[&[u8]] = &[&hkdf_label];
+    // let parts: &[&[u8]] = &[&hkdf_label];
+
+    println!("hkdf_expand_label {}", String::from_utf8_lossy(label_suffix));
+    println!("    output_bytes = {}", output_bytes);
+    println!("    label_len    = {}", label_field.len());
+    println!("    context_len  = {}", context.len());
+    // println!("    info = {:?}", BinaryData(&hkdf_label));
+
+    let parts: &[&[u8]] = &[
+
+        &length_field,
+        &[label_field.len() as u8],
+        // &label_field,
+        &b"tls13 "[..],
+        label_suffix,
+        &[context.len() as u8],
+        context,
+        ];
+
+
+    print!("    info =");
+    for a in parts.iter() {
+        print!(" ");
+        for b in a.iter() {
+            print!("{:02x}", b);
+        }
+    }
+    println!();
 
     // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
     let okm1 = secret.expand(parts, ring::hkdf::HKDF_SHA384).unwrap();
@@ -335,10 +362,14 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     // let mut test_okm: [u8; 48] = [0; 48];
     // crypto::hkdf::hkdf_extract(digest, &input_psk, &input_zero, &mut test_okm);
 
+    // let empty_digest = ring::digest::digest(&ring::digest::SHA384, &[]);
+    // let empty_digest_bytes: &[u8] = empty_digest.as_ref();
+    // println!("empty_digest_bytes = {}", BinaryData(empty_digest_bytes));
     let salt1 = ring::hkdf::Salt::new(ring::hkdf::HKDF_SHA384, &input_zero);
     let prk1 = salt1.extract(&input_psk);
 
-    let derived1 = derive_secret(&prk1, b"derived", &[0; 0]);
+    let derived1 = derive_secret(&prk1, b"derived", &[]);
+    println!("derived1 = {}", BinaryData(&derived1));
     let derived1_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &derived1);
 
     let serialized_filename = "record-constructed.bin";
