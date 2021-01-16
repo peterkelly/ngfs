@@ -32,6 +32,12 @@ impl FromBinary for Handshake {
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         let handshake_type = reader.read_u8()?;
+        Self::from_binary2(reader, handshake_type)
+    }
+}
+
+impl Handshake {
+    pub fn from_binary2(reader: &mut BinaryReader, handshake_type: u8) -> Result<Self, Box<dyn Error>> {
         let length = reader.read_u24()? as usize;
         match handshake_type {
             1 => Ok(Handshake::ClientHello(reader.read_item()?)),
@@ -220,7 +226,7 @@ impl FromBinary for ServerHello {
     type Output = ServerHello;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        println!("ServerHello start: offset = 0x{:x}", reader.abs_offset());
+        // println!("ServerHello start: offset = 0x{:x}", reader.abs_offset());
         let legacy_version = reader.read_u16()?;
         let random_slice = reader.read_fixed(32)?;
         let mut random: [u8; 32] = Default::default();
@@ -264,13 +270,15 @@ impl FromBinary for EndOfEarlyData {
 
 #[derive(Debug)]
 pub struct EncryptedExtensions {
+    todo: String,
 }
 
 impl FromBinary for EncryptedExtensions {
     type Output = EncryptedExtensions;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("EncryptedExtensions::from_binary(): Not implemented"))
+        // Err(GeneralError::new("EncryptedExtensions::from_binary(): Not implemented"))
+        Ok(EncryptedExtensions { todo: String::from("TODO") })
     }
 }
 
@@ -286,39 +294,92 @@ impl FromBinary for CertificateRequest {
     }
 }
 
+// #[derive(Debug)]
+pub struct CertificateEntry {
+    pub data: Vec<u8>,
+    pub extensions: Vec<Extension>,
+}
+
+impl FromBinary for CertificateEntry {
+    type Output = CertificateEntry;
+
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        let data = reader.read_len24_bytes()?.to_vec();
+
+        let mut extensions: Vec<Extension> = Vec::new();
+        let extensions_len = reader.read_u16()? as usize;
+        let mut extensions_reader = reader.read_nested(extensions_len)?;
+        while extensions_reader.remaining() > 0 {
+            extensions.push(Extension::from_binary2(&mut extensions_reader, ExtensionContext::Certificate)?);
+        }
+
+        Ok(CertificateEntry {
+            data,
+            extensions,
+        })
+        // unimplemented!()
+        // Ok(CertificateEntry{})
+    }
+}
+
+impl fmt::Debug for CertificateEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("CertificateEntry")
+            .field("data", &DebugHexDump(&self.data))
+            .field("extensions", &self.extensions)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub struct Certificate {
+    pub certificate_request_context: Vec<u8>,
+    pub certificate_list: Vec<CertificateEntry>,
 }
 
 impl FromBinary for Certificate {
     type Output = Certificate;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("Certificate::from_binary(): Not implemented"))
+        let certificate_request_context = reader.read_len8_bytes()?.to_vec();
+        let certificate_list = reader.read_len24_list::<CertificateEntry>()?;
+
+        Ok(Certificate {
+            certificate_request_context,
+            certificate_list,
+        })
+
+
+        // Err(GeneralError::new("Certificate::from_binary(): Not implemented"))
+        // Ok(Certificate { todo: String::from("TODO") })
     }
 }
 
 #[derive(Debug)]
 pub struct CertificateVerify {
+    todo: String,
 }
 
 impl FromBinary for CertificateVerify {
     type Output = CertificateVerify;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("CertificateVerify::from_binary(): Not implemented"))
+        // Err(GeneralError::new("CertificateVerify::from_binary(): Not implemented"))
+        Ok(CertificateVerify { todo: String::from("TODO") })
     }
 }
 
 #[derive(Debug)]
 pub struct Finished {
+    todo: String,
 }
 
 impl FromBinary for Finished {
     type Output = Finished;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("Finished::from_binary(): Not implemented"))
+        // Err(GeneralError::new("Finished::from_binary(): Not implemented"))
+        Ok(Finished { todo: String::from("TODO") })
     }
 }
 

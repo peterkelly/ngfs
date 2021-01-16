@@ -175,6 +175,11 @@ impl<'a> BinaryReader<'a> {
         self.read_fixed(len)
     }
 
+    pub fn read_len24_bytes(&mut self) -> Result<&[u8], BinaryError> {
+        let len = self.read_u24()? as usize;
+        self.read_fixed(len)
+    }
+
     pub fn read_item<T : FromBinary<Output = T>>(&mut self) -> Result<T, Box<dyn std::error::Error>> {
         T::from_binary(self)
     }
@@ -186,6 +191,11 @@ impl<'a> BinaryReader<'a> {
 
     pub fn read_len16_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, Box<dyn std::error::Error>> {
         let len = self.read_u16()? as usize;
+        self.read_fixed_list(len)
+    }
+
+    pub fn read_len24_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+        let len = self.read_u24()? as usize;
         self.read_fixed_list(len)
     }
 

@@ -460,9 +460,9 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                         nonce_bytes[i] ^= server_write_iv[i];
                     }
 
-                    println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
+                    // println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
                     let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
-                    println!("bytes_consumed = {}", bytes_consumed);
+                    // println!("bytes_consumed = {}", bytes_consumed);
                     if bytes_consumed != plaintext_raw.len() {
                         return Err("bytes_consumed != plaintext_raw.len()".into());
                     }
@@ -489,7 +489,50 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                     match key.open_in_place(nonce, aad, &mut work) {
                         Ok(plaintext) => {
                             println!("open_in_place succeeded");
-                            println!("{:#?}", Indent(&DebugHexDump(plaintext)));
+
+                            // TEMP: Add test zero padding
+                            // let mut plaintext: Vec<u8> = plaintext.to_vec();
+                            // for i in 0..5 {
+                            //     plaintext.push(0);
+                            // }
+
+                            let mut type_offset: usize = plaintext.len();
+                            while type_offset > 0 && plaintext[type_offset - 1] == 0 {
+                                type_offset -= 1;
+                            }
+                            if type_offset == 0 {
+                                return Err(GeneralError::new("Plaintext: Missing type field"));
+                            }
+                            let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
+                            let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+                            println!("inner_content_type = {:?}", inner_content_type);
+                            println!("inner_body.len() = {}", inner_body.len());
+
+
+                            println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
+
+                            match inner_content_type {
+                                ContentType::Handshake => {
+                                    let mut reader = BinaryReader::new(inner_body);
+                                    let inner_handshake = reader.read_item::<Handshake>()?;
+                                    match &inner_handshake {
+                                        Handshake::Certificate(certificate) => {
+                                            println!("This is a certificate handshake");
+                                            for entry in certificate.certificate_list.iter() {
+                                                println!("- entry");
+                                                let filename = "certificate.crt";
+                                                std::fs::write(filename, &entry.data)?;
+                                                println!("Wrote to {}", filename);
+                                            }
+                                        }
+                                        _ => {
+                                        }
+                                    }
+                                    println!("{:#?}", inner_handshake);
+                                }
+                                _ => {
+                                }
+                            }
                         },
                         Err(e) => {
                             return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e)));

@@ -515,6 +515,7 @@ pub enum Extension {
 pub enum ExtensionContext {
     ClientHello,
     ServerHello,
+    Certificate,
 }
 
 impl Extension {
@@ -574,6 +575,9 @@ impl Extension {
                     ExtensionContext::ClientHello => {
                         let entries = nested_reader.read_len16_list::<KeyShareEntry>()?;
                         Ok(Extension::KeyShareClientHello(entries))
+                    }
+                    ExtensionContext::Certificate => {
+                        Err("KeyShare extension not supported in certificates".into())
                     }
                 }
             }
