@@ -74,6 +74,12 @@ pub fn escape_string(s: &str) -> String {
     return escaped.into_iter().collect();
 }
 
+pub fn vec_with_len<T : Default + Clone>(len: usize) -> Vec<T> {
+    let mut result = Vec::with_capacity(len);
+    result.resize(len, Default::default());
+    result
+}
+
 pub struct DebugHexDump<'a>(pub &'a [u8]);
 
 impl<'a> fmt::Debug for DebugHexDump<'a> {

@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::fmt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use torrent::util::{escape_string, BinaryData, DebugHexDump, Indent};
+use torrent::util::{escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use torrent::tls::types::handshake::*;
 use torrent::tls::types::extension::*;
@@ -221,9 +221,6 @@ impl ring::hkdf::KeyType for Length {
 }
 
 fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
-    // let digest = Sha384::new();
-    // let output_bytes = digest.output_bits() / 8;
-    // let length_field = (output_bytes as u16).to_be_bytes();
     let length_field = (okm.len() as u16).to_be_bytes();
 
     let mut label_field: Vec<u8> = Vec::new();
@@ -231,147 +228,21 @@ fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mu
     label_field.extend_from_slice(label_suffix);
 
 
-    // let mut hkdf_label: Vec<u8> = Vec::new();
-    // hkdf_label.extend_from_slice(&length_field);
-    // hkdf_label.push(label_field.len() as u8);
-    // hkdf_label.extend_from_slice(&label_field);
-    // hkdf_label.push(context.len() as u8);
-    // hkdf_label.extend_from_slice(context);
+    let mut hkdf_label: Vec<u8> = Vec::new();
+    hkdf_label.extend_from_slice(&length_field);
+    hkdf_label.push(label_field.len() as u8);
+    hkdf_label.extend_from_slice(&label_field);
+    hkdf_label.push(context.len() as u8);
+    hkdf_label.extend_from_slice(context);
 
-    // let parts: &[&[u8]] = &[&hkdf_label];
+    let parts: &[&[u8]] = &[&hkdf_label];
 
-    // println!("hkdf_expand_label {}", String::from_utf8_lossy(label_suffix));
-    // println!("    output_bytes = {}", output_bytes);
-    // println!("    label_len    = {}", label_field.len());
-    // println!("    context_len  = {}", context.len());
-    // println!("    info = {:?}", BinaryData(&hkdf_label));
-
-    let parts: &[&[u8]] = &[
-
-        &length_field,
-        &[label_field.len() as u8],
-        // &label_field,
-        &b"tls13 "[..],
-        label_suffix,
-        &[context.len() as u8],
-        context,
-        ];
-
-
-    print!("    info =");
-    for a in parts.iter() {
-        print!(" ");
-        for b in a.iter() {
-            print!("{:02x}", b);
-        }
-    }
-    println!();
 
     // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
     let okm1: Okm<'_, Length> = secret.expand(parts, Length(okm.len())).unwrap();
     // let x: ring::hkdf::Okm<'_, ring::hkdf::Algorithm> = okm1;
     // let x: () = okm1;
     okm1.fill(okm).unwrap();
-}
-
-fn hkdf_expand_label_prk(secret: &Prk, label_suffix: &[u8], context: &[u8]) -> Prk {
-    let digest = Sha384::new();
-    let output_bytes = digest.output_bits() / 8;
-    let length_field = (output_bytes as u16).to_be_bytes();
-
-    let mut label_field: Vec<u8> = Vec::new();
-    label_field.extend_from_slice(&b"tls13 "[..]);
-    label_field.extend_from_slice(label_suffix);
-
-
-    // let mut hkdf_label: Vec<u8> = Vec::new();
-    // hkdf_label.extend_from_slice(&length_field);
-    // hkdf_label.push(label_field.len() as u8);
-    // hkdf_label.extend_from_slice(&label_field);
-    // hkdf_label.push(context.len() as u8);
-    // hkdf_label.extend_from_slice(context);
-
-    // let parts: &[&[u8]] = &[&hkdf_label];
-
-    println!("hkdf_expand_label {}", String::from_utf8_lossy(label_suffix));
-    println!("    output_bytes = {}", output_bytes);
-    println!("    label_len    = {}", label_field.len());
-    println!("    context_len  = {}", context.len());
-    // println!("    info = {:?}", BinaryData(&hkdf_label));
-
-    let parts: &[&[u8]] = &[
-
-        &length_field,
-        &[label_field.len() as u8],
-        // &label_field,
-        &b"tls13 "[..],
-        label_suffix,
-        &[context.len() as u8],
-        context,
-        ];
-
-
-    print!("    info =");
-    for a in parts.iter() {
-        print!(" ");
-        for b in a.iter() {
-            print!("{:02x}", b);
-        }
-    }
-    println!();
-
-    // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
-    secret.expand(parts, ring::hkdf::HKDF_SHA384).unwrap().into()
-}
-
-fn hkdf_expand_label_salt(secret: &Prk, label_suffix: &[u8], context: &[u8]) -> Salt {
-    let digest = Sha384::new();
-    let output_bytes = digest.output_bits() / 8;
-    let length_field = (output_bytes as u16).to_be_bytes();
-
-    let mut label_field: Vec<u8> = Vec::new();
-    label_field.extend_from_slice(&b"tls13 "[..]);
-    label_field.extend_from_slice(label_suffix);
-
-
-    // let mut hkdf_label: Vec<u8> = Vec::new();
-    // hkdf_label.extend_from_slice(&length_field);
-    // hkdf_label.push(label_field.len() as u8);
-    // hkdf_label.extend_from_slice(&label_field);
-    // hkdf_label.push(context.len() as u8);
-    // hkdf_label.extend_from_slice(context);
-
-    // let parts: &[&[u8]] = &[&hkdf_label];
-
-    println!("hkdf_expand_label {}", String::from_utf8_lossy(label_suffix));
-    println!("    output_bytes = {}", output_bytes);
-    println!("    label_len    = {}", label_field.len());
-    println!("    context_len  = {}", context.len());
-    // println!("    info = {:?}", BinaryData(&hkdf_label));
-
-    let parts: &[&[u8]] = &[
-
-        &length_field,
-        &[label_field.len() as u8],
-        // &label_field,
-        &b"tls13 "[..],
-        label_suffix,
-        &[context.len() as u8],
-        context,
-        ];
-
-
-    print!("    info =");
-    for a in parts.iter() {
-        print!(" ");
-        for b in a.iter() {
-            print!("{:02x}", b);
-        }
-    }
-    println!();
-
-    // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
-    secret.expand(parts, ring::hkdf::HKDF_SHA384).unwrap().into()
 }
 
 fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
@@ -383,31 +254,12 @@ fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
 }
 
 fn derive_secret(secret: &Prk, label: &[u8], messages: &[u8], len: usize) -> Vec<u8> {
-    let mut result: Vec<u8> = Vec::new();
-    for _ in 0..len {
-        result.push(0);
-    }
+    let mut result: Vec<u8> = vec_with_len(len);
     let thash = transcript_hash(messages);
     println!("derive_secret begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
     hkdf_expand_label(secret, label, &thash, &mut result);
     println!("derive_secret end '{}'", String::from_utf8_lossy(label));
     result
-}
-
-fn derive_secret_prk(secret: &Prk, label: &[u8], messages: &[u8]) -> Prk {
-    let thash = transcript_hash(messages);
-    println!("derive_secret_prk begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
-    let res = hkdf_expand_label_prk(secret, label, &thash);
-    println!("derive_secret_prk end '{}'", String::from_utf8_lossy(label));
-    res
-}
-
-fn derive_secret_salt(secret: &Prk, label: &[u8], messages: &[u8]) -> Salt {
-    let thash = transcript_hash(messages);
-    println!("derive_secret_salt begin '{}' {}", String::from_utf8_lossy(label), BinaryData(&thash));
-    let res = hkdf_expand_label_salt(secret, label, &thash);
-    println!("derive_secret_salt end '{}'", String::from_utf8_lossy(label));
-    res
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -470,19 +322,16 @@ fn get_x25519_shared_secret(my_private_key: EphemeralPrivateKey/*, client_hello:
     return Some(key_material1);
 }
 
-fn test_expand(prefix: &str, prk: &Prk) {
-    let info: &[&[u8]] = &[b"hello"];
-    let okm = prk.expand(info, ring::hkdf::HKDF_SHA384).unwrap();
-    let mut data: [u8; 48] = [0; 48];
-    okm.fill(&mut data).unwrap();
-    print!("test_expand {}: ", prefix);
-    for b in data.iter() {
-        print!("{:02x}", b);
-    }
-    println!();
+struct HandshakeTrafficSecrets {
+    client: Vec<u8>,
+    server: Vec<u8>,
 }
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
+    let algorithm: ring::hkdf::Algorithm = ring::hkdf::HKDF_SHA384;
+    let algorithm_len = hkdf::KeyType::len(&algorithm);
+    println!("algorithm.len() = {}", algorithm_len);
+
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
     let my_public_key = my_private_key.compute_public_key()?;
@@ -496,36 +345,11 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
     let client_hello_bytes: Vec<u8> = Vec::from(client_hello_plaintext_record.fragment);
 
-    let input_zero: [u8; 48] = [0; 48];
-    let input_psk: [u8; 48] = [0; 48];
+    let input_zero = vec_with_len(algorithm_len);
+    let input_psk = vec_with_len(algorithm_len);
 
-    // let salt1 = ring::hkdf::Salt::new(ring::hkdf::HKDF_SHA384, &input_zero);
-    // let prk1 = salt1.extract(&input_psk);
-
-    // let digest = crypto::sha2::Sha384::new();
-    // let test_prk: Vec<u8> = Vec::new();
-    // let test_info: Vec<u8> = Vec::new();
-    // let mut test_okm: [u8; 48] = [0; 48];
-    // crypto::hkdf::hkdf_extract(digest, &input_psk, &input_zero, &mut test_okm);
-
-    // let empty_digest = ring::digest::digest(&ring::digest::SHA384, &[]);
-    // let empty_digest_bytes: &[u8] = empty_digest.as_ref();
-    // println!("empty_digest_bytes = {}", BinaryData(empty_digest_bytes));
-    let salt1 = ring::hkdf::Salt::new(ring::hkdf::HKDF_SHA384, &input_zero);
+    let salt1 = ring::hkdf::Salt::new(algorithm, &input_zero);
     let mut prk: Prk = salt1.extract(&input_psk);
-    test_expand("prk1", &prk);
-
-    // let derived1 = derive_secret(&prk1, b"derived", &[]);
-    // println!("derived1 = {}", BinaryData(&derived1));
-    // let derived1_prk: Prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &derived1);
-
-    // let derived1_prk: Prk = derive_secret_prk(&prk1, b"derived", &[]);
-    // test_expand("derived1_prk", &derived1_prk);
-
-    // let derived1_salt: Salt = derive_secret_salt(&prk1, b"derived", &[]);
-    // let derived1_prk: Prk = derived1_salt.extract(&input_psk);
-    // let derived1_prk: Prk = derived1_salt.extract(&[]);
-    // test_expand("derived1_prk", &derived1_prk);
 
     let serialized_filename = "record-constructed.bin";
     std::fs::write(serialized_filename, &client_hello_plaintext_record_bytes)?;
@@ -536,13 +360,10 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     socket.write_all(&client_hello_plaintext_record_bytes).await?;
 
     let mut state = State::ClientHelloSent;
-    let mut client_handshake_traffic_secret: Option<Vec<u8>> = None;
-    let mut server_handshake_traffic_secret: Option<Vec<u8>> = None;
+    // let mut client_handshake_traffic_secret: Option<Vec<u8>> = None;
+    // let mut server_handshake_traffic_secret: Option<Vec<u8>> = None;
+    let mut handshake_traffic_secrets: Option<HandshakeTrafficSecrets> = None;
 
-    let mut client_handshake_traffic_prk: Option<Prk> = None;
-    let mut server_handshake_traffic_prk: Option<Prk> = None;
-
-    // let mut client_sequence_no: u64 = 0;
     let mut server_sequence_no: u64 = 0;
 
     let mut receiver = Receiver::new();
@@ -553,8 +374,6 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     transcript.extend_from_slice(&client_hello_bytes);
 
     while let Some((plaintext, plaintext_raw)) = receiver.next(&mut socket).await? {
-        // println!("Plaintext: content type {:?}, version 0x{:04x}, fragment length {}, bytes_consumed {}",
-        //         plaintext.content_type, plaintext.legacy_record_version, plaintext.fragment.len(), plaintext_raw.len());
         match plaintext.content_type {
             ContentType::Invalid => {
                 println!("Unsupported record type: Invalid");
@@ -593,28 +412,21 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                                 };
                                 println!("Shared secret = {}", BinaryData(&secret));
 
-                                // let derived2_prk: Prk = derive_secret_prk(&derived1_prk, b"derived", &secret);
-                                // let derived2_prk: Prk = derive_secret_prk(&prk1, b"derived", &secret);
-                                // test_expand("derived2_prk", &derived2_prk);
-
-                                let derived2_salt = derive_secret_salt(&prk, b"derived", &[]);
-                                prk = derived2_salt.extract(&secret);
-                                test_expand("derived2_prk", &prk);
-
+                                let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
+                                let salt = Salt::new(algorithm, &salt_bytes);
+                                prk = salt.extract(&secret);
 
                                 println!("Got expected server hello");
-                                let client_handshake_traffic_secret_b = derive_secret(&prk, b"c hs traffic", &transcript, 48);
-                                let server_handshake_traffic_secret_b = derive_secret(&prk, b"s hs traffic", &transcript, 48);
 
-                                println!("client hs secret = {}", BinaryData(&client_handshake_traffic_secret_b));
-                                println!("server hs secret = {}", BinaryData(&server_handshake_traffic_secret_b));
+                                let hs = HandshakeTrafficSecrets {
+                                    client: derive_secret(&prk, b"c hs traffic", &transcript, algorithm_len),
+                                    server: derive_secret(&prk, b"s hs traffic", &transcript, algorithm_len),
+                                };
 
-                                client_handshake_traffic_secret = Some(client_handshake_traffic_secret_b);
-                                server_handshake_traffic_secret = Some(server_handshake_traffic_secret_b);
+                                println!("client hs secret = {}", BinaryData(&hs.client));
+                                println!("server hs secret = {}", BinaryData(&hs.server));
 
-                                client_handshake_traffic_prk = Some(derive_secret_prk(&prk, b"c hs traffic", &transcript));
-                                server_handshake_traffic_prk = Some(derive_secret_prk(&prk, b"s hs traffic", &transcript));
-
+                                handshake_traffic_secrets = Some(hs);
 
                                 state = State::ServerHelloReceived;
                             }
@@ -630,64 +442,20 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                 }
             }
             ContentType::ApplicationData => {
-                let cipher = openssl::symm::Cipher::aes_256_gcm();
-                if let Some(server_prk) = &server_handshake_traffic_prk {
-                // }
-                // if let Some(secret) = server_handshake_traffic_secret.clone() {
-                //     let server_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &secret);
-                    println!("Application data:");
-                    println!("{:#?}", Indent(&DebugHexDump(&plaintext_raw)));
-
-
-                    let sequence_no_bytes: [u8; 8] = server_sequence_no.to_be_bytes();
-                    server_sequence_no += 1;
-                    let mut nonce_bytes: [u8; 12] = [0; 12];
-                    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
+                if let Some(hs_secrets) = &handshake_traffic_secrets {
+                    let server_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &hs_secrets.server);
+                    println!("Received ApplicationData (server_sequence_no = {})", server_sequence_no);
+                    // println!("{:#?}", Indent(&DebugHexDump(&plaintext_raw)));
 
                     let mut server_write_key: [u8; 32] = [0; 32];
                     let mut server_write_iv: [u8; 12] = [0; 12];
 
-                    // let server_write_key = derive_secret(&prk, b"c hs traffic", &transcript, 48);
-
-                    // // fn hkdf_expand_label(secret: &[u8], label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
-                    // let key_length = 1; // TODO
-                    // let iv_length = 1; // TODO
-
-                    // // 7.3.  Traffic Key Calculation
-                    // let mut server_write_key = Vec::new();
-                    // for i in 0..key_length {
-                    //     server_write_key.push(0);
-                    // }
-
-                    // let mut server_write_iv = Vec::new();
-                    // for i in 0..iv_length {
-                    //     server_write_iv.push(0);
-                    // }
-
-                    // hkdf_expand_label(&secret, b"key", b"", &mut server_write_key);
-                    // hkdf_expand_label(&secret, b"iv", b"", &mut server_write_iv);
-                    // println!("server_write_key = {:?}", DebugHexDump(&server_write_key));
-                    // println!("server_write_iv  = {:?}", DebugHexDump(&server_write_iv));
-
-                    // println!("here 1");
-                    // let server_write_key_okm = prk.expand(&[b"key", b""], ring::hkdf::HKDF_SHA384)?;
-                    // println!("here 2");
-                    // let server_write_iv_okm = prk.expand(&[b"iv", b""], ring::hkdf::HKDF_SHA384)?;
-                    // println!("here 3");
-
-                    // server_write_key_okm.fill(&mut server_write_key)?;
-                    // println!("here 4");
-                    // server_write_iv_okm.fill(&mut server_write_iv)?;
-                    // println!("here 5");
-
-
-
-                    // fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
-                    //
-
                     hkdf_expand_label(&server_prk, b"key", &[], &mut server_write_key);
                     hkdf_expand_label(&server_prk, b"iv", &[], &mut server_write_iv);
 
+                    let sequence_no_bytes: [u8; 8] = server_sequence_no.to_be_bytes();
+                    let mut nonce_bytes: [u8; 12] = [0; 12];
+                    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
                     for i in 0..12 {
                         nonce_bytes[i] ^= server_write_iv[i];
                     }
@@ -702,7 +470,6 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                     let mut additional_data: Vec<u8> = Vec::new();
                     additional_data.extend_from_slice(&plaintext_raw[0..5]); // TODO: verify we have at least 5 bytes
 
-
                     use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
 
                     let unbound_key = match UnboundKey::new(&AES_256_GCM, &server_write_key[0..32]) {
@@ -713,27 +480,12 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                         }
                     };
                     let key = LessSafeKey::new(unbound_key);
-                    // let nonce_bytes: [u8; 12] = [1; 12];
-                    // let enc_nonce = Nonce::assume_unique_for_key(nonce_bytes);
-                    // let input_plaintext: &[u8] = b"The quick brown fox jumps over the lazy dog";
-                    // let input_plaintext_len = input_plaintext.len();
-                    // println!("input_plaintext ({} bytes) =\n{:#?}", input_plaintext.len(), Indent(&DebugHexDump(&input_plaintext)));
 
-                    println!("iv = {:?}", BinaryData(&server_write_iv));
-                    println!("nonce = {:?}", BinaryData(&nonce_bytes));
-                    println!("aad = {:?}", BinaryData(&additional_data));
-
-                    let aad = Aad::from(additional_data);
                     let mut work: Vec<u8> = Vec::new();
                     work.extend_from_slice(&tls_ciphertext.encrypted_record);
 
-                    println!("encrypted = {:?}", BinaryData(&work));
-
-                    // key.seal_in_place_append_tag(enc_nonce, enc_aad, &mut work)?;
-                    // println!("ciphertext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
-
                     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-                    // let dec_aad = Aad::from(b"hello");
+                    let aad = Aad::from(additional_data);
                     match key.open_in_place(nonce, aad, &mut work) {
                         Ok(plaintext) => {
                             println!("open_in_place succeeded");
@@ -743,13 +495,9 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                             return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e)));
                         }
                     };
-                    // work.truncate(work.len() - AES_256_GCM.tag_len());
-                    // println!("output_plaintext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
-                    // println!("output == input ? {}", work == input_plaintext);
 
-
-
-                    println!("Received ApplicationData");
+                    println!("Successfully finished processing ApplicationData for server_sequence_no {}", server_sequence_no);
+                    server_sequence_no += 1;
                 }
                 else {
                     println!("Received ApplicationData but don't have secret");
