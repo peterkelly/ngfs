@@ -167,6 +167,7 @@ impl fmt::Debug for ObjectIdentifier {
 enum Value {
     Boolean(bool),
     Integer(Integer),
+    OctetString(Vec<u8>),
     Null,
     ObjectIdentifier(ObjectIdentifier),
     PrintableString(String),
@@ -197,6 +198,11 @@ fn print_value(value: &Value, indent: &str) {
         }
         Value::Integer(inner) => {
             println!("{:?}", inner);
+        }
+        Value::OctetString(bytes) => {
+            println!("OCTET STRING {:?}", BinaryData(bytes));
+            // println!("OCTET STRING");
+            // println!("{:#?}", Indent(&DebugHexDump(bytes)));
         }
         Value::Null => {
             println!("NULL");
@@ -261,7 +267,27 @@ fn read_object_identifier<'a>(reader: &mut BinaryReader) -> Result<ObjectIdentif
         // let old_offset = inner.offset;
         // let new_offset = inner.offset;
         let old_remaining = reader.remaining();
-        parts.push(read_var_u64(reader)?);
+        let part = read_var_u64(reader)?;
+        // 8.19.3 The number of subidentifiers (N) shall be one less than the number of object
+        // identifier components in the object identifier value being encoded.
+        //
+        // 8.19.4 The numerical value of the first subidentifier is derived from the values of the
+        // first two object identifier components in the object identifier value being encoded,
+        // using the formula:
+        //
+        //     (X*40) + Y
+        //
+        // where X is the value of the first object identifier component and Y is the value of the
+        // second object identifier component.
+
+
+        if parts.len() == 0 {
+            parts.push(part / 40);
+            parts.push(part % 40);
+        }
+        else {
+            parts.push(part);
+        }
         let new_remaining = reader.remaining();
         if new_remaining == old_remaining {
             return Err(GeneralError::new("Value consumed 0 bytes"));
@@ -302,6 +328,15 @@ fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>> {
                         Form::Primitive => {
                             let data: Vec<u8> = contents.remaining_data().to_vec();
                             Ok(Value::Integer(Integer { data: data }))
+                        }
+                    }
+                }
+                4 => {
+                    match identifier.form {
+                        Form::Constructed => Err(GeneralError::new("Octet string: incorrect form")),
+                        Form::Primitive => {
+                            let data: Vec<u8> = contents.remaining_data().to_vec();
+                            Ok(Value::OctetString(data))
                         }
                     }
                 }
