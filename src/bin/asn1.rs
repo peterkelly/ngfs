@@ -124,7 +124,6 @@ Table 6/X.208 List of character string types
 27 GeneralString
  */
 
-#[derive(Eq, PartialEq)]
 struct Integer {
     data: Vec<u8>,
 }
@@ -145,7 +144,6 @@ impl fmt::Debug for Integer {
     }
 }
 
-#[derive(Eq, PartialEq)]
 struct ObjectIdentifier {
     parts: Vec<u64>,
 }
@@ -166,7 +164,6 @@ impl fmt::Debug for ObjectIdentifier {
     }
 }
 
-#[derive(Eq, PartialEq)]
 enum Value {
     Boolean(bool),
     Integer(Integer),
@@ -184,59 +181,50 @@ enum Value {
     Unknown(Identifier),
 }
 
-impl fmt::Debug for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Value::Boolean(inner) => {
-                f.debug_tuple("Boolean").field(inner).finish()
-            }
-            Value::Integer(inner) => {
-                write!(f, "{:?}", inner)
-            }
-            Value::Null => {
-                write!(f, "NULL")
-            }
-            Value::ObjectIdentifier(oid) => {
-                write!(f, "{:?}", oid)
-            }
-            Value::PrintableString(s) => {
-                write!(f, "PrintableString {}", escape_string(s))
-            }
-            Value::Sequence(inner) => {
-                self.fmt_list("Sequence", inner, f)
-                // f.debug_tuple("Sequence").field(inner).finish()
-            }
-            Value::Set(inner) => {
-                self.fmt_list("Set", inner, f)
-                // f.debug_tuple("Set").field(inner).finish()
-            }
-            Value::Application(inner) => {
-                self.fmt_list("Application", inner, f)
-                // f.debug_tuple("Application").field(inner).finish()
-            }
-            Value::ContextSpecific(inner) => {
-                self.fmt_list("ContextSpecific", inner, f)
-                // f.debug_tuple("ContextSpecific").field(inner).finish()
-            }
-            Value::Private(inner) => {
-                self.fmt_list("Private", inner, f)
-                // f.debug_tuple("Private").field(inner).finish()
-            }
-            Value::Unknown(ident) => {
-                write!(f, "Unknown {:?}", ident)
-                // f.debug_tuple("Unknown").field(inner).finish()
-            }
-        }
+fn print_list(name: &str, values: &[Value], indent: &str) {
+    println!("{}", name);
+    for value in values.iter() {
+        print_value(value, indent);
     }
 }
 
-impl Value {
-    fn fmt_list(&self, s: &str, values: &[Value], f: &mut fmt::Formatter) -> fmt::Result {
-        let mut d = f.debug_tuple(s);
-        for value in values {
-            d.field(value);
+fn print_value(value: &Value, indent: &str) {
+    print!("{}", indent);
+    let indent = &format!("{}    ", indent);
+    match value {
+        Value::Boolean(inner) => {
+            println!("BOOLEAN {}", inner);
         }
-        d.finish()
+        Value::Integer(inner) => {
+            println!("{:?}", inner);
+        }
+        Value::Null => {
+            println!("NULL");
+        }
+        Value::ObjectIdentifier(oid) => {
+            println!("{:?}", oid);
+        }
+        Value::PrintableString(s) => {
+            println!("PrintableString {}", escape_string(s));
+        }
+        Value::Sequence(inner) => {
+            print_list("Sequence", inner, indent);
+        }
+        Value::Set(inner) => {
+            print_list("Set", inner, indent);
+        }
+        Value::Application(inner) => {
+            print_list("Application", inner, indent);
+        }
+        Value::ContextSpecific(inner) => {
+            print_list("ContextSpecific", inner, indent);
+        }
+        Value::Private(inner) => {
+            print_list("Private", inner, indent);
+        }
+        Value::Unknown(ident) => {
+            println!("Unknown {:?}", ident)
+        }
     }
 }
 
@@ -406,10 +394,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
     let data: Vec<u8> = std::fs::read(filename)?;
-    println!("data.len() = {}", data.len());
+    // println!("data.len() = {}", data.len());
     let mut reader = BinaryReader::new(&data);
-    let value = read_value(&mut reader);
-    println!("{:#?}", value);
+    let value = read_value(&mut reader)?;
+    // println!("{:#?}", value);
+    print_value(&value, "");
     // let identifier = read_identifier(&mut reader)?;
     // println!("identifier = {:?}", identifier);
     // let length = read_length(&mut reader)?;
