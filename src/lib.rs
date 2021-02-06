@@ -10,6 +10,7 @@ pub mod p2p;
 pub mod hmac;
 pub mod binary;
 pub mod tls;
+pub mod asn1;
 
 #[cfg(test)]
 mod tests {
