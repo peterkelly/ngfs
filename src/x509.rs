@@ -12,7 +12,7 @@ use std::error::Error;
 use super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::binary::BinaryReader;
 use super::result::GeneralError;
-use super::asn1::ObjectIdentifier;
+use super::asn1::value::ObjectIdentifier;
 
 // Certificate  ::=  SEQUENCE  {
 //        tbsCertificate       TBSCertificate,

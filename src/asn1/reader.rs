@@ -1,4 +1,38 @@
+// https://www.obj-sys.com/asn1tutorial/node124.html
 // https://luca.ntop.org/Teaching/Appunti/asn1.html
+
+/*
+
+Table 1/X.208 Universal class tag assignments
+1 Boolean
+2 Integer
+3 Bitstring
+4 Octetstring
+5 Null
+6 Object identifier
+7 Object descriptor
+8 Eternal type
+9 Real type
+10 Enumerated type
+12-15 reserved
+16 Sequence and sequence-of
+17 Set and Set-of
+18-22 Character string types
+25-27 Character string
+24-24 Time types
+28- Reserved
+
+
+Table 6/X.208 List of character string types
+18 NumericString
+19 PrintableString
+20 TeletexString (T61String)
+21 VideotexString
+26 VisibleString
+22 IA5String
+25 GraphicString
+27 GeneralString
+ */
 
 #![allow(unused_variables)]
 #![allow(dead_code)]
@@ -9,30 +43,10 @@
 
 use std::fmt;
 use std::error::Error;
-use super::util::{BinaryData, DebugHexDump, Indent, escape_string};
-use super::binary::BinaryReader;
-use super::result::GeneralError;
-
-#[derive(Debug, Eq, PartialEq)]
-enum Class {
-    Universal,
-    Application,
-    ContextSpecific,
-    Private,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-enum Form {
-    Primitive,
-    Constructed,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct Identifier {
-    class: Class,
-    form: Form,
-    tag: u32,
-}
+use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
+use super::super::binary::BinaryReader;
+use super::super::result::GeneralError;
+use super::value::*;
 
 fn read_identifier<'a>(reader: &'a mut BinaryReader) -> Result<Identifier, Box<dyn Error>> {
     let first = reader.read_u8()?;
@@ -88,196 +102,6 @@ fn read_length<'a>(reader: &'a mut BinaryReader) -> Result<u32, Box<dyn Error>> 
             }
             return Ok(length)
         }
-    }
-}
-
-/*
-
-Table 1/X.208 Universal class tag assignments
-1 Boolean
-2 Integer
-3 Bitstring
-4 Octetstring
-5 Null
-6 Object identifier
-7 Object descriptor
-8 Eternal type
-9 Real type
-10 Enumerated type
-12-15 reserved
-16 Sequence and sequence-of
-17 Set and Set-of
-18-22 Character string types
-25-27 Character string
-24-24 Time types
-28- Reserved
-
-
-Table 6/X.208 List of character string types
-18 NumericString
-19 PrintableString
-20 TeletexString (T61String)
-21 VideotexString
-26 VisibleString
-22 IA5String
-25 GraphicString
-27 GeneralString
- */
-
-pub struct ObjectIdentifier {
-    parts: Vec<u64>,
-}
-
-impl fmt::Display for ObjectIdentifier {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for i in 0..self.parts.len() {
-            if i > 0 {
-                write!(f, ".")?;
-            }
-            write!(f, "{}", self.parts[i])?;
-        }
-        Ok(())
-    }
-}
-
-pub struct BitString {
-    unused_bits: u8,
-    bytes: Vec<u8>,
-}
-
-impl fmt::Debug for BitString {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for i in 0..self.bytes.len() {
-            write!(f, "{:02x}", i)?;
-        }
-        write!(f, " (unused {})", self.unused_bits)
-    }
-}
-
-pub enum Value {
-    Boolean(bool),
-    Integer(Vec<u8>),
-    BitString(BitString),
-    OctetString(Vec<u8>),
-    Null,
-    ObjectIdentifier(ObjectIdentifier),
-    PrintableString(String),
-    UTF8String(String),
-
-
-    UTCTime(String),
-    GeneralizedTime(String),
-
-    Sequence(Vec<Value>),
-    Set(Vec<Value>),
-
-    Application(Vec<Value>),
-    ContextSpecific(Vec<Value>),
-    Private(Vec<Value>),
-
-    Unknown(Identifier, u32),
-}
-
-pub struct Printer {
-    pub truncate: bool,
-    pub lines: bool,
-}
-
-impl Printer {
-    pub fn new() -> Self {
-        Self {
-            truncate: false,
-            lines: false,
-        }
-    }
-
-    fn bytes_to_string(&self, bytes: &[u8]) -> String {
-        let mut s = String::new();
-        for (i, b) in bytes.iter().enumerate() {
-            if self.truncate && i >= 16 {
-                s.push_str("...");
-                break;
-            }
-            s.push_str(&format!("{:02x}", b));
-        }
-        s
-    }
-
-    fn print_list(&self, name: &str, values: &[Value], prefix: &str, indent: &str) {
-        println!("{}", name);
-        for (i, value) in values.iter().enumerate() {
-            if i + 1 < values.len() {
-                let c_prefix = &format!("{}├── ", indent);
-                let c_indent = &format!("{}│   ", indent);
-                self.print_value(value, c_prefix, c_indent);
-            }
-            else {
-                let c_prefix = &format!("{}└── ", indent);
-                let c_indent = &format!("{}    ", indent);
-                self.print_value(value, c_prefix, c_indent);
-            }
-        }
-    }
-
-    fn print_value(&self, value: &Value, prefix: &str, indent: &str) {
-        print!("{}", prefix);
-
-        match value {
-            Value::Boolean(inner) => {
-                println!("BOOLEAN {}", inner);
-            }
-            Value::Integer(inner) => {
-                println!("INTEGER {}", self.bytes_to_string(inner));
-            }
-            Value::BitString(bitstring) => {
-                println!("BIT STRING {} (unused {})",
-                         self.bytes_to_string(&bitstring.bytes),
-                         bitstring.unused_bits);
-            }
-            Value::OctetString(bytes) => {
-                println!("OCTET STRING {}", self.bytes_to_string(bytes));
-            }
-            Value::Null => {
-                println!("NULL");
-            }
-            Value::ObjectIdentifier(oid) => {
-                println!("OBJECT {}", oid);
-            }
-            Value::PrintableString(s) => {
-                println!("PrintableString {}", escape_string(s));
-            }
-            Value::UTF8String(s) => {
-                println!("UTF8String {}", escape_string(s));
-            }
-            Value::UTCTime(s) => {
-                println!("UTCTime {}", escape_string(s));
-            }
-            Value::GeneralizedTime(s) => {
-                println!("GeneralizedTime {}", escape_string(s));
-            }
-            Value::Sequence(inner) => {
-                self.print_list("Sequence", inner, indent, indent);
-            }
-            Value::Set(inner) => {
-                self.print_list("Set", inner, indent, indent);
-            }
-            Value::Application(inner) => {
-                self.print_list("Application", inner, indent, indent);
-            }
-            Value::ContextSpecific(inner) => {
-                self.print_list("ContextSpecific", inner, indent, indent);
-            }
-            Value::Private(inner) => {
-                self.print_list("Private", inner, indent, indent);
-            }
-            Value::Unknown(ident, len) => {
-                println!("Unknown {:?}, len = {}", ident, len)
-            }
-        }
-    }
-
-    pub fn print(&self, value: &Value) {
-        self.print_value(value, "", "");
     }
 }
 

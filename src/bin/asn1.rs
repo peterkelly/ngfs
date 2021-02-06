@@ -23,12 +23,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let data: Vec<u8> = std::fs::read(filename)?;
     // println!("data.len() = {}", data.len());
     let mut reader = BinaryReader::new(&data);
-    let value = asn1::read_value(&mut reader)?;
+    let value = asn1::reader::read_value(&mut reader)?;
     // println!("{:#?}", value);
-    let mut asn1_printer = asn1::Printer::new();
-    asn1_printer.truncate = true;
-    asn1_printer.lines = true;
-    asn1_printer.print(&value);
+    let mut printer = asn1::printer::Printer::new();
+    printer.truncate = true;
+    printer.lines = true;
+    printer.print(&value);
     // let identifier = read_identifier(&mut reader)?;
     // println!("identifier = {:?}", identifier);
     // let length = read_length(&mut reader)?;
