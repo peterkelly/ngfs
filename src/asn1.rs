@@ -124,39 +124,15 @@ Table 6/X.208 List of character string types
 27 GeneralString
  */
 
-pub struct Integer {
-    data: Vec<u8>,
-}
-
-impl fmt::Debug for Integer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "INTEGER")?;
-        for i in 0..self.data.len() {
-            if i > 0 {
-                write!(f, ":")?;
-            }
-            else {
-                write!(f, " ")?;
-            }
-            write!(f, "{:02x}", self.data[i])?;
-        }
-        Ok(())
-    }
-}
-
 pub struct ObjectIdentifier {
     parts: Vec<u64>,
 }
 
-impl fmt::Debug for ObjectIdentifier {
+impl fmt::Display for ObjectIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "OBJECT")?;
         for i in 0..self.parts.len() {
             if i > 0 {
                 write!(f, ".")?;
-            }
-            else {
-                write!(f, " ")?;
             }
             write!(f, "{}", self.parts[i])?;
         }
@@ -164,13 +140,33 @@ impl fmt::Debug for ObjectIdentifier {
     }
 }
 
+pub struct BitString {
+    unused_bits: u8,
+    bytes: Vec<u8>,
+}
+
+impl fmt::Debug for BitString {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for i in 0..self.bytes.len() {
+            write!(f, "{:02x}", i)?;
+        }
+        write!(f, " (unused {})", self.unused_bits)
+    }
+}
+
 pub enum Value {
     Boolean(bool),
-    Integer(Integer),
+    Integer(Vec<u8>),
+    BitString(BitString),
     OctetString(Vec<u8>),
     Null,
     ObjectIdentifier(ObjectIdentifier),
     PrintableString(String),
+    UTF8String(String),
+
+
+    UTCTime(String),
+    GeneralizedTime(String),
 
     Sequence(Vec<Value>),
     Set(Vec<Value>),
@@ -179,7 +175,7 @@ pub enum Value {
     ContextSpecific(Vec<Value>),
     Private(Vec<Value>),
 
-    Unknown(Identifier),
+    Unknown(Identifier, u32),
 }
 
 fn print_list(name: &str, values: &[Value], indent: &str) {
@@ -197,7 +193,10 @@ pub fn print_value(value: &Value, indent: &str) {
             println!("BOOLEAN {}", inner);
         }
         Value::Integer(inner) => {
-            println!("{:?}", inner);
+            println!("INTEGER {}", BinaryData(inner));
+        }
+        Value::BitString(bitstring) => {
+            println!("BIT STRING {:?}", bitstring);
         }
         Value::OctetString(bytes) => {
             println!("OCTET STRING {:?}", BinaryData(bytes));
@@ -208,10 +207,19 @@ pub fn print_value(value: &Value, indent: &str) {
             println!("NULL");
         }
         Value::ObjectIdentifier(oid) => {
-            println!("{:?}", oid);
+            println!("OBJECT {}", oid);
         }
         Value::PrintableString(s) => {
             println!("PrintableString {}", escape_string(s));
+        }
+        Value::UTF8String(s) => {
+            println!("UTF8String {}", escape_string(s));
+        }
+        Value::UTCTime(s) => {
+            println!("UTCTime {}", escape_string(s));
+        }
+        Value::GeneralizedTime(s) => {
+            println!("GeneralizedTime {}", escape_string(s));
         }
         Value::Sequence(inner) => {
             print_list("Sequence", inner, indent);
@@ -228,8 +236,8 @@ pub fn print_value(value: &Value, indent: &str) {
         Value::Private(inner) => {
             print_list("Private", inner, indent);
         }
-        Value::Unknown(ident) => {
-            println!("Unknown {:?}", ident)
+        Value::Unknown(ident, len) => {
+            println!("Unknown {:?}, len = {}", ident, len)
         }
     }
 }
@@ -326,8 +334,18 @@ pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>
                     match identifier.form {
                         Form::Constructed => Err(GeneralError::new("Integer: incorrect form")),
                         Form::Primitive => {
-                            let data: Vec<u8> = contents.remaining_data().to_vec();
-                            Ok(Value::Integer(Integer { data: data }))
+                            let bytes: Vec<u8> = contents.remaining_data().to_vec();
+                            Ok(Value::Integer(bytes))
+                        }
+                    }
+                }
+                3 => {
+                    match identifier.form {
+                        Form::Constructed => Err(GeneralError::new("BitString: incorrect form")),
+                        Form::Primitive => {
+                            let unused_bits = contents.read_u8()?;
+                            let bytes = contents.remaining_data().to_vec();
+                            Ok(Value::BitString(BitString { unused_bits, bytes }))
                         }
                     }
                 }
@@ -355,6 +373,15 @@ pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>
                     }
                     Ok(Value::ObjectIdentifier(read_object_identifier(&mut contents)?))
                 }
+                12 => {
+                    match identifier.form {
+                        Form::Constructed => Err(GeneralError::new("UTF8String: incorrect form")),
+                        Form::Primitive => {
+                            let s = String::from_utf8(contents.remaining_data().to_vec())?;
+                            Ok(Value::UTF8String(s))
+                        }
+                    }
+                }
                 16 => {
                     match identifier.form {
                         Form::Primitive => Err(GeneralError::new("Sequence: incorrect form")),
@@ -373,31 +400,48 @@ pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>
                         Form::Primitive => {
                             let s = String::from_utf8(contents.remaining_data().to_vec())?;
                             Ok(Value::PrintableString(s))
-                            // Ok(Value::PrintableString(format!("{:?}", BinaryData(&contents.remaining_data()))))
+                        }
+                    }
+                }
+                23 => {
+                    match identifier.form {
+                        Form::Constructed => Err(GeneralError::new("UTCTime: incorrect form")),
+                        Form::Primitive => {
+                            let s = String::from_utf8(contents.remaining_data().to_vec())?;
+                            Ok(Value::UTCTime(s))
+                        }
+                    }
+                }
+                24 => {
+                    match identifier.form {
+                        Form::Constructed => Err(GeneralError::new("GeneralizedTime: incorrect form")),
+                        Form::Primitive => {
+                            let s = String::from_utf8(contents.remaining_data().to_vec())?;
+                            Ok(Value::GeneralizedTime(s))
                         }
                     }
                 }
                 _ => {
-                    Ok(Value::Unknown(identifier)) // TODO
+                    Ok(Value::Unknown(identifier, length)) // TODO
                 }
                 // _ => Err(GeneralError::new(format!("Unsupported value: tag {}", identifier.tag))),
             }
         }
         Class::Application => {
             match identifier.form {
-                Form::Primitive => Ok(Value::Unknown(identifier)),
+                Form::Primitive => Ok(Value::Unknown(identifier, length)),
                 Form::Constructed => Ok(Value::Application(read_value_list(&mut contents)?)),
             }
         }
         Class::ContextSpecific => {
             match identifier.form {
-                Form::Primitive => Ok(Value::Unknown(identifier)),
+                Form::Primitive => Ok(Value::Unknown(identifier, length)),
                 Form::Constructed => Ok(Value::ContextSpecific(read_value_list(&mut contents)?)),
             }
         }
         Class::Private => {
             match identifier.form {
-                Form::Primitive => Ok(Value::Unknown(identifier)),
+                Form::Primitive => Ok(Value::Unknown(identifier, length)),
                 Form::Constructed => Ok(Value::Private(read_value_list(&mut contents)?)),
             }
         }

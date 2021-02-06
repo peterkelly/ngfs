@@ -1,5 +1,3 @@
-// https://luca.ntop.org/Teaching/Appunti/asn1.html
-
 #![allow(unused_variables)]
 #![allow(dead_code)]
 #![allow(unused_mut)]

@@ -11,6 +11,7 @@ pub mod hmac;
 pub mod binary;
 pub mod tls;
 pub mod asn1;
+pub mod x509;
 
 #[cfg(test)]
 mod tests {
