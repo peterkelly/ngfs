@@ -178,67 +178,106 @@ pub enum Value {
     Unknown(Identifier, u32),
 }
 
-fn print_list(name: &str, values: &[Value], indent: &str) {
-    println!("{}", name);
-    for value in values.iter() {
-        print_value(value, indent);
-    }
+pub struct Printer {
+    pub truncate: bool,
+    pub lines: bool,
 }
 
-pub fn print_value(value: &Value, indent: &str) {
-    print!("{}", indent);
-    let indent = &format!("{}    ", indent);
-    match value {
-        Value::Boolean(inner) => {
-            println!("BOOLEAN {}", inner);
+impl Printer {
+    pub fn new() -> Self {
+        Self {
+            truncate: false,
+            lines: false,
         }
-        Value::Integer(inner) => {
-            println!("INTEGER {}", BinaryData(inner));
+    }
+
+    fn bytes_to_string(&self, bytes: &[u8]) -> String {
+        let mut s = String::new();
+        for (i, b) in bytes.iter().enumerate() {
+            if self.truncate && i >= 16 {
+                s.push_str("...");
+                break;
+            }
+            s.push_str(&format!("{:02x}", b));
         }
-        Value::BitString(bitstring) => {
-            println!("BIT STRING {:?}", bitstring);
+        s
+    }
+
+    fn print_list(&self, name: &str, values: &[Value], prefix: &str, indent: &str) {
+        println!("{}", name);
+        for (i, value) in values.iter().enumerate() {
+            if i + 1 < values.len() {
+                let c_prefix = &format!("{}├── ", indent);
+                let c_indent = &format!("{}│   ", indent);
+                self.print_value(value, c_prefix, c_indent);
+            }
+            else {
+                let c_prefix = &format!("{}└── ", indent);
+                let c_indent = &format!("{}    ", indent);
+                self.print_value(value, c_prefix, c_indent);
+            }
         }
-        Value::OctetString(bytes) => {
-            println!("OCTET STRING {:?}", BinaryData(bytes));
-            // println!("OCTET STRING");
-            // println!("{:#?}", Indent(&DebugHexDump(bytes)));
+    }
+
+    fn print_value(&self, value: &Value, prefix: &str, indent: &str) {
+        print!("{}", prefix);
+
+        match value {
+            Value::Boolean(inner) => {
+                println!("BOOLEAN {}", inner);
+            }
+            Value::Integer(inner) => {
+                println!("INTEGER {}", self.bytes_to_string(inner));
+            }
+            Value::BitString(bitstring) => {
+                println!("BIT STRING {} (unused {})",
+                         self.bytes_to_string(&bitstring.bytes),
+                         bitstring.unused_bits);
+            }
+            Value::OctetString(bytes) => {
+                println!("OCTET STRING {}", self.bytes_to_string(bytes));
+            }
+            Value::Null => {
+                println!("NULL");
+            }
+            Value::ObjectIdentifier(oid) => {
+                println!("OBJECT {}", oid);
+            }
+            Value::PrintableString(s) => {
+                println!("PrintableString {}", escape_string(s));
+            }
+            Value::UTF8String(s) => {
+                println!("UTF8String {}", escape_string(s));
+            }
+            Value::UTCTime(s) => {
+                println!("UTCTime {}", escape_string(s));
+            }
+            Value::GeneralizedTime(s) => {
+                println!("GeneralizedTime {}", escape_string(s));
+            }
+            Value::Sequence(inner) => {
+                self.print_list("Sequence", inner, indent, indent);
+            }
+            Value::Set(inner) => {
+                self.print_list("Set", inner, indent, indent);
+            }
+            Value::Application(inner) => {
+                self.print_list("Application", inner, indent, indent);
+            }
+            Value::ContextSpecific(inner) => {
+                self.print_list("ContextSpecific", inner, indent, indent);
+            }
+            Value::Private(inner) => {
+                self.print_list("Private", inner, indent, indent);
+            }
+            Value::Unknown(ident, len) => {
+                println!("Unknown {:?}, len = {}", ident, len)
+            }
         }
-        Value::Null => {
-            println!("NULL");
-        }
-        Value::ObjectIdentifier(oid) => {
-            println!("OBJECT {}", oid);
-        }
-        Value::PrintableString(s) => {
-            println!("PrintableString {}", escape_string(s));
-        }
-        Value::UTF8String(s) => {
-            println!("UTF8String {}", escape_string(s));
-        }
-        Value::UTCTime(s) => {
-            println!("UTCTime {}", escape_string(s));
-        }
-        Value::GeneralizedTime(s) => {
-            println!("GeneralizedTime {}", escape_string(s));
-        }
-        Value::Sequence(inner) => {
-            print_list("Sequence", inner, indent);
-        }
-        Value::Set(inner) => {
-            print_list("Set", inner, indent);
-        }
-        Value::Application(inner) => {
-            print_list("Application", inner, indent);
-        }
-        Value::ContextSpecific(inner) => {
-            print_list("ContextSpecific", inner, indent);
-        }
-        Value::Private(inner) => {
-            print_list("Private", inner, indent);
-        }
-        Value::Unknown(ident, len) => {
-            println!("Unknown {:?}, len = {}", ident, len)
-        }
+    }
+
+    pub fn print(&self, value: &Value) {
+        self.print_value(value, "", "");
     }
 }
 
