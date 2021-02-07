@@ -164,7 +164,7 @@ fn read_object_identifier<'a>(reader: &mut BinaryReader) -> Result<ObjectIdentif
             return Err(GeneralError::new("Value consumed 0 bytes"));
         }
     }
-    Ok(ObjectIdentifier { parts: parts })
+    Ok(ObjectIdentifier(parts))
 }
 
 pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>> {
@@ -291,21 +291,24 @@ pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>
             }
         }
         Class::Application => {
+            let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::Application(read_value_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::Application(tag, read_value_list(&mut contents)?)),
             }
         }
         Class::ContextSpecific => {
+            let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::ContextSpecific(read_value_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::ContextSpecific(tag, read_value_list(&mut contents)?)),
             }
         }
         Class::Private => {
+            let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::Private(read_value_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::Private(tag, read_value_list(&mut contents)?)),
             }
         }
         // Class::ContextSpecific => Err(GeneralError::new("Unsupported value: class is ContextSpecific")),

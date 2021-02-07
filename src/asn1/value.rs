@@ -32,17 +32,15 @@ pub struct Identifier {
     pub tag: u32,
 }
 
-pub struct ObjectIdentifier {
-    pub parts: Vec<u64>,
-}
+pub struct ObjectIdentifier(pub Vec<u64>);
 
 impl fmt::Display for ObjectIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for i in 0..self.parts.len() {
+        for i in 0..self.0.len() {
             if i > 0 {
                 write!(f, ".")?;
             }
-            write!(f, "{}", self.parts[i])?;
+            write!(f, "{}", self.0[i])?;
         }
         Ok(())
     }
@@ -79,9 +77,9 @@ pub enum Value {
     Sequence(Vec<Value>),
     Set(Vec<Value>),
 
-    Application(Vec<Value>),
-    ContextSpecific(Vec<Value>),
-    Private(Vec<Value>),
+    Application(u32, Vec<Value>),
+    ContextSpecific(u32, Vec<Value>),
+    Private(u32, Vec<Value>),
 
     Unknown(Identifier, u32),
 }

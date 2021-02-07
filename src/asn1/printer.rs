@@ -130,7 +130,7 @@ impl Printer<'_> {
             }
             Value::ObjectIdentifier(oid) => {
                 let oid_name: Option<&str> = match self.registry {
-                    Some(registry) => registry.lookup_long_name(&oid.parts),
+                    Some(registry) => registry.lookup_long_name(&oid.0),
                     None => None,
                 };
 
@@ -157,14 +157,17 @@ impl Printer<'_> {
             Value::Set(inner) => {
                 self.print_list("Set", inner, indent, indent);
             }
-            Value::Application(inner) => {
-                self.print_list("Application", inner, indent, indent);
+            Value::Application(tag, inner) => {
+                let label = &format!("Application ({})", tag);
+                self.print_list(label, inner, indent, indent);
             }
-            Value::ContextSpecific(inner) => {
-                self.print_list("ContextSpecific", inner, indent, indent);
+            Value::ContextSpecific(tag, inner) => {
+                let label = &format!("ContextSpecific ({})", tag);
+                self.print_list(label, inner, indent, indent);
             }
-            Value::Private(inner) => {
-                self.print_list("Private", inner, indent, indent);
+            Value::Private(tag, inner) => {
+                let label = &format!("Private ({})", tag);
+                self.print_list(label, inner, indent, indent);
             }
             Value::Unknown(ident, len) => {
                 println!("Unknown {:?}, len = {}", ident, len)
