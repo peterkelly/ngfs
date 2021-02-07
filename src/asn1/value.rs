@@ -11,7 +11,7 @@ use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::super::binary::BinaryReader;
 use super::super::result::GeneralError;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Class {
     Universal,
     Application,
@@ -19,19 +19,20 @@ pub enum Class {
     Private,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Form {
     Primitive,
     Constructed,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Identifier {
     pub class: Class,
     pub form: Form,
     pub tag: u32,
 }
 
+#[derive(Clone)]
 pub struct ObjectIdentifier(pub Vec<u64>);
 
 impl fmt::Display for ObjectIdentifier {
@@ -46,6 +47,7 @@ impl fmt::Display for ObjectIdentifier {
     }
 }
 
+#[derive(Clone)]
 pub struct BitString {
     pub unused_bits: u8,
     pub bytes: Vec<u8>,
@@ -60,9 +62,13 @@ impl fmt::Debug for BitString {
     }
 }
 
+#[derive(Clone)]
+pub struct Integer(pub Vec<u8>);
+
+#[derive(Clone)]
 pub enum Value {
     Boolean(bool),
-    Integer(Vec<u8>),
+    Integer(Integer),
     BitString(BitString),
     OctetString(Vec<u8>),
     Null,
@@ -82,4 +88,69 @@ pub enum Value {
     Private(u32, Vec<Value>),
 
     Unknown(Identifier, u32),
+}
+
+impl Value {
+    pub fn as_sequence(&self) -> Result<&Vec<Value>, Box<dyn Error>> {
+        match self {
+            Value::Sequence(items) => Ok(items),
+            _ => Err(GeneralError::new("Expected a sequence")),
+        }
+    }
+
+    pub fn as_exact_sequence(&self, count: usize) -> Result<&Vec<Value>, Box<dyn Error>> {
+        let items = self.as_sequence()?;
+        if items.len() != count {
+            return Err(GeneralError::new(&format!("Expected a sequence of {} items, got {}", count, items.len())));
+        }
+        else {
+            return Ok(items);
+        }
+    }
+
+    pub fn as_set(&self) -> Result<&Vec<Value>, Box<dyn Error>> {
+        match self {
+            Value::Set(items) => Ok(items),
+            _ => Err(GeneralError::new("Expected a set")),
+        }
+    }
+
+    pub fn as_exact_set(&self, count: usize) -> Result<&Vec<Value>, Box<dyn Error>> {
+        let items = self.as_set()?;
+        if items.len() != count {
+            return Err(GeneralError::new(&format!("Expected a set of {} items, got {}", count, items.len())));
+        }
+        else {
+            return Ok(items);
+        }
+    }
+
+    pub fn as_object_identifier(&self) -> Result<&ObjectIdentifier, Box<dyn Error>> {
+        match self {
+            Value::ObjectIdentifier(oid) => Ok(oid),
+            _ => Err(GeneralError::new("Expected an object identifier")),
+        }
+    }
+
+    pub fn as_bit_string(&self) -> Result<&BitString, Box<dyn Error>> {
+        match self {
+            Value::BitString(bit_string) => Ok(bit_string),
+            _ => Err(GeneralError::new("Expected a bit string")),
+        }
+    }
+
+    pub fn as_integer(&self) -> Result<&Integer, Box<dyn Error>> {
+        match self {
+            Value::Integer(integer) => Ok(integer),
+            _ => Err(GeneralError::new("Expected an integer")),
+        }
+    }
+
+    pub fn as_string(&self) -> Result<&str, Box<dyn Error>> {
+        match self {
+            Value::PrintableString(s) => Ok(s),
+            Value::UTF8String(s) => Ok(s),
+            _ => Err(GeneralError::new("Expected a string")),
+        }
+    }
 }

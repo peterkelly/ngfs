@@ -115,7 +115,7 @@ impl Printer<'_> {
                 println!("BOOLEAN {}", inner);
             }
             Value::Integer(inner) => {
-                println!("INTEGER {}", self.bytes_to_string(inner));
+                println!("INTEGER {}", self.bytes_to_string(&inner.0));
             }
             Value::BitString(bitstring) => {
                 println!("BIT STRING {} (unused {})",

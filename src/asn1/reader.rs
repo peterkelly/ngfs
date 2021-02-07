@@ -198,7 +198,7 @@ pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>
                         Form::Constructed => Err(GeneralError::new("Integer: incorrect form")),
                         Form::Primitive => {
                             let bytes: Vec<u8> = contents.remaining_data().to_vec();
-                            Ok(Value::Integer(bytes))
+                            Ok(Value::Integer(Integer(bytes)))
                         }
                     }
                 }
