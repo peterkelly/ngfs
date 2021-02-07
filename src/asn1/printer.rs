@@ -7,21 +7,75 @@
 
 use std::fmt;
 use std::error::Error;
+use std::collections::HashMap;
 use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::super::binary::BinaryReader;
 use super::super::result::GeneralError;
 use super::value::Value;
 
-pub struct Printer {
-    pub truncate: bool,
-    pub lines: bool,
+pub struct ObjectDescriptor {
+    pub parts: &'static [u64],
+    pub name: &'static str,
+    pub short: Option<&'static str>,
+    pub description: &'static str,
 }
 
-impl Printer {
+pub struct ObjectRegistry {
+    long_names: HashMap<Vec<u64>, String>,
+    short_names: HashMap<Vec<u64>, String>,
+    descriptors: HashMap<Vec<u64>, &'static ObjectDescriptor>,
+}
+
+impl ObjectRegistry {
+    pub fn new() -> ObjectRegistry {
+        ObjectRegistry {
+            long_names: HashMap::new(),
+            short_names: HashMap::new(),
+            descriptors: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, oid: &[u64], long_name: &str) {
+        self.long_names.insert(oid.to_vec(), String::from(long_name));
+    }
+
+    pub fn add2(&mut self, oid: &[u64], long_name: &str, short_name: &str) {
+        self.long_names.insert(oid.to_vec(), String::from(long_name));
+        self.short_names.insert(oid.to_vec(), String::from(short_name));
+    }
+
+    pub fn lookup_long_name(&self, oid: &[u64]) -> Option<&str> {
+        match self.long_names.get(oid) {
+            Some(s) => Some(&s),
+            None => None,
+        }
+    }
+
+    pub fn lookup_short_name(&self, oid: &[u64]) -> Option<&str> {
+        match self.short_names.get(oid) {
+            Some(s) => Some(&s),
+            None => None,
+        }
+    }
+
+    pub fn lookup_descriptor(&self, oid: &[u64]) -> Option<&&'static ObjectDescriptor> {
+    // pub fn lookup_descriptor(&self, oid: &[u64]) {
+        self.descriptors.get(oid)
+    }
+}
+
+pub struct Printer<'a> {
+    pub truncate: bool,
+    pub lines: bool,
+    pub registry: Option<&'a ObjectRegistry>,
+}
+
+impl Printer<'_> {
     pub fn new() -> Self {
         Self {
             truncate: false,
             lines: false,
+            registry: None,
         }
     }
 
@@ -75,7 +129,15 @@ impl Printer {
                 println!("NULL");
             }
             Value::ObjectIdentifier(oid) => {
-                println!("OBJECT {}", oid);
+                let oid_name: Option<&str> = match self.registry {
+                    Some(registry) => registry.lookup_long_name(&oid.parts),
+                    None => None,
+                };
+
+                match oid_name {
+                    Some(oid_name) => println!("OBJECT {} ({})", oid_name, oid),
+                    None => println!("OBJECT {}", oid),
+                };
             }
             Value::PrintableString(s) => {
                 println!("PrintableString {}", escape_string(s));
