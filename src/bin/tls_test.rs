@@ -359,6 +359,10 @@ fn get_derived_prk(prk: &Prk, algorithm: ring::hkdf::Algorithm, secret: &[u8]) -
     salt.extract(secret)
 }
 
+struct Client {
+    state: State,
+}
+
 async fn test_client() -> Result<(), Box<dyn Error>> {
     let algorithm: ring::hkdf::Algorithm = ring::hkdf::HKDF_SHA384;
     let algorithm_len = hkdf::KeyType::len(&algorithm);
@@ -386,10 +390,12 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
     let mut initial_transcript: Vec<u8> = Vec::new();
     initial_transcript.extend_from_slice(&client_hello_bytes);
-    let mut state = State::ClientHelloSent(ClientHelloSentData {
-        prk: get_zero_prk(algorithm),
-        transcript: initial_transcript,
-    });
+    let mut client = Client {
+        state: State::ClientHelloSent(ClientHelloSentData {
+            prk: get_zero_prk(algorithm),
+            transcript: initial_transcript,
+        }),
+    };
 
     let mut receiver = Receiver::new();
 
@@ -415,7 +421,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
                     println!("{:#?}", server_handshake);
 
-                    match &mut state {
+                    match &mut client.state {
                         State::ClientHelloSent(state_data) => {
                             match server_handshake {
                                 Handshake::ServerHello(server_hello) => {
@@ -443,7 +449,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
                                     // handshake_traffic_secrets = Some(hs);
 
-                                    state = State::ServerHelloReceived(ServerHelloReceivedData {
+                                    client.state = State::ServerHelloReceived(ServerHelloReceivedData {
                                         prk: new_prk,
                                         transcript: state_data.transcript.clone(), // TODO: Avoid clone
                                         handshake_secrets: hs,
@@ -462,7 +468,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                 }
             }
             ContentType::ApplicationData => {
-                match &mut state {
+                match &mut client.state {
                     State::ServerHelloReceived(state_data) => {
                         let hs_secrets = &state_data.handshake_secrets;
 
@@ -571,7 +577,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                                                 println!("KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
                                                 println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
 
-                                                state = State::Established(EstablishedData {
+                                                client.state = State::Established(EstablishedData {
                                                     prk: new_prk,
                                                     application_secrets: ap,
                                                 });
