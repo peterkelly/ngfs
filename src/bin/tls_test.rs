@@ -263,16 +263,19 @@ fn derive_secret(secret: &Prk, label: &[u8], messages: &[u8], len: usize) -> Vec
 }
 
 struct ClientHelloSentData {
+    prk: Prk,
     transcript: Vec<u8>,
 }
 
 struct ServerHelloReceivedData {
+    prk: Prk,
     transcript: Vec<u8>,
     handshake_secrets: TrafficSecrets,
     server_sequence_no: u64,
 }
 
 struct EstablishedData {
+    prk: Prk,
     application_secrets: TrafficSecrets,
 }
 
@@ -341,6 +344,21 @@ struct TrafficSecrets {
     server: Vec<u8>,
 }
 
+fn get_zero_prk(algorithm: ring::hkdf::Algorithm) -> Prk {
+    let algorithm_len = hkdf::KeyType::len(&algorithm);
+    let input_zero: &[u8] = &vec_with_len(algorithm_len);
+    let input_psk: &[u8] = &vec_with_len(algorithm_len);
+    let salt1 = ring::hkdf::Salt::new(algorithm, input_zero);
+    salt1.extract(input_psk)
+}
+
+fn get_derived_prk(prk: &Prk, algorithm: ring::hkdf::Algorithm, secret: &[u8]) -> Prk {
+    let algorithm_len = hkdf::KeyType::len(&algorithm);
+    let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
+    let salt = Salt::new(algorithm, &salt_bytes);
+    salt.extract(secret)
+}
+
 async fn test_client() -> Result<(), Box<dyn Error>> {
     let algorithm: ring::hkdf::Algorithm = ring::hkdf::HKDF_SHA384;
     let algorithm_len = hkdf::KeyType::len(&algorithm);
@@ -359,23 +377,17 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
     let client_hello_bytes: Vec<u8> = Vec::from(client_hello_plaintext_record.fragment);
 
-    let input_zero = vec_with_len(algorithm_len);
-    let input_psk = vec_with_len(algorithm_len);
-
-    let salt1 = ring::hkdf::Salt::new(algorithm, &input_zero);
-    let mut prk: Prk = salt1.extract(&input_psk);
-
     let serialized_filename = "record-constructed.bin";
     std::fs::write(serialized_filename, &client_hello_plaintext_record_bytes)?;
     println!("Wrote {}", serialized_filename);
 
-    // let mut socket = TcpStream::connect("localhost:443").await?;
     let mut socket = TcpStream::connect("localhost:443").await?;
     socket.write_all(&client_hello_plaintext_record_bytes).await?;
 
     let mut initial_transcript: Vec<u8> = Vec::new();
     initial_transcript.extend_from_slice(&client_hello_bytes);
     let mut state = State::ClientHelloSent(ClientHelloSentData {
+        prk: get_zero_prk(algorithm),
         transcript: initial_transcript,
     });
 
@@ -411,23 +423,19 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                                     state_data.transcript.extend_from_slice(&server_hello_bytes);
                                     let my_private_key2 = my_private_key.take().unwrap();
 
-                                    let secret = match get_x25519_shared_secret(my_private_key2, &server_hello) {
+                                    let secret: &[u8] = &match get_x25519_shared_secret(my_private_key2, &server_hello) {
                                         Some(r) => r,
-                                        None => {
-                                            return Err("Cannot get shared secret".into());
-                                        }
+                                        None => return Err("Cannot get shared secret".into()),
                                     };
                                     println!("Shared secret = {}", BinaryData(&secret));
 
-                                    let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
-                                    let salt = Salt::new(algorithm, &salt_bytes);
-                                    prk = salt.extract(&secret);
+                                    let new_prk = get_derived_prk(&state_data.prk, algorithm, secret);
 
                                     println!("Got expected server hello");
 
                                     let hs = TrafficSecrets {
-                                        client: derive_secret(&prk, b"c hs traffic", &state_data.transcript, algorithm_len),
-                                        server: derive_secret(&prk, b"s hs traffic", &state_data.transcript, algorithm_len),
+                                        client: derive_secret(&new_prk, b"c hs traffic", &state_data.transcript, algorithm_len),
+                                        server: derive_secret(&new_prk, b"s hs traffic", &state_data.transcript, algorithm_len),
                                     };
 
                                     println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
@@ -436,6 +444,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                                     // handshake_traffic_secrets = Some(hs);
 
                                     state = State::ServerHelloReceived(ServerHelloReceivedData {
+                                        prk: new_prk,
                                         transcript: state_data.transcript.clone(), // TODO: Avoid clone
                                         handshake_secrets: hs,
                                         server_sequence_no: 0,
@@ -548,18 +557,22 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                                             Handshake::CertificateVerify(certificate_verify) => {
                                             }
                                             Handshake::Finished(finished) => {
-                                                let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
-                                                let salt = Salt::new(algorithm, &salt_bytes);
-                                                prk = salt.extract(&input_psk);
+                                                // let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
+                                                // let salt = Salt::new(algorithm, &salt_bytes);
+                                                // prk = salt.extract(input_psk);
+
+                                                let input_psk: &[u8] = &vec_with_len(algorithm_len);
+                                                let new_prk = get_derived_prk(&state_data.prk, algorithm, input_psk);
 
                                                 let ap = TrafficSecrets {
-                                                    client: derive_secret(&prk, b"c ap traffic", &state_data.transcript, algorithm_len),
-                                                    server: derive_secret(&prk, b"s ap traffic", &state_data.transcript, algorithm_len),
+                                                    client: derive_secret(&new_prk, b"c ap traffic", &state_data.transcript, algorithm_len),
+                                                    server: derive_secret(&new_prk, b"s ap traffic", &state_data.transcript, algorithm_len),
                                                 };
                                                 println!("KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
                                                 println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
 
                                                 state = State::Established(EstablishedData {
+                                                    prk: new_prk,
                                                     application_secrets: ap,
                                                 });
                                             }
