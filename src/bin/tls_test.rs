@@ -262,11 +262,25 @@ fn derive_secret(secret: &Prk, label: &[u8], messages: &[u8], len: usize) -> Vec
     result
 }
 
-#[derive(Debug, Eq, PartialEq)]
+struct ClientHelloSentData {
+    transcript: Vec<u8>,
+}
+
+struct ServerHelloReceivedData {
+    transcript: Vec<u8>,
+    handshake_secrets: TrafficSecrets,
+    server_sequence_no: u64,
+}
+
+struct EstablishedData {
+    application_secrets: TrafficSecrets,
+}
+
+// #[derive(Debug, Eq, PartialEq)]
 enum State {
-    ClientHelloSent,
-    ServerHelloReceived,
-    Unknown1,
+    ClientHelloSent(ClientHelloSentData),
+    ServerHelloReceived(ServerHelloReceivedData),
+    Established(EstablishedData),
 }
 
 fn get_client_hello_x25519_key_share(client_hello: &ClientHello) -> Option<Vec<u8>> {
@@ -359,19 +373,13 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let mut socket = TcpStream::connect("localhost:443").await?;
     socket.write_all(&client_hello_plaintext_record_bytes).await?;
 
-    let mut state = State::ClientHelloSent;
-    // let mut client_handshake_traffic_secret: Option<Vec<u8>> = None;
-    // let mut server_handshake_traffic_secret: Option<Vec<u8>> = None;
-    let mut handshake_traffic_secrets: Option<TrafficSecrets> = None;
-
-    let mut server_sequence_no: u64 = 0;
+    let mut initial_transcript: Vec<u8> = Vec::new();
+    initial_transcript.extend_from_slice(&client_hello_bytes);
+    let mut state = State::ClientHelloSent(ClientHelloSentData {
+        transcript: initial_transcript,
+    });
 
     let mut receiver = Receiver::new();
-
-    let mut cipher_change_bytes: Option<Vec<u8>> = None;
-
-    let mut transcript: Vec<u8> = Vec::new();
-    transcript.extend_from_slice(&client_hello_bytes);
 
     while let Some((plaintext, plaintext_raw)) = receiver.next(&mut socket).await? {
         match plaintext.content_type {
@@ -379,8 +387,6 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                 println!("Unsupported record type: Invalid");
             }
             ContentType::ChangeCipherSpec => {
-                cipher_change_bytes = Some(Vec::from(plaintext.fragment));
-                println!("now cipher_change_bytes = {:?}", cipher_change_bytes);
                 println!("ChangeCipherSpec record: Ignoring");
             }
             ContentType::Alert => {
@@ -397,171 +403,187 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
                     println!("{:#?}", server_handshake);
 
-                    if state == State::ClientHelloSent {
-                        match server_handshake {
-                            Handshake::ServerHello(server_hello) => {
-                                let server_hello_bytes: Vec<u8> = Vec::from(&plaintext.fragment[old_offset..new_offset]);
-                                transcript.extend_from_slice(&server_hello_bytes);
-                                let my_private_key2 = my_private_key.take().unwrap();
+                    match &mut state {
+                        State::ClientHelloSent(state_data) => {
+                            match server_handshake {
+                                Handshake::ServerHello(server_hello) => {
+                                    let server_hello_bytes: Vec<u8> = Vec::from(&plaintext.fragment[old_offset..new_offset]);
+                                    state_data.transcript.extend_from_slice(&server_hello_bytes);
+                                    let my_private_key2 = my_private_key.take().unwrap();
 
-                                let secret = match get_x25519_shared_secret(my_private_key2, &server_hello) {
-                                    Some(r) => r,
-                                    None => {
-                                        return Err("Cannot get shared secret".into());
-                                    }
-                                };
-                                println!("Shared secret = {}", BinaryData(&secret));
+                                    let secret = match get_x25519_shared_secret(my_private_key2, &server_hello) {
+                                        Some(r) => r,
+                                        None => {
+                                            return Err("Cannot get shared secret".into());
+                                        }
+                                    };
+                                    println!("Shared secret = {}", BinaryData(&secret));
 
-                                let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
-                                let salt = Salt::new(algorithm, &salt_bytes);
-                                prk = salt.extract(&secret);
+                                    let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
+                                    let salt = Salt::new(algorithm, &salt_bytes);
+                                    prk = salt.extract(&secret);
 
-                                println!("Got expected server hello");
+                                    println!("Got expected server hello");
 
-                                let hs = TrafficSecrets {
-                                    client: derive_secret(&prk, b"c hs traffic", &transcript, algorithm_len),
-                                    server: derive_secret(&prk, b"s hs traffic", &transcript, algorithm_len),
-                                };
+                                    let hs = TrafficSecrets {
+                                        client: derive_secret(&prk, b"c hs traffic", &state_data.transcript, algorithm_len),
+                                        server: derive_secret(&prk, b"s hs traffic", &state_data.transcript, algorithm_len),
+                                    };
 
-                                println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
-                                println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server));
+                                    println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
+                                    println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server));
 
-                                handshake_traffic_secrets = Some(hs);
+                                    // handshake_traffic_secrets = Some(hs);
 
-                                state = State::ServerHelloReceived;
-                            }
-                            _ => {
-                                println!("Received unexpected handshake type");
+                                    state = State::ServerHelloReceived(ServerHelloReceivedData {
+                                        transcript: state_data.transcript.clone(), // TODO: Avoid clone
+                                        handshake_secrets: hs,
+                                        server_sequence_no: 0,
+                                    });
+                                }
+                                _ => {
+                                    println!("Received unexpected handshake type");
+                                }
                             }
                         }
+                        _ => {
+                            println!("Received handhake record in invalid state; don't know what to do");
+                        }
                     }
-                    else {
-                        println!("Received handhake record in state {:?}; don't know what to do", state);
-                    }
-
                 }
             }
             ContentType::ApplicationData => {
-                if let Some(hs_secrets) = &handshake_traffic_secrets {
-                    let server_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &hs_secrets.server);
-                    println!("Received ApplicationData (server_sequence_no = {})", server_sequence_no);
-                    // println!("{:#?}", Indent(&DebugHexDump(&plaintext_raw)));
+                match &mut state {
+                    State::ServerHelloReceived(state_data) => {
+                        let hs_secrets = &state_data.handshake_secrets;
 
-                    let mut server_write_key: [u8; 32] = [0; 32];
-                    let mut server_write_iv: [u8; 12] = [0; 12];
+                        let server_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &hs_secrets.server);
+                        println!("Received ApplicationData (server_sequence_no = {})", state_data.server_sequence_no);
+                        // println!("{:#?}", Indent(&DebugHexDump(&plaintext_raw)));
 
-                    hkdf_expand_label(&server_prk, b"key", &[], &mut server_write_key);
-                    hkdf_expand_label(&server_prk, b"iv", &[], &mut server_write_iv);
+                        let mut server_write_key: [u8; 32] = [0; 32];
+                        let mut server_write_iv: [u8; 12] = [0; 12];
 
-                    let sequence_no_bytes: [u8; 8] = server_sequence_no.to_be_bytes();
-                    let mut nonce_bytes: [u8; 12] = [0; 12];
-                    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
-                    for i in 0..12 {
-                        nonce_bytes[i] ^= server_write_iv[i];
-                    }
+                        hkdf_expand_label(&server_prk, b"key", &[], &mut server_write_key);
+                        hkdf_expand_label(&server_prk, b"iv", &[], &mut server_write_iv);
 
-                    // println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
-                    let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
-                    // println!("bytes_consumed = {}", bytes_consumed);
-                    if bytes_consumed != plaintext_raw.len() {
-                        return Err("bytes_consumed != plaintext_raw.len()".into());
-                    }
-
-                    let mut additional_data: Vec<u8> = Vec::new();
-                    additional_data.extend_from_slice(&plaintext_raw[0..5]); // TODO: verify we have at least 5 bytes
-
-                    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
-
-                    let unbound_key = match UnboundKey::new(&AES_256_GCM, &server_write_key[0..32]) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return Err(GeneralError::new(format!("UnboundKey::new {:?} failed: {}",
-                                       BinaryData(&server_write_key), e)));
+                        let sequence_no_bytes: [u8; 8] = state_data.server_sequence_no.to_be_bytes();
+                        let mut nonce_bytes: [u8; 12] = [0; 12];
+                        &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
+                        for i in 0..12 {
+                            nonce_bytes[i] ^= server_write_iv[i];
                         }
-                    };
-                    let key = LessSafeKey::new(unbound_key);
 
-                    let mut work: Vec<u8> = Vec::new();
-                    work.extend_from_slice(&tls_ciphertext.encrypted_record);
+                        // println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
+                        let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
+                        // println!("bytes_consumed = {}", bytes_consumed);
+                        if bytes_consumed != plaintext_raw.len() {
+                            return Err("bytes_consumed != plaintext_raw.len()".into());
+                        }
 
-                    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-                    let aad = Aad::from(additional_data);
-                    match key.open_in_place(nonce, aad, &mut work) {
-                        Ok(plaintext) => {
-                            println!("open_in_place succeeded");
+                        let mut additional_data: Vec<u8> = Vec::new();
+                        additional_data.extend_from_slice(&plaintext_raw[0..5]); // TODO: verify we have at least 5 bytes
 
-                            // TEMP: Add test zero padding
-                            // let mut plaintext: Vec<u8> = plaintext.to_vec();
-                            // for i in 0..5 {
-                            //     plaintext.push(0);
-                            // }
+                        use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
 
-                            let mut type_offset: usize = plaintext.len();
-                            while type_offset > 0 && plaintext[type_offset - 1] == 0 {
-                                type_offset -= 1;
+                        let unbound_key = match UnboundKey::new(&AES_256_GCM, &server_write_key[0..32]) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Err(GeneralError::new(format!("UnboundKey::new {:?} failed: {}",
+                                           BinaryData(&server_write_key), e)));
                             }
-                            if type_offset == 0 {
-                                return Err(GeneralError::new("Plaintext: Missing type field"));
-                            }
-                            let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
-                            let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+                        };
+                        let key = LessSafeKey::new(unbound_key);
 
-                            transcript.extend_from_slice(&inner_body);
-                            println!("transcript hash = {:?}", BinaryData(&transcript_hash(&transcript)));
+                        let mut work: Vec<u8> = Vec::new();
+                        work.extend_from_slice(&tls_ciphertext.encrypted_record);
 
-                            println!("inner_content_type = {:?}", inner_content_type);
-                            println!("inner_body.len() = {}", inner_body.len());
+                        let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+                        let aad = Aad::from(additional_data);
+                        let current_sequence_no = state_data.server_sequence_no;
+                        state_data.server_sequence_no += 1;
+                        match key.open_in_place(nonce, aad, &mut work) {
+                            Ok(plaintext) => {
+                                println!("open_in_place succeeded");
+
+                                // TEMP: Add test zero padding
+                                // let mut plaintext: Vec<u8> = plaintext.to_vec();
+                                // for i in 0..5 {
+                                //     plaintext.push(0);
+                                // }
+
+                                let mut type_offset: usize = plaintext.len();
+                                while type_offset > 0 && plaintext[type_offset - 1] == 0 {
+                                    type_offset -= 1;
+                                }
+                                if type_offset == 0 {
+                                    return Err(GeneralError::new("Plaintext: Missing type field"));
+                                }
+                                let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
+                                let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+
+                                state_data.transcript.extend_from_slice(&inner_body);
+                                println!("transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
+
+                                println!("inner_content_type = {:?}", inner_content_type);
+                                println!("inner_body.len() = {}", inner_body.len());
 
 
-                            println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
+                                println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
 
-                            match inner_content_type {
-                                ContentType::Handshake => {
-                                    let mut reader = BinaryReader::new(inner_body);
-                                    let inner_handshake = reader.read_item::<Handshake>()?;
-                                    match &inner_handshake {
-                                        Handshake::Certificate(certificate) => {
-                                            println!("This is a certificate handshake");
-                                            for entry in certificate.certificate_list.iter() {
-                                                println!("- entry");
-                                                let filename = "certificate.crt";
-                                                std::fs::write(filename, &entry.data)?;
-                                                println!("Wrote to {}", filename);
+                                match inner_content_type {
+                                    ContentType::Handshake => {
+                                        let mut reader = BinaryReader::new(inner_body);
+                                        let inner_handshake = reader.read_item::<Handshake>()?;
+                                        match &inner_handshake {
+                                            Handshake::Certificate(certificate) => {
+                                                println!("This is a certificate handshake");
+                                                for entry in certificate.certificate_list.iter() {
+                                                    println!("- entry");
+                                                    let filename = "certificate.crt";
+                                                    std::fs::write(filename, &entry.data)?;
+                                                    println!("Wrote to {}", filename);
+                                                }
+                                            }
+                                            Handshake::CertificateVerify(certificate_verify) => {
+                                            }
+                                            Handshake::Finished(finished) => {
+                                                let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
+                                                let salt = Salt::new(algorithm, &salt_bytes);
+                                                prk = salt.extract(&input_psk);
+
+                                                let ap = TrafficSecrets {
+                                                    client: derive_secret(&prk, b"c ap traffic", &state_data.transcript, algorithm_len),
+                                                    server: derive_secret(&prk, b"s ap traffic", &state_data.transcript, algorithm_len),
+                                                };
+                                                println!("KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
+                                                println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
+
+                                                state = State::Established(EstablishedData {
+                                                    application_secrets: ap,
+                                                });
+                                            }
+                                            _ => {
                                             }
                                         }
-                                        Handshake::CertificateVerify(certificate_verify) => {
-                                        }
-                                        Handshake::Finished(finished) => {
-                                            let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
-                                            let salt = Salt::new(algorithm, &salt_bytes);
-                                            prk = salt.extract(&input_psk);
-
-                                            let ap = TrafficSecrets {
-                                                client: derive_secret(&prk, b"c ap traffic", &transcript, algorithm_len),
-                                                server: derive_secret(&prk, b"s ap traffic", &transcript, algorithm_len),
-                                            };
-                                            println!("KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
-                                            println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
-                                        }
-                                        _ => {
-                                        }
+                                        println!("handshake = {:#?}", inner_handshake);
                                     }
-                                    println!("handshake = {:#?}", inner_handshake);
+                                    _ => {
+                                    }
                                 }
-                                _ => {
-                                }
+                            },
+                            Err(e) => {
+                                return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e)));
                             }
-                        },
-                        Err(e) => {
-                            return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e)));
-                        }
-                    };
+                        };
 
-                    println!("Successfully finished processing ApplicationData for server_sequence_no {}", server_sequence_no);
-                    server_sequence_no += 1;
-                }
-                else {
-                    println!("Received ApplicationData but don't have secret");
+                        println!("Successfully finished processing ApplicationData for server_sequence_no {}",
+                                 current_sequence_no);
+
+                    }
+                    _ => {
+                        println!("Received ApplicationData but don't have secret");
+                    }
                 }
             }
             ContentType::Unknown(code) => {
