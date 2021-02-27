@@ -322,7 +322,7 @@ fn get_x25519_shared_secret(my_private_key: EphemeralPrivateKey/*, client_hello:
     return Some(key_material1);
 }
 
-struct HandshakeTrafficSecrets {
+struct TrafficSecrets {
     client: Vec<u8>,
     server: Vec<u8>,
 }
@@ -362,7 +362,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let mut state = State::ClientHelloSent;
     // let mut client_handshake_traffic_secret: Option<Vec<u8>> = None;
     // let mut server_handshake_traffic_secret: Option<Vec<u8>> = None;
-    let mut handshake_traffic_secrets: Option<HandshakeTrafficSecrets> = None;
+    let mut handshake_traffic_secrets: Option<TrafficSecrets> = None;
 
     let mut server_sequence_no: u64 = 0;
 
@@ -418,13 +418,13 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
                                 println!("Got expected server hello");
 
-                                let hs = HandshakeTrafficSecrets {
+                                let hs = TrafficSecrets {
                                     client: derive_secret(&prk, b"c hs traffic", &transcript, algorithm_len),
                                     server: derive_secret(&prk, b"s hs traffic", &transcript, algorithm_len),
                                 };
 
-                                println!("client hs secret = {}", BinaryData(&hs.client));
-                                println!("server hs secret = {}", BinaryData(&hs.server));
+                                println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
+                                println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server));
 
                                 handshake_traffic_secrets = Some(hs);
 
@@ -505,6 +505,10 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                             }
                             let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
                             let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+
+                            transcript.extend_from_slice(&inner_body);
+                            println!("transcript hash = {:?}", BinaryData(&transcript_hash(&transcript)));
+
                             println!("inner_content_type = {:?}", inner_content_type);
                             println!("inner_body.len() = {}", inner_body.len());
 
@@ -525,10 +529,24 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
                                                 println!("Wrote to {}", filename);
                                             }
                                         }
+                                        Handshake::CertificateVerify(certificate_verify) => {
+                                        }
+                                        Handshake::Finished(finished) => {
+                                            let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
+                                            let salt = Salt::new(algorithm, &salt_bytes);
+                                            prk = salt.extract(&input_psk);
+
+                                            let ap = TrafficSecrets {
+                                                client: derive_secret(&prk, b"c ap traffic", &transcript, algorithm_len),
+                                                server: derive_secret(&prk, b"s ap traffic", &transcript, algorithm_len),
+                                            };
+                                            println!("KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
+                                            println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
+                                        }
                                         _ => {
                                         }
                                     }
-                                    println!("{:#?}", inner_handshake);
+                                    println!("handshake = {:#?}", inner_handshake);
                                 }
                                 _ => {
                                 }
