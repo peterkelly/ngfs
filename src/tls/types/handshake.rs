@@ -357,15 +357,17 @@ impl FromBinary for Certificate {
 
 #[derive(Debug)]
 pub struct CertificateVerify {
-    todo: String,
+    pub algorithm: SignatureScheme,
+    pub signature: Vec<u8>,
 }
 
 impl FromBinary for CertificateVerify {
     type Output = CertificateVerify;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        // Err(GeneralError::new("CertificateVerify::from_binary(): Not implemented"))
-        Ok(CertificateVerify { todo: String::from("TODO") })
+        let algorithm = reader.read_item::<SignatureScheme>()?;
+        let signature = reader.read_len16_bytes()?.to_vec();
+        Ok(CertificateVerify { algorithm, signature })
     }
 }
 
