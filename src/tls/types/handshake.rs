@@ -371,7 +371,8 @@ impl FromBinary for CertificateVerify {
 
 #[derive(Debug)]
 pub struct Finished {
-    todo: String,
+    pub data: Vec<u8>,
+    // todo: String,
 }
 
 impl FromBinary for Finished {
@@ -379,7 +380,8 @@ impl FromBinary for Finished {
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         // Err(GeneralError::new("Finished::from_binary(): Not implemented"))
-        Ok(Finished { todo: String::from("TODO") })
+        // Ok(Finished { todo: String::from("TODO") })
+        Ok(Finished { data: reader.remaining_data().to_vec() })
     }
 }
 

@@ -256,9 +256,9 @@ fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
 fn derive_secret(secret: &Prk, label: &[u8], messages: &[u8], len: usize) -> Vec<u8> {
     let mut result: Vec<u8> = vec_with_len(len);
     let thash = transcript_hash(messages);
-    println!("derive_secret begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
+    // println!("derive_secret begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
     hkdf_expand_label(secret, label, &thash, &mut result);
-    println!("derive_secret end '{}'", String::from_utf8_lossy(label));
+    // println!("derive_secret end '{}'", String::from_utf8_lossy(label));
     result
 }
 
@@ -425,24 +425,20 @@ fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext, plain
     Ok(())
 }
 
-fn decrypt_from_server<'a>(work: &'a mut Vec<u8>,
-                           traffic_secret: &[u8],
-                           sequence_no: u64,
-                           plaintext_raw: &[u8]
-                           ) -> Result<&'a mut [u8], Box<dyn Error>> {
-    let server_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &traffic_secret);
+fn decrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, plaintext_raw: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &traffic_secret);
 
-    let mut server_write_key: [u8; 32] = [0; 32];
-    let mut server_write_iv: [u8; 12] = [0; 12];
+    let mut write_key: [u8; 32] = [0; 32];
+    let mut write_iv: [u8; 12] = [0; 12];
 
-    hkdf_expand_label(&server_prk, b"key", &[], &mut server_write_key);
-    hkdf_expand_label(&server_prk, b"iv", &[], &mut server_write_iv);
+    hkdf_expand_label(&prk, b"key", &[], &mut write_key);
+    hkdf_expand_label(&prk, b"iv", &[], &mut write_iv);
 
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
     &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
     for i in 0..12 {
-        nonce_bytes[i] ^= server_write_iv[i];
+        nonce_bytes[i] ^= write_iv[i];
     }
 
     let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
@@ -455,21 +451,19 @@ fn decrypt_from_server<'a>(work: &'a mut Vec<u8>,
 
     use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
 
-    let unbound_key = match UnboundKey::new(&AES_256_GCM, &server_write_key[0..32]) {
+    let unbound_key = match UnboundKey::new(&AES_256_GCM, &write_key[0..32]) {
         Ok(v) => v,
-        Err(e) => {
-            return Err(GeneralError::new(format!("UnboundKey::new {:?} failed: {}",
-                       BinaryData(&server_write_key), e)));
-        }
+        Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
     };
     let key = LessSafeKey::new(unbound_key);
 
+    let mut work: Vec<u8> = Vec::new();
     work.extend_from_slice(&tls_ciphertext.encrypted_record);
 
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let aad = Aad::from(additional_data);
-    let open_result: Result<&mut [u8], ring::error::Unspecified> = key.open_in_place(nonce, aad, work);
-    Ok(open_result?)
+    let open_result: Result<&mut [u8], ring::error::Unspecified> = key.open_in_place(nonce, aad, &mut work);
+    Ok(open_result?.to_vec())
 }
 
 fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext, plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
@@ -477,92 +471,91 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
         State::ServerHelloReceived(state_data) => {
             println!("Received ApplicationData (server_sequence_no = {})", state_data.server_sequence_no);
             let current_sequence_no = state_data.server_sequence_no;
-            let mut work: Vec<u8> = Vec::new();
-            let open_result = decrypt_from_server(
-                &mut work,
-                &state_data.handshake_secrets.server,
-                state_data.server_sequence_no,
-                &plaintext_raw);
-            match open_result {
-                Ok(plaintext) => {
-                    state_data.server_sequence_no += 1;
-                    println!("open_in_place succeeded");
+            // let mut work: Vec<u8> = Vec::new();
 
-                    // TEMP: Add test zero padding
-                    // let mut plaintext: Vec<u8> = plaintext.to_vec();
-                    // for i in 0..5 {
-                    //     plaintext.push(0);
-                    // }
+            let plaintext = match decrypt_traffic(&state_data.handshake_secrets.server,
+                                                  state_data.server_sequence_no,
+                                                  &plaintext_raw) {
+                Err(e) => return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e))),
+                Ok(plaintext) => plaintext,
+            };
 
-                    let mut type_offset: usize = plaintext.len();
-                    while type_offset > 0 && plaintext[type_offset - 1] == 0 {
-                        type_offset -= 1;
-                    }
-                    if type_offset == 0 {
-                        return Err(GeneralError::new("Plaintext: Missing type field"));
-                    }
-                    let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
-                    let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+            state_data.server_sequence_no += 1;
+            println!("open_in_place succeeded");
 
-                    state_data.transcript.extend_from_slice(&inner_body);
-                    println!("transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
+            // TEMP: Add test zero padding
+            // let mut plaintext: Vec<u8> = plaintext.to_vec();
+            // for i in 0..5 {
+            //     plaintext.push(0);
+            // }
 
-                    println!("inner_content_type = {:?}", inner_content_type);
-                    println!("inner_body.len() = {}", inner_body.len());
+            let mut type_offset: usize = plaintext.len();
+            while type_offset > 0 && plaintext[type_offset - 1] == 0 {
+                type_offset -= 1;
+            }
+            if type_offset == 0 {
+                return Err(GeneralError::new("Plaintext: Missing type field"));
+            }
+            let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
+            let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+
+            state_data.transcript.extend_from_slice(&inner_body);
+            println!("transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
+
+            println!("inner_content_type = {:?}", inner_content_type);
+            println!("inner_body.len() = {}", inner_body.len());
 
 
-                    println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
+            println!("plaintext =");
+            println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
+            println!("inner_body =");
+            println!("{:#?}", Indent(&DebugHexDump(&inner_body)));
 
-                    match inner_content_type {
-                        ContentType::Handshake => {
-                            let mut reader = BinaryReader::new(inner_body);
-                            let inner_handshake = reader.read_item::<Handshake>()?;
-                            match &inner_handshake {
-                                Handshake::Certificate(certificate) => {
-                                    println!("This is a certificate handshake");
-                                    for entry in certificate.certificate_list.iter() {
-                                        println!("- entry");
-                                        let filename = "certificate.crt";
-                                        std::fs::write(filename, &entry.data)?;
-                                        println!("Wrote to {}", filename);
-                                    }
-                                }
-                                Handshake::CertificateVerify(certificate_verify) => {
-                                }
-                                Handshake::Finished(finished) => {
-                                    // let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
-                                    // let salt = Salt::new(algorithm, &salt_bytes);
-                                    // prk = salt.extract(input_psk);
-
-                                    let algorithm_len = hkdf::KeyType::len(&client.algorithm);
-                                    let input_psk: &[u8] = &vec_with_len(algorithm_len);
-                                    let new_prk = get_derived_prk(&state_data.prk, client.algorithm, input_psk);
-
-                                    let ap = TrafficSecrets {
-                                        client: derive_secret(&new_prk, b"c ap traffic", &state_data.transcript, algorithm_len),
-                                        server: derive_secret(&new_prk, b"s ap traffic", &state_data.transcript, algorithm_len),
-                                    };
-                                    println!("KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
-                                    println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
-
-                                    client.state = State::Established(EstablishedData {
-                                        prk: new_prk,
-                                        application_secrets: ap,
-                                    });
-                                }
-                                _ => {
-                                }
+            match inner_content_type {
+                ContentType::Handshake => {
+                    let mut reader = BinaryReader::new(inner_body);
+                    let inner_handshake = reader.read_item::<Handshake>()?;
+                    match &inner_handshake {
+                        Handshake::Certificate(certificate) => {
+                            println!("This is a certificate handshake");
+                            for entry in certificate.certificate_list.iter() {
+                                println!("- entry");
+                                let filename = "certificate.crt";
+                                std::fs::write(filename, &entry.data)?;
+                                println!("Wrote to {}", filename);
                             }
                             println!("handshake = {:#?}", inner_handshake);
                         }
+                        Handshake::CertificateVerify(certificate_verify) => {
+                            println!("handshake = {:#?}", inner_handshake);
+                        }
+                        Handshake::Finished(finished) => {
+                            println!("Received Handshake::Finished with {} bytes", finished.data.len());
+                            let algorithm_len = hkdf::KeyType::len(&client.algorithm);
+                            let input_psk: &[u8] = &vec_with_len(algorithm_len);
+                            let new_prk = get_derived_prk(&state_data.prk, client.algorithm, input_psk);
+
+                            let ap = TrafficSecrets {
+                                client: derive_secret(&new_prk, b"c ap traffic", &state_data.transcript, algorithm_len),
+                                server: derive_secret(&new_prk, b"s ap traffic", &state_data.transcript, algorithm_len),
+                            };
+                            println!("KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
+                            println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
+
+                            // println!("handshake = {:#?}", inner_handshake);
+                            client.state = State::Established(EstablishedData {
+                                prk: new_prk,
+                                application_secrets: ap,
+                            });
+                        }
                         _ => {
+                            println!("handshake = {:#?}", inner_handshake);
                         }
                     }
-                },
-                Err(e) => {
-                    return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e)));
                 }
-            };
+                _ => {
+                }
+            }
 
             println!("Successfully finished processing ApplicationData for server_sequence_no {}",
                      current_sequence_no);
