@@ -425,58 +425,67 @@ fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext, plain
     Ok(())
 }
 
+fn decrypt_from_server<'a>(work: &'a mut Vec<u8>,
+                           traffic_secret: &[u8],
+                           sequence_no: u64,
+                           plaintext_raw: &[u8]
+                           ) -> Result<&'a mut [u8], Box<dyn Error>> {
+    let server_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &traffic_secret);
+
+    let mut server_write_key: [u8; 32] = [0; 32];
+    let mut server_write_iv: [u8; 12] = [0; 12];
+
+    hkdf_expand_label(&server_prk, b"key", &[], &mut server_write_key);
+    hkdf_expand_label(&server_prk, b"iv", &[], &mut server_write_iv);
+
+    let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
+    let mut nonce_bytes: [u8; 12] = [0; 12];
+    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
+    for i in 0..12 {
+        nonce_bytes[i] ^= server_write_iv[i];
+    }
+
+    let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
+    if bytes_consumed != plaintext_raw.len() {
+        return Err("bytes_consumed != plaintext_raw.len()".into());
+    }
+
+    let mut additional_data: Vec<u8> = Vec::new();
+    additional_data.extend_from_slice(&plaintext_raw[0..5]); // TODO: verify we have at least 5 bytes
+
+    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
+
+    let unbound_key = match UnboundKey::new(&AES_256_GCM, &server_write_key[0..32]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(GeneralError::new(format!("UnboundKey::new {:?} failed: {}",
+                       BinaryData(&server_write_key), e)));
+        }
+    };
+    let key = LessSafeKey::new(unbound_key);
+
+    work.extend_from_slice(&tls_ciphertext.encrypted_record);
+
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let aad = Aad::from(additional_data);
+    let open_result: Result<&mut [u8], ring::error::Unspecified> = key.open_in_place(nonce, aad, work);
+    Ok(open_result?)
+}
+
 fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext, plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
     match &mut client.state {
         State::ServerHelloReceived(state_data) => {
-            let hs_secrets = &state_data.handshake_secrets;
-
-            let server_prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &hs_secrets.server);
             println!("Received ApplicationData (server_sequence_no = {})", state_data.server_sequence_no);
-            // println!("{:#?}", Indent(&DebugHexDump(&plaintext_raw)));
-
-            let mut server_write_key: [u8; 32] = [0; 32];
-            let mut server_write_iv: [u8; 12] = [0; 12];
-
-            hkdf_expand_label(&server_prk, b"key", &[], &mut server_write_key);
-            hkdf_expand_label(&server_prk, b"iv", &[], &mut server_write_iv);
-
-            let sequence_no_bytes: [u8; 8] = state_data.server_sequence_no.to_be_bytes();
-            let mut nonce_bytes: [u8; 12] = [0; 12];
-            &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
-            for i in 0..12 {
-                nonce_bytes[i] ^= server_write_iv[i];
-            }
-
-            // println!("plaintext.fragment.len() = {}", plaintext.fragment.len());
-            let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
-            // println!("bytes_consumed = {}", bytes_consumed);
-            if bytes_consumed != plaintext_raw.len() {
-                return Err("bytes_consumed != plaintext_raw.len()".into());
-            }
-
-            let mut additional_data: Vec<u8> = Vec::new();
-            additional_data.extend_from_slice(&plaintext_raw[0..5]); // TODO: verify we have at least 5 bytes
-
-            use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
-
-            let unbound_key = match UnboundKey::new(&AES_256_GCM, &server_write_key[0..32]) {
-                Ok(v) => v,
-                Err(e) => {
-                    return Err(GeneralError::new(format!("UnboundKey::new {:?} failed: {}",
-                               BinaryData(&server_write_key), e)));
-                }
-            };
-            let key = LessSafeKey::new(unbound_key);
-
-            let mut work: Vec<u8> = Vec::new();
-            work.extend_from_slice(&tls_ciphertext.encrypted_record);
-
-            let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-            let aad = Aad::from(additional_data);
             let current_sequence_no = state_data.server_sequence_no;
-            state_data.server_sequence_no += 1;
-            match key.open_in_place(nonce, aad, &mut work) {
+            let mut work: Vec<u8> = Vec::new();
+            let open_result = decrypt_from_server(
+                &mut work,
+                &state_data.handshake_secrets.server,
+                state_data.server_sequence_no,
+                &plaintext_raw);
+            match open_result {
                 Ok(plaintext) => {
+                    state_data.server_sequence_no += 1;
                     println!("open_in_place succeeded");
 
                     // TEMP: Add test zero padding
