@@ -363,6 +363,7 @@ struct Client {
     state: State,
     my_private_key: Option<EphemeralPrivateKey>,
     algorithm: ring::hkdf::Algorithm,
+    to_send: Vec<u8>,
 }
 
 fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext, plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
@@ -466,6 +467,53 @@ fn decrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, plaintext_raw: &
     Ok(open_result?.to_vec())
 }
 
+fn encrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, input_plaintext: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &traffic_secret);
+
+    let mut write_key: [u8; 32] = [0; 32];
+    let mut write_iv: [u8; 12] = [0; 12];
+
+    hkdf_expand_label(&prk, b"key", &[], &mut write_key);
+    hkdf_expand_label(&prk, b"iv", &[], &mut write_iv);
+
+    let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
+    let mut nonce_bytes: [u8; 12] = [0; 12];
+    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
+    for i in 0..12 {
+        nonce_bytes[i] ^= write_iv[i];
+    }
+
+    let mut tls_ciphertext_data: Vec<u8> = TLSCiphertext::to_raw_data(input_plaintext);
+    // let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
+    // if bytes_consumed != plaintext_raw.len() {
+    //     return Err("bytes_consumed != plaintext_raw.len()".into());
+    // }
+
+    let mut additional_data: Vec<u8> = Vec::new();
+    additional_data.extend_from_slice(&tls_ciphertext_data[0..5]); // TODO: verify we have at least 5 bytes
+
+    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
+
+    let unbound_key = match UnboundKey::new(&AES_256_GCM, &write_key[0..32]) {
+        Ok(v) => v,
+        Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
+    };
+    let key = LessSafeKey::new(unbound_key);
+
+    // let mut work: Vec<u8> = Vec::new();
+    // work.extend_from_slice(&tls_ciphertext.encrypted_record);
+
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let aad = Aad::from(additional_data);
+
+    key.seal_in_place_append_tag(nonce, aad, &mut tls_ciphertext_data)?;
+    Ok(tls_ciphertext_data)
+
+
+    // let open_result: Result<&mut [u8], ring::error::Unspecified> = key.open_in_place(nonce, aad, &mut work);
+    // Ok(open_result?.to_vec())
+}
+
 fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext, plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
     match &mut client.state {
         State::ServerHelloReceived(state_data) => {
@@ -549,11 +597,38 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                             println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
                             println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
 
+
+                            // Finished message
+                            //
+                            // TODO
+
+
+                            // HTTP request
+                            {
+                                let request_bytes = b"GET / HTTP/1.1\r\n\r\n";
+                                let request_enc = encrypt_traffic(&ap.client, 0, &request_bytes[..])?;
+
+
+                                let send_tls_plaintext = TLSPlaintext {
+                                    content_type: ContentType::ApplicationData,
+                                    legacy_record_version: 0x0303,
+                                    fragment: request_enc,
+                                };
+
+
+                                client.to_send.extend_from_slice(&send_tls_plaintext.to_vec());
+                            }
+
+
+
                             // println!("handshake = {:#?}", inner_handshake);
                             client.state = State::Established(EstablishedData {
                                 prk: new_prk,
                                 application_secrets: ap,
                             });
+
+
+
                         }
                         _ => {
                             println!("    Unsupported handshake message:");
@@ -607,6 +682,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
         }),
         my_private_key: my_private_key,
         algorithm: algorithm,
+        to_send: Vec::new(),
     };
 
     let mut receiver = Receiver::new();
@@ -631,9 +707,16 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
             ContentType::Unknown(code) => {
                 println!("Unsupported record type: {}", code);
             }
+        }
 
+
+        if client.to_send.len() > 0 {
+            socket.write_all(&client.to_send).await?;
+            println!("Sent {} bytes", client.to_send.len());
+            client.to_send.clear();
         }
     }
+    println!("Server closed connection");
     Ok(())
 }
 
