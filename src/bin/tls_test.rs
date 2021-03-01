@@ -277,6 +277,8 @@ struct ServerHelloReceivedData {
 struct EstablishedData {
     prk: Prk,
     application_secrets: TrafficSecrets,
+    client_sequence_no: u64,
+    server_sequence_no: u64,
 }
 
 // #[derive(Debug, Eq, PartialEq)]
@@ -546,6 +548,7 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
             let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
             let inner_body: &[u8] = &plaintext[0..type_offset - 1];
 
+            let old_transcript = state_data.transcript.clone();
             state_data.transcript.extend_from_slice(&inner_body);
             // println!("transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
 
@@ -602,22 +605,34 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                             //
                             // TODO
 
+// fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
+
+                            let finished_key_bytes: Vec<u8> = derive_secret(&state_data.prk, b"finished", &state_data.transcript, algorithm_len);
+                            let hmac_algorithm = ring::hmac::HMAC_SHA384; // TODO choose appropriate based on client.algorithm
+                            let finished_key = ring::hmac::Key::new(hmac_algorithm, &finished_key_bytes);
+                            // let finished_tag: Vec<u8> = Vec::new();
+                            let finished_tag = transcript_hash(&old_transcript);
+                            match ring::hmac::verify(&finished_key, &finished.data, &finished_tag) {
+                                Ok(()) => println!("Finished: Verification succeeded"),
+                                Err(_) => println!("Finished: Verification failed"),
+                            };
+
 
                             // HTTP request
-                            {
-                                let request_bytes = b"GET / HTTP/1.1\r\n\r\n";
-                                let request_enc = encrypt_traffic(&ap.client, 0, &request_bytes[..])?;
+                            // {
+                            //     let request_bytes = b"GET / HTTP/1.1\r\n\r\n";
+                            //     let request_enc = encrypt_traffic(&ap.client, 0, &request_bytes[..])?;
 
 
-                                let send_tls_plaintext = TLSPlaintext {
-                                    content_type: ContentType::ApplicationData,
-                                    legacy_record_version: 0x0303,
-                                    fragment: request_enc,
-                                };
+                            //     let send_tls_plaintext = TLSPlaintext {
+                            //         content_type: ContentType::ApplicationData,
+                            //         legacy_record_version: 0x0303,
+                            //         fragment: request_enc,
+                            //     };
 
 
-                                client.to_send.extend_from_slice(&send_tls_plaintext.to_vec());
-                            }
+                            //     client.to_send.extend_from_slice(&send_tls_plaintext.to_vec());
+                            // }
 
 
 
@@ -625,6 +640,8 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                             client.state = State::Established(EstablishedData {
                                 prk: new_prk,
                                 application_secrets: ap,
+                                client_sequence_no: 0,
+                                server_sequence_no: state_data.server_sequence_no,
                             });
 
 
@@ -640,6 +657,59 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                 }
             }
         }
+
+
+        State::Established(state_data) => {
+            // println!("Received ApplicationData (server_sequence_no = {})", state_data.server_sequence_no);
+            let current_sequence_no = state_data.server_sequence_no;
+            state_data.server_sequence_no += 1;
+            println!("ApplicationData for server_sequence_no {}", current_sequence_no);
+
+            let plaintext = match decrypt_traffic(&state_data.application_secrets.server,
+                                                  current_sequence_no,
+                                                  &plaintext_raw) {
+                Err(e) => return Err(GeneralError::new(format!("established: key.open_in_place() failed: {}", e))),
+                Ok(plaintext) => plaintext,
+            };
+
+
+            // TEMP: Add test zero padding
+            // let mut plaintext: Vec<u8> = plaintext.to_vec();
+            // for i in 0..5 {
+            //     plaintext.push(0);
+            // }
+
+            let mut type_offset: usize = plaintext.len();
+            while type_offset > 0 && plaintext[type_offset - 1] == 0 {
+                type_offset -= 1;
+            }
+            if type_offset == 0 {
+                return Err(GeneralError::new("Plaintext: Missing type field"));
+            }
+            let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
+            let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+
+            // let old_transcript = state_data.transcript.clone();
+            // state_data.transcript.extend_from_slice(&inner_body);
+            // println!("transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
+
+            // println!("inner_content_type = {:?}", inner_content_type);
+            // println!("inner_body.len() = {}", inner_body.len());
+
+
+            // println!("plaintext =");
+            // println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
+            // println!("inner_body =");
+            // println!("{:#?}", Indent(&DebugHexDump(&inner_body)));
+
+            println!("inner_content_type = {:?}", inner_content_type);
+
+            // match inner_content_type {
+            // }
+        }
+
+
+
         _ => {
             println!("Received ApplicationData but don't have secret");
         }
