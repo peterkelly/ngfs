@@ -262,6 +262,15 @@ fn derive_secret(secret: &Prk, label: &[u8], messages: &[u8], len: usize) -> Vec
     result
 }
 
+fn derive_secret2(secret: &Prk, label: &[u8], len: usize) -> Vec<u8> {
+    let mut result: Vec<u8> = vec_with_len(len);
+    // println!("derive_secret begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
+    hkdf_expand_label(secret, label, &[], &mut result);
+    // println!("derive_secret end '{}'", String::from_utf8_lossy(label));
+    result
+}
+
+
 struct ClientHelloSentData {
     prk: Prk,
     transcript: Vec<u8>,
@@ -607,12 +616,26 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
 // fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
 
-                            let finished_key_bytes: Vec<u8> = derive_secret(&state_data.prk, b"finished", &state_data.transcript, algorithm_len);
-                            let hmac_algorithm = ring::hmac::HMAC_SHA384; // TODO choose appropriate based on client.algorithm
+                            // let finished_key_bytes: Vec<u8> = derive_secret(&new_prk, b"finished", &state_data.transcript, algorithm_len);
+                            let server_handshake_prk = Prk::new_less_safe(client.algorithm, &state_data.handshake_secrets.server);
+                            let finished_key_bytes: Vec<u8> = derive_secret2(&server_handshake_prk, b"finished", algorithm_len);
+                            println!("finished_key_bytes = {:?}", BinaryData(&finished_key_bytes));
+                            // let hmac_algorithm = ring::hmac::HMAC_SHA384; // TODO choose appropriate based on client.algorithm
+                            let hmac_algorithm = client.algorithm.hmac_algorithm();
                             let finished_key = ring::hmac::Key::new(hmac_algorithm, &finished_key_bytes);
                             // let finished_tag: Vec<u8> = Vec::new();
                             let finished_tag = transcript_hash(&old_transcript);
-                            match ring::hmac::verify(&finished_key, &finished.data, &finished_tag) {
+                            println!();
+                            println!("server_finish: handshake_hash = {:?}", BinaryData(&transcript_hash(&old_transcript)));
+                            // println!("new transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
+                            let verify_tag = ring::hmac::sign(&finished_key, &finished_tag);
+                            let verify_data: &[u8] = &verify_tag.as_ref();
+                            // let x: () = expected_tag.as_ref::<u8>;
+                            println!("server_finish: verify_data    = {:?}", BinaryData(verify_data));
+                            println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
+                            println!();
+                            // match ring::hmac::verify(&finished_key, &finished.data, &finished_tag) {
+                            match ring::hmac::verify(&finished_key, &finished_tag, &finished.data) {
                                 Ok(()) => println!("Finished: Verification succeeded"),
                                 Err(_) => println!("Finished: Verification failed"),
                             };
