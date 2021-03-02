@@ -53,22 +53,46 @@ impl Handshake {
             _ => Ok(Handshake::Unknown(handshake_type, Vec::from(reader.read_fixed(length)?))),
         }
     }
+
+    fn inner_to_binary(&self, temp_writer: &mut BinaryWriter) -> Result<u8, Box<dyn std::error::Error>> {
+        match self {
+            Handshake::ClientHello(client_hello) => {
+                client_hello.to_binary(temp_writer)?;
+                Ok(1)
+            }
+            Handshake::Finished(finished) => {
+                finished.to_binary(temp_writer)?;
+                Ok(20)
+            }
+            _ => unimplemented!(), // TODO
+        }
+    }
 }
 
 impl ToBinary for Handshake {
     fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
-            Handshake::ClientHello(client_hello) => {
-                writer.write_u8(1);
-                let mut temp_writer = BinaryWriter::new();
-                client_hello.to_binary(&mut temp_writer)?;
-                let temp_data: Vec<u8> = temp_writer.into();
-                writer.write_u24(temp_data.len() as u32);
-                writer.write_raw(&temp_data);
-                Ok(())
-            }
-            _ => unimplemented!(), // TODO
-        }
+        let mut temp_writer = BinaryWriter::new();
+        let code = self.inner_to_binary(&mut temp_writer)?;
+        let temp_data: Vec<u8> = temp_writer.into();
+
+        writer.write_u8(code);
+        writer.write_u24(temp_data.len() as u32);
+        writer.write_raw(&temp_data);
+        Ok(())
+
+
+        // match self {
+        //     Handshake::ClientHello(client_hello) => {
+        //         writer.write_u8(1);
+        //         let mut temp_writer = BinaryWriter::new();
+        //         client_hello.to_binary(&mut temp_writer)?;
+        //         let temp_data: Vec<u8> = temp_writer.into();
+        //         writer.write_u24(temp_data.len() as u32);
+        //         writer.write_raw(&temp_data);
+        //         Ok(())
+        //     }
+        //     _ => unimplemented!(), // TODO
+        // }
     }
 }
 
@@ -384,6 +408,13 @@ impl FromBinary for Finished {
         // Err(GeneralError::new("Finished::from_binary(): Not implemented"))
         // Ok(Finished { todo: String::from("TODO") })
         Ok(Finished { data: reader.remaining_data().to_vec() })
+    }
+}
+
+impl ToBinary for Finished {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_raw(&self.data);
+        Ok(())
     }
 }
 

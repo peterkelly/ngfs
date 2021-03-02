@@ -494,14 +494,15 @@ fn encrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, input_plaintext:
         nonce_bytes[i] ^= write_iv[i];
     }
 
-    let mut tls_ciphertext_data: Vec<u8> = TLSCiphertext::to_raw_data(input_plaintext);
+    // let mut tls_ciphertext_data: Vec<u8> = TLSCiphertext::to_raw_data(input_plaintext);
+    let mut tls_ciphertext_data = input_plaintext.to_vec();
     // let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
     // if bytes_consumed != plaintext_raw.len() {
     //     return Err("bytes_consumed != plaintext_raw.len()".into());
     // }
 
-    let mut additional_data: Vec<u8> = Vec::new();
-    additional_data.extend_from_slice(&tls_ciphertext_data[0..5]); // TODO: verify we have at least 5 bytes
+    // let mut additional_data: Vec<u8> = Vec::new();
+    // additional_data.extend_from_slice(&tls_ciphertext_data[0..5]); // TODO: verify we have at least 5 bytes
 
     use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
 
@@ -510,15 +511,24 @@ fn encrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, input_plaintext:
         Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
     };
     let key = LessSafeKey::new(unbound_key);
+    let additional_data = TLSCiphertext::to_additional_data(input_plaintext, key.algorithm().tag_len());
+    println!("encrypt_traffic: tag_len = {}", key.algorithm().tag_len());
 
     // let mut work: Vec<u8> = Vec::new();
     // work.extend_from_slice(&tls_ciphertext.encrypted_record);
 
+    println!("encrypt_traffic: nonce = {:?}", BinaryData(&nonce_bytes));
+    println!("encrypt_traffic: aad = {:?}", BinaryData(&additional_data));
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-    let aad = Aad::from(additional_data);
+    let aad = Aad::from(additional_data.clone());
 
     key.seal_in_place_append_tag(nonce, aad, &mut tls_ciphertext_data)?;
     Ok(tls_ciphertext_data)
+
+    // let mut res: Vec<u8> = Vec::new();
+    // res.extend_from_slice(&additional_data);
+    // res.extend_from_slice(&tls_ciphertext_data);
+    // Ok(res)
 
 
     // let open_result: Result<&mut [u8], ring::error::Unspecified> = key.open_in_place(nonce, aad, &mut work);
@@ -610,52 +620,108 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                             println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
 
 
-                            // Finished message
+                            // Received Server Finished message
                             //
                             // TODO
 
 // fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
 
                             // let finished_key_bytes: Vec<u8> = derive_secret(&new_prk, b"finished", &state_data.transcript, algorithm_len);
-                            let server_handshake_prk = Prk::new_less_safe(client.algorithm, &state_data.handshake_secrets.server);
-                            let finished_key_bytes: Vec<u8> = derive_secret2(&server_handshake_prk, b"finished", algorithm_len);
-                            println!("finished_key_bytes = {:?}", BinaryData(&finished_key_bytes));
-                            // let hmac_algorithm = ring::hmac::HMAC_SHA384; // TODO choose appropriate based on client.algorithm
-                            let hmac_algorithm = client.algorithm.hmac_algorithm();
-                            let finished_key = ring::hmac::Key::new(hmac_algorithm, &finished_key_bytes);
-                            // let finished_tag: Vec<u8> = Vec::new();
-                            let finished_tag = transcript_hash(&old_transcript);
-                            println!();
-                            println!("server_finish: handshake_hash = {:?}", BinaryData(&transcript_hash(&old_transcript)));
-                            // println!("new transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
-                            let verify_tag = ring::hmac::sign(&finished_key, &finished_tag);
-                            let verify_data: &[u8] = &verify_tag.as_ref();
-                            // let x: () = expected_tag.as_ref::<u8>;
-                            println!("server_finish: verify_data    = {:?}", BinaryData(verify_data));
-                            println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
-                            println!();
-                            // match ring::hmac::verify(&finished_key, &finished.data, &finished_tag) {
-                            match ring::hmac::verify(&finished_key, &finished_tag, &finished.data) {
-                                Ok(()) => println!("Finished: Verification succeeded"),
-                                Err(_) => println!("Finished: Verification failed"),
-                            };
+                            {
+                                let server_handshake_prk = Prk::new_less_safe(client.algorithm, &state_data.handshake_secrets.server);
+                                let server_finished_key_bytes: Vec<u8> = derive_secret2(&server_handshake_prk, b"finished", algorithm_len);
+                                println!("server_finished_key_bytes = {:?}", BinaryData(&server_finished_key_bytes));
+                                let hmac_algorithm = client.algorithm.hmac_algorithm();
+                                let server_finished_key = ring::hmac::Key::new(hmac_algorithm, &server_finished_key_bytes);
+                                let server_finished_tag = transcript_hash(&old_transcript);
+                                println!();
+                                println!("server_finish: handshake_hash = {:?}", BinaryData(&server_finished_tag));
+                                let verify_tag = ring::hmac::sign(&server_finished_key, &server_finished_tag);
+                                let verify_data: &[u8] = &verify_tag.as_ref();
+                                println!("server_finish: verify_data    = {:?}", BinaryData(verify_data));
+                                println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
+                                println!();
+                                match ring::hmac::verify(&server_finished_key, &server_finished_tag, &finished.data) {
+                                    Ok(()) => println!("Finished: Verification succeeded"),
+                                    Err(_) => println!("Finished: Verification failed"),
+                                };
+                            }
+
+
+                            let mut client_sequence_no: u64 = 0;
+
+                            // Send Client Finished message
+                            {
+                                let client_handshake_prk = Prk::new_less_safe(client.algorithm, &state_data.handshake_secrets.client);
+                                let client_finished_key_bytes: Vec<u8> = derive_secret2(&client_handshake_prk, b"finished", algorithm_len);
+                                println!("client_finished_key_bytes = {:?}", BinaryData(&client_finished_key_bytes));
+                                let hmac_algorithm = client.algorithm.hmac_algorithm();
+                                let client_finished_key = ring::hmac::Key::new(hmac_algorithm, &client_finished_key_bytes);
+                                let client_finished_tag = transcript_hash(&state_data.transcript);
+                                println!();
+                                println!("client_finish: handshake_hash = {:?}", BinaryData(&client_finished_tag));
+                                let verify_tag = ring::hmac::sign(&client_finished_key, &client_finished_tag);
+                                let verify_data: &[u8] = &verify_tag.as_ref();
+                                println!("client_finish: verify_data    = {:?}", BinaryData(verify_data));
+                                // println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
+                                // println!();
+                                // match ring::hmac::verify(&server_finished_key, &server_finished_tag, &finished.data) {
+                                //     Ok(()) => println!("Finished: Verification succeeded"),
+                                //     Err(_) => println!("Finished: Verification failed"),
+                                // };
+
+                                let client_finished = Handshake::Finished(Finished {
+                                    data: verify_data.to_vec(),
+                                });
+
+                                let mut writer = BinaryWriter::new();
+                                writer.write_item(&client_finished)?;
+                                let client_finished_bytes: Vec<u8> = Vec::from(writer);
+                                println!("client_finished_bytes = {:?}", BinaryData(&client_finished_bytes));
+
+                                let mut to_encrypt: Vec<u8> = Vec::new();
+                                to_encrypt.extend_from_slice(&client_finished_bytes);
+                                to_encrypt.push(22); // Handshake
+
+
+
+                                let client_finished_enc = encrypt_traffic(
+                                    &state_data.handshake_secrets.client,
+                                    client_sequence_no,
+                                    &to_encrypt)?;
+                                client_sequence_no += 1;
+
+                                let output_record = TLSPlaintext {
+                                    content_type: ContentType::ApplicationData,
+                                    legacy_record_version: 0x0303,
+                                    fragment: client_finished_enc,
+                                };
+                                client.to_send.extend_from_slice(&output_record.to_vec());
+                                // Ok(output_record)
+
+                            }
 
 
                             // HTTP request
-                            // {
-                            //     let request_bytes = b"GET / HTTP/1.1\r\n\r\n";
-                            //     let request_enc = encrypt_traffic(&ap.client, 0, &request_bytes[..])?;
+                            {
+                                let mut to_encrypt: Vec<u8> = Vec::new();
+                                to_encrypt.extend_from_slice(b"GET / HTTP/1.1\r\n\r\n");
+                                to_encrypt.push(23); // ApplicationData
 
+                                client_sequence_no = 0;
+                                let client_finished_enc = encrypt_traffic(
+                                    &ap.client,
+                                    client_sequence_no,
+                                    &to_encrypt)?;
+                                client_sequence_no += 1;
 
-                            //     let send_tls_plaintext = TLSPlaintext {
-                            //         content_type: ContentType::ApplicationData,
-                            //         legacy_record_version: 0x0303,
-                            //         fragment: request_enc,
-                            //     };
-
-
-                            //     client.to_send.extend_from_slice(&send_tls_plaintext.to_vec());
-                            // }
+                                let output_record = TLSPlaintext {
+                                    content_type: ContentType::ApplicationData,
+                                    legacy_record_version: 0x0303,
+                                    fragment: client_finished_enc,
+                                };
+                                client.to_send.extend_from_slice(&output_record.to_vec());
+                            }
 
 
 
@@ -664,7 +730,8 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                                 prk: new_prk,
                                 application_secrets: ap,
                                 client_sequence_no: 0,
-                                server_sequence_no: state_data.server_sequence_no,
+                                // server_sequence_no: state_data.server_sequence_no,
+                                server_sequence_no: 0,
                             });
 
 
@@ -720,10 +787,10 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
             // println!("inner_body.len() = {}", inner_body.len());
 
 
-            // println!("plaintext =");
-            // println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
-            // println!("inner_body =");
-            // println!("{:#?}", Indent(&DebugHexDump(&inner_body)));
+            println!("plaintext =");
+            println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
+            println!("inner_body =");
+            println!("{:#?}", Indent(&DebugHexDump(&inner_body)));
 
             println!("inner_content_type = {:?}", inner_content_type);
 
