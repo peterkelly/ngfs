@@ -418,15 +418,49 @@ impl ToBinary for Finished {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct NewSessionTicket {
+    pub ticket_lifetime: u32,
+    pub ticket_age_add: u32,
+    pub ticket_nonce: Vec<u8>,
+    pub ticket: Vec<u8>,
+    pub extensions: Vec<Extension>,
 }
 
 impl FromBinary for NewSessionTicket {
     type Output = NewSessionTicket;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("NewSessionTicket::from_binary(): Not implemented"))
+        let ticket_lifetime = reader.read_u32()?;
+        let ticket_age_add = reader.read_u32()?;
+        let ticket_nonce = reader.read_len8_bytes()?.to_vec();
+        let ticket = reader.read_len16_bytes()?.to_vec();
+        let mut extensions: Vec<Extension> = Vec::new();
+        let extensions_len = reader.read_u16()? as usize;
+        let mut extensions_reader = reader.read_nested(extensions_len)?;
+        while extensions_reader.remaining() > 0 {
+            extensions.push(Extension::from_binary2(&mut extensions_reader, ExtensionContext::ServerHello)?);
+        }
+
+        Ok(NewSessionTicket {
+            ticket_lifetime,
+            ticket_age_add,
+            ticket_nonce,
+            ticket,
+            extensions
+        })
+    }
+}
+
+impl fmt::Debug for NewSessionTicket {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("NewSessionTicket")
+            .field("ticket_lifetime", &self.ticket_lifetime)
+            .field("ticket_age_add", &self.ticket_age_add)
+            .field("ticket_nonce", &BinaryData(&self.ticket_nonce))
+            .field("ticket", &BinaryData(&self.ticket))
+            .field("extensions", &self.extensions)
+            .finish()
     }
 }
 

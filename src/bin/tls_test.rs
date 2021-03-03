@@ -12,6 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use torrent::util::{escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
+use torrent::tls::types::alert::*;
 use torrent::tls::types::handshake::*;
 use torrent::tls::types::extension::*;
 use torrent::tls::types::record::*;
@@ -794,8 +795,23 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
             println!("inner_content_type = {:?}", inner_content_type);
 
-            // match inner_content_type {
-            // }
+            match inner_content_type {
+                ContentType::Handshake => {
+                    let mut reader = BinaryReader::new(inner_body);
+                    let inner_handshake = reader.read_item::<Handshake>()?;
+                    println!("inner_handshake = {:?}", Indent(&inner_handshake));
+                    // match &inner_handshake {
+                    // }
+                }
+                ContentType::Alert => {
+                    let mut reader = BinaryReader::new(inner_body);
+                    let inner_alert = reader.read_item::<Alert>()?;
+                    println!("inner_alert = {:?}", Indent(&inner_alert));
+                }
+                _ => {
+                    println!("Unsupported record type: {:?}", inner_content_type);
+                }
+            }
         }
 
 
