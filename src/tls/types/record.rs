@@ -8,6 +8,10 @@
 use std::error::Error;
 use std::fmt;
 
+use super::alert::Alert;
+use super::handshake::Handshake;
+use super::super::super::binary::BinaryReader;
+
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
 const TLS_RECORD_SIZE: usize = 16384;
 
@@ -43,6 +47,50 @@ impl ContentType {
             ContentType::Handshake => 22,
             ContentType::ApplicationData => 23,
             ContentType::Unknown(byte) => *byte,
+        }
+    }
+}
+
+pub enum Message {
+    Invalid,
+    ChangeCipherSpec,
+    Alert(Alert),
+    Handshake(Handshake),
+    ApplicationData(Vec<u8>),
+    Unknown(u8),
+}
+
+impl Message {
+    pub fn content_type(&self) -> ContentType {
+        match self {
+            Message::Invalid => ContentType::Invalid,
+            Message::ChangeCipherSpec => ContentType::ChangeCipherSpec,
+            Message::Alert(_) => ContentType::Alert,
+            Message::Handshake(_) => ContentType::Handshake,
+            Message::ApplicationData(_) => ContentType::ApplicationData,
+            Message::Unknown(code) => ContentType::Unknown(*code),
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Message::Invalid => "Invalid",
+            Message::ChangeCipherSpec => "ChangeCipherSpec",
+            Message::Alert(alert) => alert.name(),
+            Message::Handshake(handshake) => handshake.name(),
+            Message::ApplicationData(_) => "ApplicationData",
+            Message::Unknown(_) => "Unknown",
+        }
+    }
+
+    pub fn from_raw(data: &[u8], content_type: ContentType) -> Result<Message, Box<dyn Error>> {
+        match content_type {
+            ContentType::Invalid => Ok(Message::Invalid),
+            ContentType::ChangeCipherSpec => Ok(Message::ChangeCipherSpec),
+            ContentType::Alert => Ok(Message::Alert(BinaryReader::new(data).read_item::<Alert>()?)),
+            ContentType::Handshake => Ok(Message::Handshake(BinaryReader::new(data).read_item::<Handshake>()?)),
+            ContentType::ApplicationData => Ok(Message::ApplicationData(data.to_vec())),
+            ContentType::Unknown(code) => Ok(Message::Unknown(code)),
         }
     }
 }

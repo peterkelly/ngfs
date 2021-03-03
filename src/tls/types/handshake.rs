@@ -37,6 +37,22 @@ impl FromBinary for Handshake {
 }
 
 impl Handshake {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Handshake::ClientHello(_) => "Handshake.ClientHello",
+            Handshake::ServerHello(_) => "Handshake.ServerHello",
+            Handshake::EndOfEarlyData(_) => "Handshake.EndOfEarlyData",
+            Handshake::EncryptedExtensions(_) => "Handshake.EncryptedExtensions",
+            Handshake::CertificateRequest(_) => "Handshake.CertificateRequest",
+            Handshake::Certificate(_) => "Handshake.Certificate",
+            Handshake::CertificateVerify(_) => "Handshake.CertificateVerify",
+            Handshake::Finished(_) => "Handshake.Finished",
+            Handshake::NewSessionTicket(_) => "Handshake.NewSessionTicket",
+            Handshake::KeyUpdate(_) => "Handshake.KeyUpdate",
+            Handshake::Unknown(_, _) => "Handshake.Unknown",
+        }
+    }
+
     pub fn from_binary2(reader: &mut BinaryReader, handshake_type: u8) -> Result<Self, Box<dyn Error>> {
         let length = reader.read_u24()? as usize;
         match handshake_type {

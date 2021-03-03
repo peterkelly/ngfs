@@ -170,6 +170,41 @@ pub struct Alert {
     pub description: AlertDescription,
 }
 
+impl Alert {
+    pub fn name(&self) -> &'static str {
+        match self.description {
+            AlertDescription::CloseNotify => "Alert.CloseNotify",
+            AlertDescription::UnexpectedMessage => "Alert.UnexpectedMessage",
+            AlertDescription::BadRecordMac => "Alert.BadRecordMac",
+            AlertDescription::RecordOverflow => "Alert.RecordOverflow",
+            AlertDescription::HandshakeFailure => "Alert.HandshakeFailure",
+            AlertDescription::BadCertificate => "Alert.BadCertificate",
+            AlertDescription::UnsupportedCertificate => "Alert.UnsupportedCertificate",
+            AlertDescription::CertificateRevoked => "Alert.CertificateRevoked",
+            AlertDescription::CertificateExpired => "Alert.CertificateExpired",
+            AlertDescription::CertificateUnknown => "Alert.CertificateUnknown",
+            AlertDescription::IllegalParameter => "Alert.IllegalParameter",
+            AlertDescription::UnknownCa => "Alert.UnknownCa",
+            AlertDescription::AccessDenied => "Alert.AccessDenied",
+            AlertDescription::DecodeError => "Alert.DecodeError",
+            AlertDescription::DecryptError => "Alert.DecryptError",
+            AlertDescription::ProtocolVersion => "Alert.ProtocolVersion",
+            AlertDescription::InsufficientSecurity => "Alert.InsufficientSecurity",
+            AlertDescription::InternalError => "Alert.InternalError",
+            AlertDescription::InappropriateFallback => "Alert.InappropriateFallback",
+            AlertDescription::UserCanceled => "Alert.UserCanceled",
+            AlertDescription::MissingExtension => "Alert.MissingExtension",
+            AlertDescription::UnsupportedExtension => "Alert.UnsupportedExtension",
+            AlertDescription::UnrecognizedName => "Alert.UnrecognizedName",
+            AlertDescription::BadCertificateStatusResponse => "Alert.BadCertificateStatusResponse",
+            AlertDescription::UnknownPskIdentity => "Alert.UnknownPskIdentity",
+            AlertDescription::CertificateRequired => "Alert.CertificateRequired",
+            AlertDescription::NoApplicationProtocol => "Alert.NoApplicationProtocol",
+            AlertDescription::Unknown(_) => "Alert.Unknown",
+        }
+    }
+}
+
 impl FromBinary for Alert {
     type Output = Alert;
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
