@@ -254,22 +254,18 @@ fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
     result
 }
 
-fn derive_secret(secret: &Prk, label: &[u8], messages: &[u8], len: usize) -> Vec<u8> {
+fn derive_secret_prk_hash(secret: &Prk, label: &[u8], thash: &[u8], len: usize) -> Vec<u8> {
     let mut result: Vec<u8> = vec_with_len(len);
-    let thash = transcript_hash(messages);
-    // println!("derive_secret begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
     hkdf_expand_label(secret, label, &thash, &mut result);
-    // println!("derive_secret end '{}'", String::from_utf8_lossy(label));
     result
 }
 
-fn derive_secret2(secret: &Prk, label: &[u8], len: usize) -> Vec<u8> {
-    let mut result: Vec<u8> = vec_with_len(len);
-    // println!("derive_secret begin '{}' {:?}", String::from_utf8_lossy(label), BinaryData(&thash));
-    hkdf_expand_label(secret, label, &[], &mut result);
-    // println!("derive_secret end '{}'", String::from_utf8_lossy(label));
-    result
+fn derive_secret3(secret: &[u8], label: &[u8], algorithm: ring::hkdf::Algorithm) -> Vec<u8> {
+    let algorithm_len = hkdf::KeyType::len(&algorithm);
+    let prk = Prk::new_less_safe(algorithm, secret);
+    derive_secret_prk_hash(&prk, label, &[], algorithm_len)
 }
+
 
 
 struct ClientHelloSentData {
@@ -366,7 +362,7 @@ fn get_zero_prk(algorithm: ring::hkdf::Algorithm) -> Prk {
 
 fn get_derived_prk(prk: &Prk, algorithm: ring::hkdf::Algorithm, secret: &[u8]) -> Prk {
     let algorithm_len = hkdf::KeyType::len(&algorithm);
-    let salt_bytes: Vec<u8> = derive_secret(&prk, b"derived", &[], algorithm_len);
+    let salt_bytes: Vec<u8> = derive_secret_prk_hash(&prk, b"derived", &transcript_hash(&[]), algorithm_len);
     let salt = Salt::new(algorithm, &salt_bytes);
     salt.extract(secret)
 }
@@ -409,8 +405,8 @@ fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext, plain
 
                         let algorithm_len = hkdf::KeyType::len(&client.algorithm);
                         let hs = TrafficSecrets {
-                            client: derive_secret(&new_prk, b"c hs traffic", &state_data.transcript, algorithm_len),
-                            server: derive_secret(&new_prk, b"s hs traffic", &state_data.transcript, algorithm_len),
+                            client: derive_secret_prk_hash(&new_prk, b"c hs traffic", &transcript_hash(&state_data.transcript), algorithm_len),
+                            server: derive_secret_prk_hash(&new_prk, b"s hs traffic", &transcript_hash(&state_data.transcript), algorithm_len),
                         };
 
                         println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
@@ -567,9 +563,13 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
             }
             let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
             let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+            let message = Message::from_raw(inner_body, inner_content_type)?;
+            println!("======== Received {}", message.name());
 
-            let old_transcript = state_data.transcript.clone();
+            // let old_transcript = state_data.transcript.clone();
+            let old_transcript_hash: Vec<u8> = transcript_hash(&state_data.transcript);
             state_data.transcript.extend_from_slice(&inner_body);
+            let new_transcript_hash: Vec<u8> = transcript_hash(&state_data.transcript);
             // println!("transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
 
             // println!("inner_content_type = {:?}", inner_content_type);
@@ -582,169 +582,151 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
             // println!("{:#?}", Indent(&DebugHexDump(&inner_body)));
 
 
-            match inner_content_type {
-                ContentType::Handshake => {
-                    let mut reader = BinaryReader::new(inner_body);
-                    let inner_handshake = reader.read_item::<Handshake>()?;
-                    match &inner_handshake {
-                        Handshake::Certificate(certificate) => {
-                            println!("    Received Handshake::Certificate");
-                            println!("        certificate_request_context.len() = {}", certificate.certificate_request_context.len());
-                            println!("        certificate_list.len() = {}", certificate.certificate_list.len());
+            match message {
+                Message::Handshake(Handshake::Certificate(certificate)) => {
 
-                            println!("    This is a certificate handshake");
-                            for entry in certificate.certificate_list.iter() {
-                                println!("    - entry");
-                                let filename = "certificate.crt";
-                                std::fs::write(filename, &entry.data)?;
-                                println!("    Wrote to {}", filename);
-                            }
-                            // println!("handshake = {:#?}", inner_handshake);
-                        }
-                        Handshake::CertificateVerify(certificate_verify) => {
-                            println!("    Received Handshake::CertificateVerify with algorithm {:?} and {} signature bytes",
-                                certificate_verify.algorithm,
-                                certificate_verify.signature.len());
-                            // println!("handshake = {:#?}", inner_handshake);
-                        }
-                        Handshake::Finished(finished) => {
-                            println!("    Received Handshake::Finished with {} bytes", finished.data.len());
-                            let algorithm_len = hkdf::KeyType::len(&client.algorithm);
-                            let input_psk: &[u8] = &vec_with_len(algorithm_len);
-                            let new_prk = get_derived_prk(&state_data.prk, client.algorithm, input_psk);
+                    println!("    Received Handshake::Certificate");
+                    println!("        certificate_request_context.len() = {}", certificate.certificate_request_context.len());
+                    println!("        certificate_list.len() = {}", certificate.certificate_list.len());
 
-                            let ap = TrafficSecrets {
-                                client: derive_secret(&new_prk, b"c ap traffic", &state_data.transcript, algorithm_len),
-                                server: derive_secret(&new_prk, b"s ap traffic", &state_data.transcript, algorithm_len),
-                            };
-                            println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
-                            println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
-
-
-                            // Received Server Finished message
-                            //
-                            // TODO
-
-// fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
-
-                            // let finished_key_bytes: Vec<u8> = derive_secret(&new_prk, b"finished", &state_data.transcript, algorithm_len);
-                            {
-                                let server_handshake_prk = Prk::new_less_safe(client.algorithm, &state_data.handshake_secrets.server);
-                                let server_finished_key_bytes: Vec<u8> = derive_secret2(&server_handshake_prk, b"finished", algorithm_len);
-                                println!("server_finished_key_bytes = {:?}", BinaryData(&server_finished_key_bytes));
-                                let hmac_algorithm = client.algorithm.hmac_algorithm();
-                                let server_finished_key = ring::hmac::Key::new(hmac_algorithm, &server_finished_key_bytes);
-                                let server_finished_tag = transcript_hash(&old_transcript);
-                                println!();
-                                println!("server_finish: handshake_hash = {:?}", BinaryData(&server_finished_tag));
-                                let verify_tag = ring::hmac::sign(&server_finished_key, &server_finished_tag);
-                                let verify_data: &[u8] = &verify_tag.as_ref();
-                                println!("server_finish: verify_data    = {:?}", BinaryData(verify_data));
-                                println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
-                                println!();
-                                match ring::hmac::verify(&server_finished_key, &server_finished_tag, &finished.data) {
-                                    Ok(()) => println!("Finished: Verification succeeded"),
-                                    Err(_) => println!("Finished: Verification failed"),
-                                };
-                            }
-
-
-                            let mut client_sequence_no: u64 = 0;
-
-                            // Send Client Finished message
-                            {
-                                let client_handshake_prk = Prk::new_less_safe(client.algorithm, &state_data.handshake_secrets.client);
-                                let client_finished_key_bytes: Vec<u8> = derive_secret2(&client_handshake_prk, b"finished", algorithm_len);
-                                println!("client_finished_key_bytes = {:?}", BinaryData(&client_finished_key_bytes));
-                                let hmac_algorithm = client.algorithm.hmac_algorithm();
-                                let client_finished_key = ring::hmac::Key::new(hmac_algorithm, &client_finished_key_bytes);
-                                let client_finished_tag = transcript_hash(&state_data.transcript);
-                                println!();
-                                println!("client_finish: handshake_hash = {:?}", BinaryData(&client_finished_tag));
-                                let verify_tag = ring::hmac::sign(&client_finished_key, &client_finished_tag);
-                                let verify_data: &[u8] = &verify_tag.as_ref();
-                                println!("client_finish: verify_data    = {:?}", BinaryData(verify_data));
-                                // println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
-                                // println!();
-                                // match ring::hmac::verify(&server_finished_key, &server_finished_tag, &finished.data) {
-                                //     Ok(()) => println!("Finished: Verification succeeded"),
-                                //     Err(_) => println!("Finished: Verification failed"),
-                                // };
-
-                                let client_finished = Handshake::Finished(Finished {
-                                    data: verify_data.to_vec(),
-                                });
-
-                                let mut writer = BinaryWriter::new();
-                                writer.write_item(&client_finished)?;
-                                let client_finished_bytes: Vec<u8> = Vec::from(writer);
-                                println!("client_finished_bytes = {:?}", BinaryData(&client_finished_bytes));
-
-                                let mut to_encrypt: Vec<u8> = Vec::new();
-                                to_encrypt.extend_from_slice(&client_finished_bytes);
-                                to_encrypt.push(22); // Handshake
-
-
-
-                                let client_finished_enc = encrypt_traffic(
-                                    &state_data.handshake_secrets.client,
-                                    client_sequence_no,
-                                    &to_encrypt)?;
-                                client_sequence_no += 1;
-
-                                let output_record = TLSPlaintext {
-                                    content_type: ContentType::ApplicationData,
-                                    legacy_record_version: 0x0303,
-                                    fragment: client_finished_enc,
-                                };
-                                client.to_send.extend_from_slice(&output_record.to_vec());
-                                // Ok(output_record)
-
-                            }
-
-
-                            // HTTP request
-                            {
-                                let mut to_encrypt: Vec<u8> = Vec::new();
-                                to_encrypt.extend_from_slice(b"GET / HTTP/1.1\r\n\r\n");
-                                to_encrypt.push(23); // ApplicationData
-
-                                client_sequence_no = 0;
-                                let client_finished_enc = encrypt_traffic(
-                                    &ap.client,
-                                    client_sequence_no,
-                                    &to_encrypt)?;
-                                client_sequence_no += 1;
-
-                                let output_record = TLSPlaintext {
-                                    content_type: ContentType::ApplicationData,
-                                    legacy_record_version: 0x0303,
-                                    fragment: client_finished_enc,
-                                };
-                                client.to_send.extend_from_slice(&output_record.to_vec());
-                            }
-
-
-
-                            // println!("handshake = {:#?}", inner_handshake);
-                            client.state = State::Established(EstablishedData {
-                                prk: new_prk,
-                                application_secrets: ap,
-                                client_sequence_no: 0,
-                                // server_sequence_no: state_data.server_sequence_no,
-                                server_sequence_no: 0,
-                            });
-
-
-
-                        }
-                        _ => {
-                            println!("    Unsupported handshake message:");
-                            println!("{:#?}", Indent(&Indent(&inner_handshake)));
-                        }
+                    println!("    This is a certificate handshake");
+                    for entry in certificate.certificate_list.iter() {
+                        println!("    - entry");
+                        let filename = "certificate.crt";
+                        std::fs::write(filename, &entry.data)?;
+                        println!("    Wrote to {}", filename);
                     }
+                    // println!("handshake = {:#?}", inner_handshake);
+
+                }
+                Message::Handshake(Handshake::CertificateVerify(certificate_verify)) => {
+
+                    println!("    Received Handshake::CertificateVerify with algorithm {:?} and {} signature bytes",
+                        certificate_verify.algorithm,
+                        certificate_verify.signature.len());
+                    // println!("handshake = {:#?}", inner_handshake);
+
+                }
+                Message::Handshake(Handshake::Finished(finished)) => {
+
+                    println!("    Received Handshake::Finished with {} bytes", finished.data.len());
+                    let algorithm_len = hkdf::KeyType::len(&client.algorithm);
+                    let input_psk: &[u8] = &vec_with_len(algorithm_len);
+                    let new_prk = get_derived_prk(&state_data.prk, client.algorithm, input_psk);
+
+                    let ap = TrafficSecrets {
+                        client: derive_secret_prk_hash(&new_prk, b"c ap traffic", &transcript_hash(&state_data.transcript), algorithm_len),
+                        server: derive_secret_prk_hash(&new_prk, b"s ap traffic", &transcript_hash(&state_data.transcript), algorithm_len),
+                    };
+                    println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
+                    println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
+
+
+
+                    {
+                        let derived_bytes = derive_secret3(&state_data.handshake_secrets.server, b"finished", client.algorithm);
+
+                        println!("server_finished_key_bytes = {:?}", BinaryData(&derived_bytes));
+                        let hmac_algorithm: ring::hmac::Algorithm = client.algorithm.hmac_algorithm();
+                        let finished_key: ring::hmac::Key = ring::hmac::Key::new(hmac_algorithm, &derived_bytes);
+                        let finished_tag: &[u8] = &old_transcript_hash;
+                        println!();
+                        println!("server_finish: handshake_hash = {:?}", BinaryData(finished_tag));
+                        let verify_tag = ring::hmac::sign(&finished_key, finished_tag);
+                        let verify_data: &[u8] = &verify_tag.as_ref();
+                        println!("server_finish: verify_data    = {:?}", BinaryData(verify_data));
+                        println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
+                        println!();
+                        match ring::hmac::verify(&finished_key, finished_tag, &finished.data) {
+                            Ok(()) => println!("Finished: Verification succeeded"),
+                            Err(_) => println!("Finished: Verification failed"),
+                        };
+                    }
+
+
+                    let mut client_sequence_no: u64 = 0;
+
+                    // Send Client Finished message
+                    {
+                        let derived_bytes = derive_secret3(&state_data.handshake_secrets.client, b"finished", client.algorithm);
+
+                        println!("client_finished_key_bytes = {:?}", BinaryData(&derived_bytes));
+                        let hmac_algorithm: ring::hmac::Algorithm = client.algorithm.hmac_algorithm();
+                        let finished_key: ring::hmac::Key = ring::hmac::Key::new(hmac_algorithm, &derived_bytes);
+                        let finished_tag_ref: &[u8] = &new_transcript_hash;
+                        println!();
+                        println!("client_finish: handshake_hash = {:?}", BinaryData(&finished_tag_ref));
+                        let verify_tag = ring::hmac::sign(&finished_key, &finished_tag_ref);
+                        let verify_data: &[u8] = &verify_tag.as_ref();
+                        println!("client_finish: verify_data    = {:?}", BinaryData(verify_data));
+
+                        let client_finished = Handshake::Finished(Finished {
+                            data: verify_data.to_vec(),
+                        });
+
+                        let mut writer = BinaryWriter::new();
+                        writer.write_item(&client_finished)?;
+                        let client_finished_bytes: Vec<u8> = Vec::from(writer);
+                        println!("client_finished_bytes = {:?}", BinaryData(&client_finished_bytes));
+
+                        let mut to_encrypt: Vec<u8> = Vec::new();
+                        to_encrypt.extend_from_slice(&client_finished_bytes);
+                        to_encrypt.push(22); // Handshake
+
+
+
+                        let client_finished_enc = encrypt_traffic(
+                            &state_data.handshake_secrets.client,
+                            client_sequence_no,
+                            &to_encrypt)?;
+                        client_sequence_no += 1;
+
+                        let output_record = TLSPlaintext {
+                            content_type: ContentType::ApplicationData,
+                            legacy_record_version: 0x0303,
+                            fragment: client_finished_enc,
+                        };
+                        client.to_send.extend_from_slice(&output_record.to_vec());
+                        // Ok(output_record)
+
+                    }
+
+
+                    // HTTP request
+                    {
+                        let mut to_encrypt: Vec<u8> = Vec::new();
+                        to_encrypt.extend_from_slice(b"GET / HTTP/1.1\r\n\r\n");
+                        to_encrypt.push(23); // ApplicationData
+
+                        client_sequence_no = 0;
+                        let client_finished_enc = encrypt_traffic(
+                            &ap.client,
+                            client_sequence_no,
+                            &to_encrypt)?;
+                        client_sequence_no += 1;
+
+                        let output_record = TLSPlaintext {
+                            content_type: ContentType::ApplicationData,
+                            legacy_record_version: 0x0303,
+                            fragment: client_finished_enc,
+                        };
+                        client.to_send.extend_from_slice(&output_record.to_vec());
+                    }
+
+
+
+                    // println!("handshake = {:#?}", inner_handshake);
+                    client.state = State::Established(EstablishedData {
+                        prk: new_prk,
+                        application_secrets: ap,
+                        client_sequence_no: 0,
+                        // server_sequence_no: state_data.server_sequence_no,
+                        server_sequence_no: 0,
+                    });
+
                 }
                 _ => {
+                    println!("Unexpected message type {}", message.name());
                 }
             }
         }
@@ -779,37 +761,21 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
             }
             let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
             let inner_body: &[u8] = &plaintext[0..type_offset - 1];
-
-            // let old_transcript = state_data.transcript.clone();
-            // state_data.transcript.extend_from_slice(&inner_body);
-            // println!("transcript hash = {:?}", BinaryData(&transcript_hash(&state_data.transcript)));
-
-            // println!("inner_content_type = {:?}", inner_content_type);
-            // println!("inner_body.len() = {}", inner_body.len());
-
-
-            println!("plaintext =");
-            println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
-            println!("inner_body =");
-            println!("{:#?}", Indent(&DebugHexDump(&inner_body)));
-
-            println!("inner_content_type = {:?}", inner_content_type);
-
-            match inner_content_type {
-                ContentType::Handshake => {
-                    let mut reader = BinaryReader::new(inner_body);
-                    let inner_handshake = reader.read_item::<Handshake>()?;
-                    println!("inner_handshake = {:?}", Indent(&inner_handshake));
-                    // match &inner_handshake {
-                    // }
+            let message = Message::from_raw(inner_body, inner_content_type)?;
+            println!("======== Received {}", message.name());
+            match message {
+                Message::Handshake(Handshake::NewSessionTicket(ticket)) => {
+                    println!("ticket = {:#?}", ticket);
                 }
-                ContentType::Alert => {
-                    let mut reader = BinaryReader::new(inner_body);
-                    let inner_alert = reader.read_item::<Alert>()?;
-                    println!("inner_alert = {:?}", Indent(&inner_alert));
+                Message::ApplicationData(data) => {
+                    println!("data =");
+                    println!("{:#?}", Indent(&DebugHexDump(&data)));
+                }
+                Message::Alert(alert) => {
+                    // println!("inner_alert = {:?}", Indent(&alert));
                 }
                 _ => {
-                    println!("Unsupported record type: {:?}", inner_content_type);
+                    println!("Unexpected message type {}", message.name());
                 }
             }
         }

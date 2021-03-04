@@ -17,7 +17,7 @@ const TLS_RECORD_SIZE: usize = 16384;
 
 const TLS_MAX_ENCRYPTED_RECORD_LEN: usize = (1 << 14) + 256;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ContentType {
     Invalid,
     ChangeCipherSpec,
