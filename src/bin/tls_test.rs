@@ -221,7 +221,7 @@ impl ring::hkdf::KeyType for Length {
     }
 }
 
-fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
+fn hkdf_expand_label(algorithm: ring::hkdf::Algorithm, secret: &[u8], label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
     let length_field = (okm.len() as u16).to_be_bytes();
 
     let mut label_field: Vec<u8> = Vec::new();
@@ -240,7 +240,8 @@ fn hkdf_expand_label(secret: &Prk, label_suffix: &[u8], context: &[u8], okm: &mu
 
 
     // crypto::hkdf::hkdf_expand(digest, secret, &hkdf_label, okm);
-    let okm1: Okm<'_, Length> = secret.expand(parts, Length(okm.len())).unwrap();
+    let prk = Prk::new_less_safe(algorithm, secret);
+    let okm1: Okm<'_, Length> = prk.expand(parts, Length(okm.len())).unwrap();
     // let x: ring::hkdf::Okm<'_, ring::hkdf::Algorithm> = okm1;
     // let x: () = okm1;
     okm1.fill(okm).unwrap();
@@ -254,34 +255,33 @@ fn transcript_hash(transcript: &[u8]) -> Vec<u8> {
     result
 }
 
-fn derive_secret_prk_hash(secret: &Prk, label: &[u8], thash: &[u8], len: usize) -> Vec<u8> {
+fn derive_secret_prk_hash(algorithm: ring::hkdf::Algorithm, secret: &[u8], label: &[u8], thash: &[u8]) -> Vec<u8> {
+    let len = hkdf::KeyType::len(&algorithm);
     let mut result: Vec<u8> = vec_with_len(len);
-    hkdf_expand_label(secret, label, &thash, &mut result);
+    hkdf_expand_label(algorithm, &secret, label, &thash, &mut result);
     result
 }
 
-fn derive_secret3(secret: &[u8], label: &[u8], algorithm: ring::hkdf::Algorithm) -> Vec<u8> {
-    let algorithm_len = hkdf::KeyType::len(&algorithm);
-    let prk = Prk::new_less_safe(algorithm, secret);
-    derive_secret_prk_hash(&prk, label, &[], algorithm_len)
+fn derive_secret3(algorithm: ring::hkdf::Algorithm, secret: &[u8], label: &[u8]) -> Vec<u8> {
+    derive_secret_prk_hash(algorithm, secret, label, &[])
 }
 
 
 
 struct ClientHelloSentData {
-    prk: Prk,
+    prk: Vec<u8>,
     transcript: Vec<u8>,
 }
 
 struct ServerHelloReceivedData {
-    prk: Prk,
+    prk: Vec<u8>,
     transcript: Vec<u8>,
     handshake_secrets: TrafficSecrets,
     server_sequence_no: u64,
 }
 
 struct EstablishedData {
-    prk: Prk,
+    prk: Vec<u8>,
     application_secrets: TrafficSecrets,
     client_sequence_no: u64,
     server_sequence_no: u64,
@@ -352,19 +352,18 @@ struct TrafficSecrets {
     server: Vec<u8>,
 }
 
-fn get_zero_prk(algorithm: ring::hkdf::Algorithm) -> Prk {
+fn get_zero_prk(algorithm: ring::hkdf::Algorithm) -> Vec<u8> {
     let algorithm_len = hkdf::KeyType::len(&algorithm);
     let input_zero: &[u8] = &vec_with_len(algorithm_len);
     let input_psk: &[u8] = &vec_with_len(algorithm_len);
-    let salt1 = ring::hkdf::Salt::new(algorithm, input_zero);
-    salt1.extract(input_psk)
+    let key = ring::hmac::Key::new(algorithm.hmac_algorithm(), &input_zero);
+    ring::hmac::sign(&key, input_psk).as_ref().to_vec()
 }
 
-fn get_derived_prk(prk: &Prk, algorithm: ring::hkdf::Algorithm, secret: &[u8]) -> Prk {
-    let algorithm_len = hkdf::KeyType::len(&algorithm);
-    let salt_bytes: Vec<u8> = derive_secret_prk_hash(&prk, b"derived", &transcript_hash(&[]), algorithm_len);
-    let salt = Salt::new(algorithm, &salt_bytes);
-    salt.extract(secret)
+fn get_derived_prk(prbytes: &[u8], hkdf_algorithm: ring::hkdf::Algorithm, secret: &[u8]) -> Vec<u8> {
+    let salt_bytes: Vec<u8> = derive_secret_prk_hash(hkdf_algorithm, &prbytes, b"derived", &transcript_hash(&[]));
+    let key = ring::hmac::Key::new(hkdf_algorithm.hmac_algorithm(), &salt_bytes);
+    ring::hmac::sign(&key, secret).as_ref().to_vec()
 }
 
 struct Client {
@@ -404,9 +403,10 @@ fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext, plain
                         println!("Got expected server hello");
 
                         let algorithm_len = hkdf::KeyType::len(&client.algorithm);
+                        let thash = transcript_hash(&state_data.transcript);
                         let hs = TrafficSecrets {
-                            client: derive_secret_prk_hash(&new_prk, b"c hs traffic", &transcript_hash(&state_data.transcript), algorithm_len),
-                            server: derive_secret_prk_hash(&new_prk, b"s hs traffic", &transcript_hash(&state_data.transcript), algorithm_len),
+                            client: derive_secret_prk_hash(client.algorithm, &new_prk, b"c hs traffic", &thash),
+                            server: derive_secret_prk_hash(client.algorithm, &new_prk, b"s hs traffic", &thash),
                         };
 
                         println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
@@ -434,14 +434,15 @@ fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext, plain
     Ok(())
 }
 
-fn decrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, plaintext_raw: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
-    let prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &traffic_secret);
-
+fn decrypt_traffic<'a>(algorithm: ring::hkdf::Algorithm,
+                       traffic_secret: &[u8],
+                       sequence_no: u64,
+                       plaintext_raw: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
-    hkdf_expand_label(&prk, b"key", &[], &mut write_key);
-    hkdf_expand_label(&prk, b"iv", &[], &mut write_iv);
+    hkdf_expand_label(algorithm, traffic_secret, b"key", &[], &mut write_key);
+    hkdf_expand_label(algorithm, traffic_secret, b"iv", &[], &mut write_iv);
 
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
@@ -475,14 +476,15 @@ fn decrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, plaintext_raw: &
     Ok(open_result?.to_vec())
 }
 
-fn encrypt_traffic<'a>(traffic_secret: &[u8], sequence_no: u64, input_plaintext: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
-    let prk = Prk::new_less_safe(ring::hkdf::HKDF_SHA384, &traffic_secret);
-
+fn encrypt_traffic<'a>(algorithm: ring::hkdf::Algorithm,
+                       traffic_secret: &[u8],
+                       sequence_no: u64,
+                       input_plaintext: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
-    hkdf_expand_label(&prk, b"key", &[], &mut write_key);
-    hkdf_expand_label(&prk, b"iv", &[], &mut write_iv);
+    hkdf_expand_label(algorithm, traffic_secret, b"key", &[], &mut write_key);
+    hkdf_expand_label(algorithm, traffic_secret, b"iv", &[], &mut write_iv);
 
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
@@ -540,7 +542,8 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
             state_data.server_sequence_no += 1;
             println!("ApplicationData for server_sequence_no {}", current_sequence_no);
 
-            let plaintext = match decrypt_traffic(&state_data.handshake_secrets.server,
+            let plaintext = match decrypt_traffic(client.algorithm,
+                                                  &state_data.handshake_secrets.server,
                                                   current_sequence_no,
                                                   &plaintext_raw) {
                 Err(e) => return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e))),
@@ -614,9 +617,10 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                     let input_psk: &[u8] = &vec_with_len(algorithm_len);
                     let new_prk = get_derived_prk(&state_data.prk, client.algorithm, input_psk);
 
+                    let thash = transcript_hash(&state_data.transcript);
                     let ap = TrafficSecrets {
-                        client: derive_secret_prk_hash(&new_prk, b"c ap traffic", &transcript_hash(&state_data.transcript), algorithm_len),
-                        server: derive_secret_prk_hash(&new_prk, b"s ap traffic", &transcript_hash(&state_data.transcript), algorithm_len),
+                        client: derive_secret_prk_hash(client.algorithm, &new_prk, b"c ap traffic", &thash),
+                        server: derive_secret_prk_hash(client.algorithm, &new_prk, b"s ap traffic", &thash),
                     };
                     println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
                     println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
@@ -624,7 +628,7 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
 
                     {
-                        let derived_bytes = derive_secret3(&state_data.handshake_secrets.server, b"finished", client.algorithm);
+                        let derived_bytes = derive_secret3(client.algorithm, &state_data.handshake_secrets.server, b"finished");
 
                         println!("server_finished_key_bytes = {:?}", BinaryData(&derived_bytes));
                         let hmac_algorithm: ring::hmac::Algorithm = client.algorithm.hmac_algorithm();
@@ -648,7 +652,7 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
                     // Send Client Finished message
                     {
-                        let derived_bytes = derive_secret3(&state_data.handshake_secrets.client, b"finished", client.algorithm);
+                        let derived_bytes = derive_secret3(client.algorithm, &state_data.handshake_secrets.client, b"finished");
 
                         println!("client_finished_key_bytes = {:?}", BinaryData(&derived_bytes));
                         let hmac_algorithm: ring::hmac::Algorithm = client.algorithm.hmac_algorithm();
@@ -676,6 +680,7 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
 
                         let client_finished_enc = encrypt_traffic(
+                            client.algorithm,
                             &state_data.handshake_secrets.client,
                             client_sequence_no,
                             &to_encrypt)?;
@@ -700,6 +705,7 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
                         client_sequence_no = 0;
                         let client_finished_enc = encrypt_traffic(
+                            client.algorithm,
                             &ap.client,
                             client_sequence_no,
                             &to_encrypt)?;
@@ -738,7 +744,8 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
             state_data.server_sequence_no += 1;
             println!("ApplicationData for server_sequence_no {}", current_sequence_no);
 
-            let plaintext = match decrypt_traffic(&state_data.application_secrets.server,
+            let plaintext = match decrypt_traffic(client.algorithm,
+                                                  &state_data.application_secrets.server,
                                                   current_sequence_no,
                                                   &plaintext_raw) {
                 Err(e) => return Err(GeneralError::new(format!("established: key.open_in_place() failed: {}", e))),
