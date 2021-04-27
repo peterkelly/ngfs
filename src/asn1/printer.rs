@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::super::binary::BinaryReader;
 use super::super::result::GeneralError;
-use super::value::Value;
+use super::value::{Value, ObjectIdentifier};
 
 pub struct ObjectDescriptor {
     pub parts: &'static [u64],
@@ -55,6 +55,20 @@ impl ObjectRegistry {
         match self.short_names.get(oid) {
             Some(s) => Some(&s),
             None => None,
+        }
+    }
+
+    pub fn get_long_name(&self, oid: &ObjectIdentifier) -> String {
+        match self.long_names.get(&oid.0) {
+            Some(s) => String::from(s),
+            None => format!("{}", oid),
+        }
+    }
+
+    pub fn get_short_name(&self, oid: &ObjectIdentifier) -> String {
+        match self.short_names.get(&oid.0) {
+            Some(s) => String::from(s),
+            None => format!("{}", oid),
         }
     }
 

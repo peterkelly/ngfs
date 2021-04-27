@@ -91,6 +91,34 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            Value::Boolean(_)            => "Boolean",
+            Value::Integer(_)            => "Integer",
+            Value::BitString(_)          => "BitString",
+            Value::OctetString(_)        => "OctetString",
+            Value::Null                  => "Null",
+            Value::ObjectIdentifier(_)   => "ObjectIdentifier",
+            Value::PrintableString(_)    => "PrintableString",
+            Value::UTF8String(_)         => "UTF8String",
+            Value::UTCTime(_)            => "UTCTime",
+            Value::GeneralizedTime(_)    => "GeneralizedTime",
+            Value::Sequence(_)           => "Sequence",
+            Value::Set(_)                => "Set",
+            Value::Application(_, _)     => "Application",
+            Value::ContextSpecific(_, _) => "ContextSpecific",
+            Value::Private(_, _)         => "Private",
+            Value::Unknown(_, _)         => "Unknown",
+        }
+    }
+
+    pub fn as_sequence_iter(&self) -> Result<std::slice::Iter<Value>, Box<dyn Error>> {
+        match self {
+            Value::Sequence(items) => Ok(items.iter()),
+            _ => Err(GeneralError::new("Expected a sequence")),
+        }
+    }
+
     pub fn as_sequence(&self) -> Result<&Vec<Value>, Box<dyn Error>> {
         match self {
             Value::Sequence(items) => Ok(items),
@@ -139,6 +167,13 @@ impl Value {
         }
     }
 
+    pub fn as_octet_string(&self) -> Result<&Vec<u8>, Box<dyn Error>> {
+        match self {
+            Value::OctetString(bytes) => Ok(bytes),
+            _ => Err(GeneralError::new("Expected an octet string")),
+        }
+    }
+
     pub fn as_integer(&self) -> Result<&Integer, Box<dyn Error>> {
         match self {
             Value::Integer(integer) => Ok(integer),
@@ -151,6 +186,13 @@ impl Value {
             Value::PrintableString(s) => Ok(s),
             Value::UTF8String(s) => Ok(s),
             _ => Err(GeneralError::new("Expected a string")),
+        }
+    }
+
+    pub fn as_boolean(&self) -> Result<bool, Box<dyn Error>> {
+        match self {
+            Value::Boolean(b) => Ok(*b),
+            _ => Err(GeneralError::new("Expected a boolean")),
         }
     }
 }

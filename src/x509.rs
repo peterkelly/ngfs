@@ -60,6 +60,12 @@ impl AlgorithmIdentifier {
     }
 }
 
+impl AlgorithmIdentifier {
+    pub fn to_string(&self, reg: &ObjectRegistry) -> String {
+        format!("{} {}", reg.get_long_name(&self.algorithm), self.parameters.type_str())
+    }
+}
+
 pub struct Certificate {
     pub tbs_certificate: TBSCertificate,
     pub signature_algorithm: AlgorithmIdentifier,
@@ -184,6 +190,11 @@ impl SubjectPublicKeyInfo {
             subject_public_key,
         })
     }
+
+    pub fn print(&self, reg: &ObjectRegistry, indent: &str) {
+        println!("{}algorithm = {}", indent, self.algorithm.to_string(reg));
+        println!("{}subject_public_key = <{} bytes>", indent, self.subject_public_key.bytes.len());
+    }
 }
 
 pub struct UniqueIdentifier {
@@ -194,6 +205,30 @@ pub struct Extension {
     pub id: ObjectIdentifier,
     pub critical: bool,
     pub value: Vec<u8>,
+}
+
+impl Extension {
+    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
+        let mut it = value.as_sequence_iter()?;
+        let mut item = it.next().ok_or("Missing item")?;
+        let id = item.as_object_identifier()?.clone();
+
+        item = it.next().ok_or("Missing item")?;
+        let mut critical = false;
+        if let Value::Boolean(b) = item {
+            critical = *b;
+            item = it.next().ok_or("Missing item")?;
+        }
+
+        let value = item.as_octet_string()?.clone();
+        Ok(Extension { id, critical, value })
+    }
+
+    pub fn print(&self, reg: &ObjectRegistry, indent: &str) {
+        println!("{}id = {}", indent, reg.get_long_name(&self.id));
+        println!("{}critical = {}", indent, self.critical);
+        println!("{}value = <{} bytes>", indent, self.value.len());
+    }
 }
 
 pub struct TBSCertificate {
@@ -211,15 +246,55 @@ pub struct TBSCertificate {
 
 impl TBSCertificate {
     pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let items = value.as_exact_sequence(8)?;
+        let mut it = value.as_sequence_iter()?;
+
+        let item = it.next().ok_or("Missing version")?;
         let version: Version = Version::V3; // TODO
-        let serial_number = items[1].as_integer()?.clone();
-        let signature = AlgorithmIdentifier::from_asn1(&items[2])?;
-        let issuer = Name::from_asn1(&items[3])?;
-        let validity = Validity::from_asn1(&items[4])?;
-        let subject = Name::from_asn1(&items[5])?;
-        let subject_public_key_info = SubjectPublicKeyInfo::from_asn1(&items[6])?;
-        let extensions: Vec<Extension> = Vec::new(); // TODO
+
+        let item = it.next().ok_or("Missing serial_number")?;
+        let serial_number = item.as_integer()?.clone();
+
+        let item = it.next().ok_or("Missing signature")?;
+        let signature = AlgorithmIdentifier::from_asn1(&item)?;
+
+        let item = it.next().ok_or("Missing issuer")?;
+        let issuer = Name::from_asn1(&item)?;
+
+        let item = it.next().ok_or("Missing validity")?;
+        let validity = Validity::from_asn1(&item)?;
+
+        let item = it.next().ok_or("Missing subject")?;
+        let subject = Name::from_asn1(&item)?;
+
+        let item = it.next().ok_or("Missing subject_public_key_info")?;
+        let subject_public_key_info = SubjectPublicKeyInfo::from_asn1(&item)?;
+
+        let item = it.next().ok_or("Missing extensions")?;
+
+        let mut extensions: Vec<Extension> = Vec::new();
+
+        match item {
+            Value::ContextSpecific(3, ext_items) => {
+                match ext_items.get(0) {
+                    Some(ext_items2) => {
+                        let ext_items3 = ext_items2.as_sequence()?;
+                        for ext_item in ext_items3 {
+                            extensions.push(Extension::from_asn1(ext_item)?);
+                        }
+                    }
+                    None => {
+                    }
+                }
+            }
+            _ => {
+                return Err(GeneralError::new("Unexpected value for extension"));
+            }
+        }
+
+        match it.next() {
+            Some(_) => return Err(GeneralError::new("Unexpected value")),
+            None => {},
+        };
 
         Ok(TBSCertificate {
             version,
@@ -269,15 +344,33 @@ pub fn time_to_str(time: &Time) -> &str {
     }
 }
 
-pub fn print_certificate(registry: &ObjectRegistry, certificate: &Certificate) {
+pub fn print_tbs_certificate(tbs: &TBSCertificate, reg: &ObjectRegistry, indent: &str) {
+    let child_indent: &str = &format!("{}    ", indent);
+    // TODO pub version: Version,
+    println!("{}serial_number = {}", indent, BinaryData(&tbs.serial_number.0));
+    // TODO pub signature: AlgorithmIdentifier,
+    println!("{}signature = {}", indent, tbs.signature.to_string(reg));
+    println!("{}issuer = {}", indent, name_to_simple_string(reg, &tbs.issuer));
+    println!("{}validity =", indent);
+    println!("{}    not before = {}", indent, time_to_str(&tbs.validity.not_before));
+    println!("{}    not after = {}", indent, time_to_str(&tbs.validity.not_after));
+    println!("{}subject = {}", indent, name_to_simple_string(reg, &tbs.subject));
+    println!("{}subject_public_key_info =", indent);
+    tbs.subject_public_key_info.print(reg, child_indent);
+    // TODO pub issuer_unique_id: Option<UniqueIdentifier>,
+    // TODO pub subject_unique_id: Option<UniqueIdentifier>,
+    for (i, ext) in tbs.extensions.iter().enumerate() {
+        println!("{}extensions[{}] =", indent, i);
+        ext.print(reg, child_indent);
+    }
+}
+
+pub fn print_certificate(reg: &ObjectRegistry, certificate: &Certificate) {
+    let tbs: &TBSCertificate = &certificate.tbs_certificate;
     println!("Certificate");
     println!("    TBSCertificate");
-    println!("        serial_number = {}", BinaryData(&certificate.tbs_certificate.serial_number.0));
-    println!("        issuer = {}", name_to_simple_string(registry, &certificate.tbs_certificate.issuer));
-    println!("        subject = {}", name_to_simple_string(registry, &certificate.tbs_certificate.subject));
-    println!("        not before = {}", time_to_str(&certificate.tbs_certificate.validity.not_before));
-    println!("        not after = {}", time_to_str(&certificate.tbs_certificate.validity.not_after));
-
+    let child_indent: &str = &"        ";
+    print_tbs_certificate(tbs, reg, child_indent);
 }
 
 pub fn populate_registry(registry: &mut ObjectRegistry) {
