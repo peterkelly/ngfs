@@ -83,7 +83,6 @@ fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
         Extension::KeyShareClientHello(vec![
             KeyShareEntry {
                 group: NamedGroup::X25519,
-                // key_exchange: from_hex("13676e955e3f1e389274ffb25c6adb258a549c56779fd593613a73ea85acc669").unwrap().to_vec()
                 key_exchange: Vec::from(my_public_key_bytes),
             }])
     ];
@@ -154,19 +153,25 @@ fn test_aes() -> Result<(), Box<dyn Error>> {
     let enc_nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let input_plaintext: &[u8] = b"The quick brown fox jumps over the lazy dog";
     let input_plaintext_len = input_plaintext.len();
-    println!("input_plaintext ({} bytes) =\n{:#?}", input_plaintext.len(), Indent(&DebugHexDump(&input_plaintext)));
+    println!("input_plaintext ({} bytes) =\n{:#?}",
+             input_plaintext.len(),
+             Indent(&DebugHexDump(&input_plaintext)));
 
     let enc_aad = Aad::from(b"hello");
     let mut work: Vec<u8> = Vec::new();
     work.extend_from_slice(&input_plaintext);
     key.seal_in_place_append_tag(enc_nonce, enc_aad, &mut work)?;
-    println!("ciphertext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
+    println!("ciphertext ({} bytes) =\n{:#?}",
+             work.len(),
+             Indent(&DebugHexDump(&work)));
 
     let dec_nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let dec_aad = Aad::from(b"hello");
     key.open_in_place(dec_nonce, dec_aad, &mut work)?;
     work.truncate(work.len() - AES_256_GCM.tag_len());
-    println!("output_plaintext ({} bytes) =\n{:#?}", work.len(), Indent(&DebugHexDump(&work)));
+    println!("output_plaintext ({} bytes) =\n{:#?}",
+             work.len(),
+             Indent(&DebugHexDump(&work)));
     println!("output == input ? {}", work == input_plaintext);
 
     Ok(())
@@ -212,7 +217,11 @@ fn test_dh() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn hkdf_expand_label(alg: HashAlgorithm, prk: &[u8], label_suffix: &[u8], context: &[u8], okm: &mut [u8]) {
+fn hkdf_expand_label(alg: HashAlgorithm,
+                     prk: &[u8],
+                     label_suffix: &[u8],
+                     context: &[u8],
+                     okm: &mut [u8]) {
     let length_field = (okm.len() as u16).to_be_bytes();
 
     let mut label_field: Vec<u8> = Vec::new();
@@ -300,12 +309,8 @@ fn get_server_hello_x25519_key_share(server_hello: &ServerHello) -> Option<Vec<u
     return None;
 }
 
-fn get_x25519_shared_secret(my_private_key: EphemeralPrivateKey/*, client_hello: &ClientHello*/, server_hello: &ServerHello) -> Option<Vec<u8>> {
-    // let client_share = match get_client_hello_x25519_key_share(client_hello) {
-    //     Some(v) => v,
-    //     None => return None,
-    // };
-
+fn get_x25519_shared_secret(my_private_key: EphemeralPrivateKey,
+                            server_hello: &ServerHello) -> Option<Vec<u8>> {
     let server_share = match get_server_hello_x25519_key_share(server_hello) {
         Some(v) => v,
         None => return None,
@@ -356,7 +361,8 @@ struct Client {
     to_send: Vec<u8>,
 }
 
-fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext, plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+fn client_received_handshake(client: &mut Client, plaintext: TLSPlaintext,
+                             plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
     println!("Handshake record");
     let mut reader = BinaryReader::new(&plaintext.fragment);
     let count = 0;
@@ -516,7 +522,9 @@ fn encrypt_traffic<'a>(alg: HashAlgorithm,
     // Ok(open_result?.to_vec())
 }
 
-fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext, plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+fn client_received_application_data(client: &mut Client,
+                                    plaintext: TLSPlaintext,
+                                    plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
     match &mut client.state {
         State::ServerHelloReceived(state_data) => {
             // println!("Received ApplicationData (server_sequence_no = {})", state_data.server_sequence_no);
@@ -571,8 +579,10 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                 Message::Handshake(Handshake::Certificate(certificate)) => {
 
                     println!("    Received Handshake::Certificate");
-                    println!("        certificate_request_context.len() = {}", certificate.certificate_request_context.len());
-                    println!("        certificate_list.len() = {}", certificate.certificate_list.len());
+                    println!("        certificate_request_context.len() = {}",
+                        certificate.certificate_request_context.len());
+                    println!("        certificate_list.len() = {}",
+                        certificate.certificate_list.len());
 
                     println!("    This is a certificate handshake");
                     for entry in certificate.certificate_list.iter() {
@@ -607,7 +617,8 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                     println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
 
                     {
-                        let finished_key: Vec<u8> = derive_secret3(client.alg, &state_data.handshake_secrets.server, b"finished");
+                        let finished_key: Vec<u8> =
+                            derive_secret3(client.alg, &state_data.handshake_secrets.server, b"finished");
                         {
                             println!("server_finished_key = {:?}", BinaryData(&finished_key));
                             println!();
@@ -631,13 +642,16 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
                     // Send Client Finished message
                     {
-                        let finished_key: Vec<u8> = derive_secret3(client.alg, &state_data.handshake_secrets.client, b"finished");
+                        let finished_key: Vec<u8> =
+                            derive_secret3(client.alg, &state_data.handshake_secrets.client, b"finished");
 
                         println!("client_finished_key = {:?}", BinaryData(&finished_key));
                         println!();
-                        println!("client_finish: handshake_hash = {:?}", BinaryData(&new_transcript_hash));
+                        println!("client_finish: handshake_hash = {:?}",
+                                 BinaryData(&new_transcript_hash));
 
-                        let verify_data: Vec<u8> = client.alg.hmac_sign(&finished_key, &new_transcript_hash);
+                        let verify_data: Vec<u8> =
+                            client.alg.hmac_sign(&finished_key, &new_transcript_hash);
                         println!("client_finish: verify_data    = {:?}", BinaryData(&verify_data));
 
                         let client_finished = Handshake::Finished(Finished {
@@ -712,7 +726,8 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
 
 
         State::Established(state_data) => {
-            // println!("Received ApplicationData (server_sequence_no = {})", state_data.server_sequence_no);
+            // println!("Received ApplicationData (server_sequence_no = {})",
+            //          state_data.server_sequence_no);
             let current_sequence_no = state_data.server_sequence_no;
             state_data.server_sequence_no += 1;
             println!("ApplicationData for server_sequence_no {}", current_sequence_no);
@@ -721,7 +736,8 @@ fn client_received_application_data(client: &mut Client, plaintext: TLSPlaintext
                                                   &state_data.application_secrets.server,
                                                   current_sequence_no,
                                                   &plaintext_raw) {
-                Err(e) => return Err(GeneralError::new(format!("established: key.open_in_place() failed: {}", e))),
+                Err(e) => return Err(GeneralError::new(
+                    format!("established: key.open_in_place() failed: {}", e))),
                 Ok(plaintext) => plaintext,
             };
 
@@ -910,7 +926,8 @@ impl Receiver {
 }
 
 impl Receiver {
-    async fn next(&mut self, socket: &mut TcpStream) -> Result<Option<(TLSPlaintext, Vec<u8>)>, ReceiverError> {
+    async fn next(&mut self, socket: &mut TcpStream) ->
+                  Result<Option<(TLSPlaintext, Vec<u8>)>, ReceiverError> {
         const READ_SIZE: usize = 1024;
         loop {
             if self.to_remove > 0 {
@@ -942,7 +959,8 @@ impl Receiver {
     }
 }
 
-async fn process_connection_inner(receiver: &mut Receiver, socket: &mut TcpStream) -> Result<(), Box<dyn Error>> {
+async fn process_connection_inner(receiver: &mut Receiver, socket: &mut TcpStream) ->
+                                  Result<(), Box<dyn Error>> {
     while let Some((record, record_raw)) = receiver.next(socket).await? {
         process_record(&record, &record_raw)?;
     }
