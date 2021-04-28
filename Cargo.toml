@@ -16,3 +16,5 @@ openssl = "0.10.32"
 quiche = "0.6.0"
 ring = { version = "0.16", features = ["alloc", "dev_urandom_fallback", "std"] }
 rustls = { version = "0.19.1", features = ["logging", "dangerous_configuration"] }
+webpki = "0.21.0"
+webpki-roots = "0.21.0"
