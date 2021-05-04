@@ -10,21 +10,42 @@ use std::net::SocketAddr;
 use std::fmt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use torrent::util::{escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
-use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
-use torrent::tls::types::alert::*;
-use torrent::tls::types::handshake::*;
-use torrent::tls::types::extension::*;
-use torrent::tls::types::record::*;
-use torrent::util::from_hex;
-use torrent::crypt::*;
-use torrent::result::GeneralError;
 use crypto::digest::Digest;
 use crypto::sha2::Sha384;
 use crypto::hkdf::{hkdf_extract, hkdf_expand};
 use crypto::aes_gcm::AesGcm;
 use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::rand::SystemRandom;
+use torrent::result::GeneralError;
+use torrent::util::{from_hex, escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
+use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
+use torrent::crypt::HashAlgorithm;
+// use torrent::tls::types::alert::*;
+use torrent::tls::types::handshake::{
+    CipherSuite,
+    Handshake,
+    ClientHello,
+    ServerHello,
+    Finished,
+};
+use torrent::tls::types::extension::{
+    ECPointFormat,
+    NamedCurve,
+    Extension,
+    SignatureScheme,
+    PskKeyExchangeMode,
+    NamedGroup,
+    ServerName,
+    ProtocolName,
+    KeyShareEntry,
+};
+use torrent::tls::types::record::{
+    ContentType,
+    Message,
+    TLSPlaintext,
+    TLSPlaintextError,
+    TLSCiphertext,
+};
 
 fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     let random = from_hex("1a87a2e2f77536fcfa071500af3c7dffa5830e6c61214e2dee7623c2b925aed8").unwrap();
@@ -325,15 +346,16 @@ fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Vec<u8>
     output
 }
 
-fn decrypt_traffic<'a>(alg: HashAlgorithm,
+fn decrypt_traffic<'a>(hash_alg: HashAlgorithm,
+                       aead_alg: &'static ring::aead::Algorithm,
                        traffic_secret: &[u8],
                        sequence_no: u64,
                        plaintext_raw: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
-    hkdf_expand_label(alg, traffic_secret, b"key", &[], &mut write_key);
-    hkdf_expand_label(alg, traffic_secret, b"iv", &[], &mut write_iv);
+    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key);
+    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv);
 
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
@@ -350,32 +372,74 @@ fn decrypt_traffic<'a>(alg: HashAlgorithm,
     let mut additional_data: Vec<u8> = Vec::new();
     additional_data.extend_from_slice(&plaintext_raw[0..5]); // TODO: verify we have at least 5 bytes
 
-    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
-
-    let unbound_key = match UnboundKey::new(&AES_256_GCM, &write_key[0..32]) {
+    let unbound_key = match ring::aead::UnboundKey::new(aead_alg, &write_key[0..32]) {
         Ok(v) => v,
         Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
     };
-    let key = LessSafeKey::new(unbound_key);
+    let key = ring::aead::LessSafeKey::new(unbound_key);
 
     let mut work: Vec<u8> = Vec::new();
     work.extend_from_slice(&tls_ciphertext.encrypted_record);
 
-    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-    let aad = Aad::from(additional_data);
+    let nonce = ring::aead::Nonce::assume_unique_for_key(nonce_bytes);
+    let aad = ring::aead::Aad::from(additional_data);
     let open_result: Result<&mut [u8], ring::error::Unspecified> = key.open_in_place(nonce, aad, &mut work);
     Ok(open_result?.to_vec())
 }
 
-fn encrypt_traffic<'a>(alg: HashAlgorithm,
+fn decrypt_message(
+    hash_alg: HashAlgorithm,
+    aead_alg: &'static ring::aead::Algorithm,
+    sequence_no: u64,
+    decryption_key: &[u8],
+    plaintext_raw: &[u8],
+) -> Result<(Message, Vec<u8>), Box<dyn Error>> {
+    println!("ApplicationData for server_sequence_no {}", sequence_no);
+
+    let plaintext = match decrypt_traffic(hash_alg,
+                                          aead_alg,
+                                          decryption_key,
+                                          sequence_no,
+                                          plaintext_raw) {
+        Err(e) => return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e))),
+        Ok(plaintext) => plaintext,
+    };
+
+
+    // TEMP: Add test zero padding
+    // let mut plaintext: Vec<u8> = plaintext.to_vec();
+    // for i in 0..5 {
+    //     plaintext.push(0);
+    // }
+
+    let mut type_offset: usize = plaintext.len();
+    while type_offset > 0 && plaintext[type_offset - 1] == 0 {
+        type_offset -= 1;
+    }
+    if type_offset == 0 {
+        return Err(GeneralError::new("Plaintext: Missing type field"));
+    }
+    let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
+    let inner_body: &[u8] = &plaintext[0..type_offset - 1];
+
+    let mut inner_body_vec: Vec<u8> = Vec::new();
+    inner_body_vec.extend_from_slice(inner_body);
+    let message = Message::from_raw(inner_body, inner_content_type)?;
+    println!("======== Received {}", message.name());
+
+    Ok((message, inner_body_vec))
+}
+
+fn encrypt_traffic<'a>(hash_alg: HashAlgorithm,
+                       aead_alg: &'static ring::aead::Algorithm,
                        traffic_secret: &[u8],
                        sequence_no: u64,
                        input_plaintext: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
-    hkdf_expand_label(alg, traffic_secret, b"key", &[], &mut write_key);
-    hkdf_expand_label(alg, traffic_secret, b"iv", &[], &mut write_iv);
+    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key);
+    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv);
 
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
@@ -394,9 +458,9 @@ fn encrypt_traffic<'a>(alg: HashAlgorithm,
     // let mut additional_data: Vec<u8> = Vec::new();
     // additional_data.extend_from_slice(&tls_ciphertext_data[0..5]); // TODO: verify we have at least 5 bytes
 
-    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
+    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad};
 
-    let unbound_key = match UnboundKey::new(&AES_256_GCM, &write_key[0..32]) {
+    let unbound_key = match UnboundKey::new(aead_alg, &write_key[0..32]) {
         Ok(v) => v,
         Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
     };
@@ -426,7 +490,8 @@ fn encrypt_traffic<'a>(alg: HashAlgorithm,
 }
 
 struct ClientHelloSent {
-    alg: HashAlgorithm,
+    hash_alg: HashAlgorithm,
+    aead_alg: &'static ring::aead::Algorithm,
     prk: Vec<u8>,
     transcript: Vec<u8>,
     my_private_key: Option<EphemeralPrivateKey>,
@@ -438,7 +503,6 @@ impl ClientHelloSent {
                           handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
         self.transcript.extend_from_slice(handshake_bytes);
 
-        let alg = self.alg;
         match handshake {
             Handshake::ServerHello(server_hello) => {
                 let my_private_key2 = self.my_private_key.take().unwrap();
@@ -449,14 +513,14 @@ impl ClientHelloSent {
                 };
                 println!("Shared secret = {}", BinaryData(&secret));
 
-                let new_prk = get_derived_prk(alg, &self.prk, secret);
+                let new_prk = get_derived_prk(self.hash_alg, &self.prk, secret);
 
                 println!("Got expected server hello");
 
                 let thash = transcript_hash(&self.transcript);
                 let hs = TrafficSecrets {
-                    client: derive_secret_prk_hash(alg, &new_prk, b"c hs traffic", &thash),
-                    server: derive_secret_prk_hash(alg, &new_prk, b"s hs traffic", &thash),
+                    client: derive_secret_prk_hash(self.hash_alg, &new_prk, b"c hs traffic", &thash),
+                    server: derive_secret_prk_hash(self.hash_alg, &new_prk, b"s hs traffic", &thash),
                 };
 
                 println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
@@ -465,7 +529,8 @@ impl ClientHelloSent {
                 // handshake_traffic_secrets = Some(hs);
 
                 Ok(Some(State::ServerHelloReceived(ServerHelloReceived {
-                    alg: alg,
+                    hash_alg: self.hash_alg,
+                    aead_alg: self.aead_alg,
                     prk: new_prk,
                     transcript: self.transcript.clone(), // TODO: Avoid clone
                     handshake_secrets: hs,
@@ -487,7 +552,8 @@ impl ClientHelloSent {
 }
 
 struct ServerHelloReceived {
-    alg: HashAlgorithm,
+    hash_alg: HashAlgorithm,
+    aead_alg: &'static ring::aead::Algorithm,
     prk: Vec<u8>,
     transcript: Vec<u8>,
     handshake_secrets: TrafficSecrets,
@@ -505,43 +571,18 @@ impl ServerHelloReceived {
                         conn: &mut ClientConn,
                         plaintext: TLSPlaintext,
                         plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
-        let alg = self.alg;
-        // server_hello_receiverd_application_data(&mut client, &mut self, plaintext, plaintext_raw);
-        // println!("Received ApplicationData (server_sequence_no = {})", self.server_sequence_no);
-        let current_sequence_no = self.server_sequence_no;
-        self.server_sequence_no += 1;
-        println!("ApplicationData for server_sequence_no {}", current_sequence_no);
+        let decryption_key = &self.handshake_secrets.server;
 
-        let plaintext = match decrypt_traffic(alg,
-                                              &self.handshake_secrets.server,
-                                              current_sequence_no,
-                                              &plaintext_raw) {
-            Err(e) => return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e))),
-            Ok(plaintext) => plaintext,
-        };
-
-
-        // TEMP: Add test zero padding
-        // let mut plaintext: Vec<u8> = plaintext.to_vec();
-        // for i in 0..5 {
-        //     plaintext.push(0);
-        // }
-
-        let mut type_offset: usize = plaintext.len();
-        while type_offset > 0 && plaintext[type_offset - 1] == 0 {
-            type_offset -= 1;
-        }
-        if type_offset == 0 {
-            return Err(GeneralError::new("Plaintext: Missing type field"));
-        }
-        let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
-        let inner_body: &[u8] = &plaintext[0..type_offset - 1];
-        let message = Message::from_raw(inner_body, inner_content_type)?;
-        println!("======== Received {}", message.name());
-
-        // let old_transcript = self.transcript.clone();
         let old_transcript_hash: Vec<u8> = transcript_hash(&self.transcript);
-        self.transcript.extend_from_slice(&inner_body);
+        let (message, inner_body_vec) = decrypt_message(
+            self.hash_alg,
+            self.aead_alg,
+            self.server_sequence_no,
+            decryption_key,
+            &plaintext_raw)?;
+        self.server_sequence_no += 1;
+        self.transcript.extend_from_slice(&inner_body_vec);
+
         let new_transcript_hash: Vec<u8> = transcript_hash(&self.transcript);
         // println!("transcript hash = {:?}", BinaryData(&transcript_hash(&self.transcript)));
 
@@ -585,35 +626,35 @@ impl ServerHelloReceived {
             Message::Handshake(Handshake::Finished(finished)) => {
 
                 println!("    Received Handshake::Finished with {} bytes", finished.data.len());
-                let input_psk: &[u8] = &vec_with_len(alg.byte_len());
-                let new_prk = get_derived_prk(alg, &self.prk, input_psk);
+                let input_psk: &[u8] = &vec_with_len(self.hash_alg.byte_len());
+                let new_prk = get_derived_prk(self.hash_alg, &self.prk, input_psk);
 
                 let thash = transcript_hash(&self.transcript);
                 let ap = TrafficSecrets {
-                    client: derive_secret_prk_hash(alg, &new_prk, b"c ap traffic", &thash),
-                    server: derive_secret_prk_hash(alg, &new_prk, b"s ap traffic", &thash),
+                    client: derive_secret_prk_hash(self.hash_alg, &new_prk, b"c ap traffic", &thash),
+                    server: derive_secret_prk_hash(self.hash_alg, &new_prk, b"s ap traffic", &thash),
                 };
                 println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
                 println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
 
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret3(alg, &self.handshake_secrets.server, b"finished");
+                        derive_secret3(self.hash_alg, &self.handshake_secrets.server, b"finished");
                     {
                         println!("server_finished_key = {:?}", BinaryData(&finished_key));
                         println!();
                         println!("server_finish: handshake_hash = {:?}", BinaryData(&old_transcript_hash));
-                        let verify_data: Vec<u8> = alg.hmac_sign(&finished_key, &old_transcript_hash);
+                        let verify_data: Vec<u8> = self.hash_alg.hmac_sign(&finished_key, &old_transcript_hash);
                         println!("server_finish: verify_data    = {:?}", BinaryData(&verify_data));
                         println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
                         println!();
                     }
 
-                    if alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data) {
-                        println!("Finished (alg): Verification succeeded");
+                    if self.hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data) {
+                        println!("Finished (self.hash_alg): Verification succeeded");
                     }
                     else {
-                        println!("Finished (alg): Verification failed");
+                        println!("Finished (self.hash_alg): Verification failed");
                         return Err(GeneralError::new("Incorrect finished data"));
                     }
                 }
@@ -623,7 +664,7 @@ impl ServerHelloReceived {
                 // Send Client Finished message
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret3(alg, &self.handshake_secrets.client, b"finished");
+                        derive_secret3(self.hash_alg, &self.handshake_secrets.client, b"finished");
 
                     println!("client_finished_key = {:?}", BinaryData(&finished_key));
                     println!();
@@ -631,11 +672,11 @@ impl ServerHelloReceived {
                              BinaryData(&new_transcript_hash));
 
                     let verify_data: Vec<u8> =
-                        alg.hmac_sign(&finished_key, &new_transcript_hash);
+                        self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash);
                     println!("client_finish: verify_data    = {:?}", BinaryData(&verify_data));
 
                     let client_finished = Handshake::Finished(Finished {
-                        data: alg.hmac_sign(&finished_key, &new_transcript_hash),
+                        data: self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash),
                     });
 
                     let mut writer = BinaryWriter::new();
@@ -649,7 +690,8 @@ impl ServerHelloReceived {
 
 
                     let client_finished_enc = encrypt_traffic(
-                        alg,
+                        self.hash_alg,
+                        self.aead_alg,
                         &self.handshake_secrets.client,
                         client_sequence_no,
                         &to_encrypt)?;
@@ -672,7 +714,8 @@ impl ServerHelloReceived {
 
                     client_sequence_no = 0;
                     let client_finished_enc = encrypt_traffic(
-                        alg,
+                        self.hash_alg,
+                        self.aead_alg,
                         &ap.client,
                         client_sequence_no,
                         &to_encrypt)?;
@@ -690,7 +733,7 @@ impl ServerHelloReceived {
 
                 // println!("handshake = {:#?}", inner_handshake);
                 return Ok(Some(State::Established(Established {
-                    alg: alg,
+                    alg: self.hash_alg,
                     prk: new_prk,
                     application_secrets: ap,
                     client_sequence_no: 0,
@@ -725,40 +768,16 @@ impl Established {
                         conn: &mut ClientConn,
                         plaintext: TLSPlaintext,
                         plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
-        let alg = self.alg;
-        // println!("Received ApplicationData (server_sequence_no = {})",
-        //          self.server_sequence_no);
-        let current_sequence_no = self.server_sequence_no;
+        let decryption_key = &self.application_secrets.server;
+
+        let (message, inner_body_vec) = decrypt_message(
+            self.alg,
+            &ring::aead::AES_256_GCM,
+            self.server_sequence_no,
+            decryption_key,
+            &plaintext_raw)?;
         self.server_sequence_no += 1;
-        println!("ApplicationData for server_sequence_no {}", current_sequence_no);
 
-        let plaintext = match decrypt_traffic(alg,
-                                              &self.application_secrets.server,
-                                              current_sequence_no,
-                                              &plaintext_raw) {
-            Err(e) => return Err(GeneralError::new(
-                format!("established: key.open_in_place() failed: {}", e))),
-            Ok(plaintext) => plaintext,
-        };
-
-
-        // TEMP: Add test zero padding
-        // let mut plaintext: Vec<u8> = plaintext.to_vec();
-        // for i in 0..5 {
-        //     plaintext.push(0);
-        // }
-
-        let mut type_offset: usize = plaintext.len();
-        while type_offset > 0 && plaintext[type_offset - 1] == 0 {
-            type_offset -= 1;
-        }
-        if type_offset == 0 {
-            return Err(GeneralError::new("Plaintext: Missing type field"));
-        }
-        let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
-        let inner_body: &[u8] = &plaintext[0..type_offset - 1];
-        let message = Message::from_raw(inner_body, inner_content_type)?;
-        println!("======== Received {}", message.name());
         match message {
             Message::Handshake(Handshake::NewSessionTicket(ticket)) => {
                 println!("ticket = {:#?}", ticket);
@@ -878,7 +897,8 @@ impl Client {
 
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
-    let alg = HashAlgorithm::SHA384;
+    let hash_alg = HashAlgorithm::SHA384;
+    let aead_alg = &ring::aead::AES_256_GCM;
 
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
@@ -904,8 +924,9 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     initial_transcript.extend_from_slice(&client_hello_bytes);
     let mut client = Client {
         state: State::ClientHelloSent(ClientHelloSent {
-            alg: alg,
-            prk: get_zero_prk(alg),
+            hash_alg: hash_alg,
+            aead_alg: aead_alg,
+            prk: get_zero_prk(hash_alg),
             transcript: initial_transcript,
             my_private_key: my_private_key,
         }),
