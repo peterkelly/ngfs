@@ -296,8 +296,6 @@ impl ServerHelloReceived {
                     }
                 }
 
-                let mut client_sequence_no: u64 = 0;
-
                 // Send Client Finished message
                 {
                     let finished_key: Vec<u8> =
@@ -319,52 +317,32 @@ impl ServerHelloReceived {
                     let mut writer = BinaryWriter::new();
                     writer.write_item(&client_finished)?;
                     let client_finished_bytes: Vec<u8> = Vec::from(writer);
-                    println!("client_finished_bytes = {:?}", BinaryData(&client_finished_bytes));
-
-                    let mut to_encrypt: Vec<u8> = Vec::new();
-                    to_encrypt.extend_from_slice(&client_finished_bytes);
-                    to_encrypt.push(22); // Handshake
-
-
-                    let client_finished_enc = encrypt_traffic(
-                        self.hash_alg,
-                        self.aead_alg,
-                        &self.handshake_secrets.client,
-                        client_sequence_no,
-                        &to_encrypt)?;
-                    client_sequence_no += 1;
-
-                    let output_record = TLSPlaintext {
-                        content_type: ContentType::ApplicationData,
-                        legacy_record_version: 0x0303,
-                        fragment: client_finished_enc,
-                    };
-                    conn.to_send.extend_from_slice(&output_record.to_vec());
+                    conn.append_encrypted(
+                        client_finished_bytes,          // to_encrypt
+                        ContentType::Handshake,         // content_type
+                        self.hash_alg,                  // hash_alg
+                        self.aead_alg,                  // aead_alg
+                        &self.handshake_secrets.client, // traffic_secret
+                        0,                              // client_sequence_no
+                    )?;
                 }
 
+                // Start of application traffic
+                let mut client_sequence_no: u64 = 0;
 
                 // HTTP request
                 {
-                    let mut to_encrypt: Vec<u8> = Vec::new();
-                    to_encrypt.extend_from_slice(b"GET / HTTP/1.1\r\n\r\n");
-                    to_encrypt.push(23); // ApplicationData
-
-                    client_sequence_no = 0;
-                    let client_finished_enc = encrypt_traffic(
-                        self.hash_alg,
-                        self.aead_alg,
-                        &ap.client,
-                        client_sequence_no,
-                        &to_encrypt)?;
-                    client_sequence_no += 1;
-
-                    let output_record = TLSPlaintext {
-                        content_type: ContentType::ApplicationData,
-                        legacy_record_version: 0x0303,
-                        fragment: client_finished_enc,
-                    };
-                    conn.to_send.extend_from_slice(&output_record.to_vec());
+                    let request = b"GET / HTTP/1.1\r\n\r\n".to_vec();
+                    conn.append_encrypted(
+                        request,                      // to_encrypt
+                        ContentType::ApplicationData, // content_type
+                        self.hash_alg,                // hash_alg
+                        self.aead_alg,                // aead_alg
+                        &ap.client,                   // traffic_secret
+                        client_sequence_no,           // client_sequence_no
+                    )?;
                 }
+                client_sequence_no += 1;
 
 
 
@@ -443,6 +421,54 @@ struct TrafficSecrets {
 
 struct ClientConn {
     to_send: Vec<u8>,
+}
+
+impl ClientConn {
+    fn new() -> Self {
+        ClientConn {
+            to_send: Vec::new(),
+        }
+    }
+
+    // TODO: Make this return (). The only reason it returns a Result, and the only reason why
+    // encrypt_traffic() returns a Result, is that the latter calls UnboundKey::new() because it
+    // does a hkdf_expand_label() each time. We should do the hkdf_expand_label() just once when
+    // we get a new prk, so it doesn't have to be repeated (and potentially fail) on every
+    // encryption call.
+    fn append_encrypted(
+        &mut self,
+        mut to_encrypt: Vec<u8>,
+        content_type: ContentType,
+        hash_alg: HashAlgorithm,
+        aead_alg: &'static ring::aead::Algorithm,
+        traffic_secret: &[u8],
+        client_sequence_no: u64,
+    ) -> Result<(), Box<dyn Error>> {
+        to_encrypt.push(content_type.to_raw());
+        let client_finished_enc = encrypt_traffic(
+            hash_alg,
+            aead_alg,
+            traffic_secret,
+            client_sequence_no,
+            &to_encrypt)?;
+
+        let output_record = TLSPlaintext {
+            content_type: ContentType::ApplicationData,
+            legacy_record_version: 0x0303,
+            fragment: client_finished_enc,
+        };
+        self.to_send.extend_from_slice(&output_record.to_vec());
+        Ok(())
+    }
+
+    async fn send_pending_data(&mut self, socket: &mut TcpStream) -> Result<(), Box<dyn Error>> {
+        if self.to_send.len() > 0 {
+            socket.write_all(&self.to_send).await?;
+            println!("Sent {} bytes", self.to_send.len());
+            self.to_send.clear();
+        }
+        Ok(())
+    }
 }
 
 enum State {
@@ -657,9 +683,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
             my_private_key: my_private_key,
         }),
     };
-    let mut conn = ClientConn {
-        to_send: Vec::new(),
-    };
+    let mut conn = ClientConn::new();
 
     let mut receiver = Receiver::new();
 
@@ -673,11 +697,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
             ContentType::Unknown(code) => client.unknown(&mut conn, code)?,
         }
 
-        if conn.to_send.len() > 0 {
-            socket.write_all(&conn.to_send).await?;
-            println!("Sent {} bytes", conn.to_send.len());
-            conn.to_send.clear();
-        }
+        conn.send_pending_data(&mut socket).await?;
     }
     println!("Server closed connection");
     Ok(())
