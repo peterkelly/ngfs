@@ -120,11 +120,7 @@ fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
 }
 
 fn transcript_hash(alg: HashAlgorithm, transcript: &[u8]) -> Vec<u8> {
-    let mut digest = alg.new_digest();
-    digest.input(transcript);
-    let mut result: Vec<u8> = vec![0; digest.output_bits() / 8];
-    digest.result(&mut result);
-    result
+    alg.hash(transcript)
 }
 
 struct ClientHelloSent {

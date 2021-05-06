@@ -21,14 +21,6 @@ impl HashAlgorithm {
         }
     }
 
-    pub fn new_digest(&self) -> Box<dyn Digest> {
-        match self {
-            HashAlgorithm::SHA256 => Box::new(Sha256::new()),
-            HashAlgorithm::SHA384 => Box::new(Sha384::new()),
-            HashAlgorithm::SHA512 => Box::new(Sha512::new()),
-        }
-    }
-
     pub fn hash(&self, input: &[u8]) -> Vec<u8> {
         let mut output = vec_with_len(self.byte_len());
         match self {

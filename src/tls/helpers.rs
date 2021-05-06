@@ -102,10 +102,7 @@ pub fn get_server_hello_x25519_shared_secret(
 }
 
 fn empty_transcript_hash(alg: HashAlgorithm) -> Vec<u8> {
-    let mut digest = alg.new_digest();
-    let mut result: Vec<u8> = vec![0; digest.output_bits() / 8];
-    digest.result(&mut result);
-    result
+    alg.hash(&[])
 }
 
 pub fn get_zero_prk(alg: HashAlgorithm) -> Vec<u8> {
