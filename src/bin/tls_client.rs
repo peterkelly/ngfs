@@ -14,7 +14,7 @@ use ring::rand::SystemRandom;
 use torrent::result::GeneralError;
 use torrent::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, BinaryWriter};
-use torrent::crypt::HashAlgorithm;
+use torrent::crypt::{HashAlgorithm, AeadAlgorithm};
 use torrent::tls::error::TLSError;
 use torrent::tls::types::handshake::{
     CipherSuite,
@@ -125,7 +125,7 @@ fn transcript_hash(alg: HashAlgorithm, transcript: &[u8]) -> Vec<u8> {
 
 struct ClientHelloSent {
     hash_alg: HashAlgorithm,
-    aead_alg: &'static ring::aead::Algorithm,
+    aead_alg: AeadAlgorithm,
     prk: Vec<u8>,
     transcript: Vec<u8>,
     my_private_key: Option<EphemeralPrivateKey>,
@@ -187,7 +187,7 @@ impl ClientHelloSent {
 
 struct ServerHelloReceived {
     hash_alg: HashAlgorithm,
-    aead_alg: &'static ring::aead::Algorithm,
+    aead_alg: AeadAlgorithm,
     prk: Vec<u8>,
     transcript: Vec<u8>,
     handshake_secrets: TrafficSecrets,
@@ -364,7 +364,7 @@ impl ServerHelloReceived {
 
 struct Established {
     hash_alg: HashAlgorithm,
-    aead_alg: &'static ring::aead::Algorithm,
+    aead_alg: AeadAlgorithm,
     prk: Vec<u8>,
     application_secrets: TrafficSecrets,
     client_sequence_no: u64,
@@ -432,7 +432,7 @@ impl ClientConn {
         mut data: Vec<u8>,
         content_type: ContentType,
         hash_alg: HashAlgorithm,
-        aead_alg: &'static ring::aead::Algorithm,
+        aead_alg: AeadAlgorithm,
         traffic_secret: &[u8],
         client_sequence_no: u64,
     ) -> Result<(), TLSError> {
@@ -642,7 +642,7 @@ fn handshake_to_record(handshake: &Handshake) -> Result<TLSPlaintext, Box<dyn Er
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
     let hash_alg = HashAlgorithm::SHA384;
-    let aead_alg = &ring::aead::AES_256_GCM;
+    let aead_alg = AeadAlgorithm::AES_256_GCM_SHA384;
 
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;

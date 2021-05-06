@@ -1,7 +1,5 @@
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
-use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad};
-use ring::error::Unspecified;
-use super::super::crypt::{HashAlgorithm, CryptError};
+use super::super::crypt::{HashAlgorithm, AeadAlgorithm, CryptError};
 use super::super::util::{vec_with_len};
 use super::types::handshake::{
     // ClientHello,
@@ -119,7 +117,7 @@ pub fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Res
 
 pub fn encrypt_traffic(
     hash_alg: HashAlgorithm,
-    aead_alg: &'static ring::aead::Algorithm,
+    aead_alg: AeadAlgorithm,
     traffic_secret: &[u8],
     sequence_no: u64,
     inout: &mut Vec<u8>,
@@ -139,13 +137,7 @@ pub fn encrypt_traffic(
         nonce_bytes[i] ^= write_iv[i];
     }
 
-    let unbound_key = match UnboundKey::new(aead_alg, &write_key[0..32]) {
-        Ok(v) => v,
-        Err(Unspecified) => return Err(TLSError::EncryptionFailed),
-    };
-    let key = LessSafeKey::new(unbound_key);
-
-    let len = inout.len() + key.algorithm().tag_len();
+    let len = inout.len() + aead_alg.tag_len();
 
     let additional_data: [u8; 5] = [
         0x17, // opaque_type = application_data = 23
@@ -156,19 +148,14 @@ pub fn encrypt_traffic(
     ];
 
 
-    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-    let aad = Aad::from(additional_data);
-
-    match key.seal_in_place_append_tag(nonce, aad, inout) {
-        Ok(()) => (),
-        Err(Unspecified) => return Err(TLSError::EncryptionFailed),
-    };
+    aead_alg.encrypt_in_place(&write_key[0..32], &nonce_bytes, &additional_data, inout)
+        .map_err(|_| TLSError::EncryptionFailed)?;
     Ok(())
 }
 
 fn decrypt_traffic(
     hash_alg: HashAlgorithm,
-    aead_alg: &'static ring::aead::Algorithm,
+    aead_alg: AeadAlgorithm,
     traffic_secret: &[u8],
     sequence_no: u64,
     plaintext_raw: &[u8],
@@ -200,28 +187,15 @@ fn decrypt_traffic(
         return Err(TLSError::DecryptionFailed);
     }
 
-    let unbound_key = match ring::aead::UnboundKey::new(aead_alg, &write_key[0..32]) {
-        Ok(v) => v,
-        Err(Unspecified) => return Err(TLSError::DecryptionFailed),
-    };
-    let key = ring::aead::LessSafeKey::new(unbound_key);
-
     let mut work: Vec<u8> = tls_ciphertext.encrypted_record;
-
-    let nonce = ring::aead::Nonce::assume_unique_for_key(nonce_bytes);
-    let aad = ring::aead::Aad::from(&plaintext_raw[0..5]);
-
-    let open_result = match key.open_in_place(nonce, aad, &mut work) {
-        Ok(v) => v,
-        Err(Unspecified) => return Err(TLSError::DecryptionFailed),
-    };
-
-    Ok(open_result.to_vec())
+    aead_alg.decrypt_in_place(&write_key[0..32], &nonce_bytes, &plaintext_raw[0..5], &mut work)
+        .map_err(|_| TLSError::DecryptionFailed)?;
+    Ok(work)
 }
 
 pub fn decrypt_message(
     hash_alg: HashAlgorithm,
-    aead_alg: &'static ring::aead::Algorithm,
+    aead_alg: AeadAlgorithm,
     sequence_no: u64,
     decryption_key: &[u8],
     plaintext_raw: &[u8],
@@ -229,10 +203,10 @@ pub fn decrypt_message(
     println!("ApplicationData for server_sequence_no {}", sequence_no);
 
     let plaintext = decrypt_traffic(hash_alg,
-                                          aead_alg,
-                                          decryption_key,
-                                          sequence_no,
-                                          plaintext_raw)?;
+                                    aead_alg,
+                                    decryption_key,
+                                    sequence_no,
+                                    plaintext_raw)?;
 
 
     // TEMP: Add test zero padding
