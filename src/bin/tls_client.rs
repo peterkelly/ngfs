@@ -15,6 +15,7 @@ use torrent::result::GeneralError;
 use torrent::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, BinaryWriter};
 use torrent::crypt::HashAlgorithm;
+use torrent::tls::error::TLSError;
 use torrent::tls::types::handshake::{
     CipherSuite,
     Handshake,
@@ -430,32 +431,27 @@ impl ClientConn {
         }
     }
 
-    // TODO: Make this return (). The only reason it returns a Result, and the only reason why
-    // encrypt_traffic() returns a Result, is that the latter calls UnboundKey::new() because it
-    // does a hkdf_expand_label() each time. We should do the hkdf_expand_label() just once when
-    // we get a new prk, so it doesn't have to be repeated (and potentially fail) on every
-    // encryption call.
     fn append_encrypted(
         &mut self,
-        mut to_encrypt: Vec<u8>,
+        mut data: Vec<u8>,
         content_type: ContentType,
         hash_alg: HashAlgorithm,
         aead_alg: &'static ring::aead::Algorithm,
         traffic_secret: &[u8],
         client_sequence_no: u64,
-    ) -> Result<(), Box<dyn Error>> {
-        to_encrypt.push(content_type.to_raw());
-        let client_finished_enc = encrypt_traffic(
+    ) -> Result<(), TLSError> {
+        data.push(content_type.to_raw());
+        encrypt_traffic(
             hash_alg,
             aead_alg,
             traffic_secret,
             client_sequence_no,
-            &to_encrypt)?;
+            &mut data)?;
 
         let output_record = TLSPlaintext {
             content_type: ContentType::ApplicationData,
             legacy_record_version: 0x0303,
-            fragment: client_finished_enc,
+            fragment: data,
         };
         self.to_send.extend_from_slice(&output_record.to_vec());
         Ok(())
