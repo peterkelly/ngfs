@@ -1,6 +1,5 @@
-use std::error::Error;
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
-use super::super::result::GeneralError;
+use ring::error::Unspecified;
 use super::super::crypt::HashAlgorithm;
 use super::super::util::{vec_with_len};
 use super::types::handshake::{
@@ -15,6 +14,9 @@ use super::types::record::{
     TLSCiphertext,
     ContentType,
     Message,
+};
+use super::error::{
+    TLSError,
 };
 
 fn hkdf_expand_label(
@@ -126,7 +128,7 @@ pub fn encrypt_traffic(
     traffic_secret: &[u8],
     sequence_no: u64,
     input_plaintext: &[u8],
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>, TLSError> {
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
@@ -144,29 +146,28 @@ pub fn encrypt_traffic(
 
     let unbound_key = match UnboundKey::new(aead_alg, &write_key[0..32]) {
         Ok(v) => v,
-        Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
+        Err(Unspecified) => return Err(TLSError::EncryptionFailed),
     };
     let key = LessSafeKey::new(unbound_key);
-    // let additional_data = TLSCiphertext::to_additional_data_fixed(input_plaintext, key.algorithm().tag_len());
 
-    let newlen = input_plaintext.len() + key.algorithm().tag_len();
+    let len = input_plaintext.len() + key.algorithm().tag_len();
 
     let additional_data: [u8; 5] = [
         0x17, // opaque_type = application_data = 23
         0x03, // legacy_record_version = 0x0303
         0x03, // legacy_record_version
-        (newlen >> 8) as u8,
-        newlen as u8,
+        (len >> 8) as u8,
+        len as u8,
     ];
 
 
-    // println!("encrypt_traffic: tag_len = {}", key.algorithm().tag_len());
-    // println!("encrypt_traffic: nonce = {:?}", BinaryData(&nonce_bytes));
-    // println!("encrypt_traffic: aad = {:?}", BinaryData(&additional_data));
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let aad = Aad::from(additional_data);
 
-    key.seal_in_place_append_tag(nonce, aad, &mut tls_ciphertext_data)?;
+    match key.seal_in_place_append_tag(nonce, aad, &mut tls_ciphertext_data) {
+        Ok(()) => (),
+        Err(Unspecified) => return Err(TLSError::EncryptionFailed),
+    };
     Ok(tls_ciphertext_data)
 }
 
@@ -176,7 +177,7 @@ fn decrypt_traffic(
     traffic_secret: &[u8],
     sequence_no: u64,
     plaintext_raw: &[u8],
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>, TLSError> {
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
@@ -190,9 +191,16 @@ fn decrypt_traffic(
         nonce_bytes[i] ^= write_iv[i];
     }
 
-    let (tls_ciphertext, bytes_consumed) = TLSCiphertext::from_raw_data(&plaintext_raw)?;
+    let (tls_ciphertext, bytes_consumed) = match TLSCiphertext::from_raw_data(&plaintext_raw) {
+        Ok(v) => v,
+        Err(_) => return Err(TLSError::DecryptionFailed),
+    };
     if bytes_consumed != plaintext_raw.len() {
-        return Err("bytes_consumed != plaintext_raw.len()".into());
+        return Err(TLSError::DecryptionFailed);
+    }
+
+    if plaintext_raw.len() < 5 {
+        return Err(TLSError::DecryptionFailed);
     }
 
     let mut additional_data: Vec<u8> = Vec::new();
@@ -200,7 +208,7 @@ fn decrypt_traffic(
 
     let unbound_key = match ring::aead::UnboundKey::new(aead_alg, &write_key[0..32]) {
         Ok(v) => v,
-        Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
+        Err(Unspecified) => return Err(TLSError::DecryptionFailed),
     };
     let key = ring::aead::LessSafeKey::new(unbound_key);
 
@@ -209,8 +217,13 @@ fn decrypt_traffic(
 
     let nonce = ring::aead::Nonce::assume_unique_for_key(nonce_bytes);
     let aad = ring::aead::Aad::from(additional_data);
-    let open_result: Result<&mut [u8], ring::error::Unspecified> = key.open_in_place(nonce, aad, &mut work);
-    Ok(open_result?.to_vec())
+
+    let open_result = match key.open_in_place(nonce, aad, &mut work) {
+        Ok(v) => v,
+        Err(Unspecified) => return Err(TLSError::DecryptionFailed),
+    };
+
+    Ok(open_result.to_vec())
 }
 
 pub fn decrypt_message(
@@ -219,17 +232,14 @@ pub fn decrypt_message(
     sequence_no: u64,
     decryption_key: &[u8],
     plaintext_raw: &[u8],
-) -> Result<(Message, Vec<u8>), Box<dyn Error>> {
+) -> Result<(Message, Vec<u8>), TLSError> {
     println!("ApplicationData for server_sequence_no {}", sequence_no);
 
-    let plaintext = match decrypt_traffic(hash_alg,
+    let plaintext = decrypt_traffic(hash_alg,
                                           aead_alg,
                                           decryption_key,
                                           sequence_no,
-                                          plaintext_raw) {
-        Err(e) => return Err(GeneralError::new(format!("key.open_in_place() failed: {}", e))),
-        Ok(plaintext) => plaintext,
-    };
+                                          plaintext_raw)?;
 
 
     // TEMP: Add test zero padding
@@ -243,14 +253,15 @@ pub fn decrypt_message(
         type_offset -= 1;
     }
     if type_offset == 0 {
-        return Err(GeneralError::new("Plaintext: Missing type field"));
+        return Err(TLSError::InvalidPlaintextRecord);
     }
     let inner_content_type = ContentType::from_raw(plaintext[type_offset - 1]);
     let inner_body: &[u8] = &plaintext[0..type_offset - 1];
 
     let mut inner_body_vec: Vec<u8> = Vec::new();
     inner_body_vec.extend_from_slice(inner_body);
-    let message = Message::from_raw(inner_body, inner_content_type)?;
+    let message = Message::from_raw(inner_body, inner_content_type)
+        .map_err(|_| TLSError::InvalidMessageRecord)?;
     println!("======== Received {}", message.name());
 
     Ok((message, inner_body_vec))
