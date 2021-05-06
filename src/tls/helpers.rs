@@ -2,7 +2,7 @@ use std::error::Error;
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use super::super::result::GeneralError;
 use super::super::crypt::HashAlgorithm;
-use super::super::util::{vec_with_len, BinaryData};
+use super::super::util::{vec_with_len};
 use super::types::handshake::{
     // ClientHello,
     ServerHello,
@@ -120,7 +120,7 @@ pub fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Vec
     output
 }
 
-pub fn encrypt_traffic<'a>(
+pub fn encrypt_traffic(
     hash_alg: HashAlgorithm,
     aead_alg: &'static ring::aead::Algorithm,
     traffic_secret: &[u8],
@@ -147,18 +147,30 @@ pub fn encrypt_traffic<'a>(
         Err(e) => return Err(GeneralError::new(format!("UnboundKey::new() failed: {}", e))),
     };
     let key = LessSafeKey::new(unbound_key);
-    let additional_data = TLSCiphertext::to_additional_data(input_plaintext, key.algorithm().tag_len());
-    println!("encrypt_traffic: tag_len = {}", key.algorithm().tag_len());
-    println!("encrypt_traffic: nonce = {:?}", BinaryData(&nonce_bytes));
-    println!("encrypt_traffic: aad = {:?}", BinaryData(&additional_data));
+    // let additional_data = TLSCiphertext::to_additional_data_fixed(input_plaintext, key.algorithm().tag_len());
+
+    let newlen = input_plaintext.len() + key.algorithm().tag_len();
+
+    let additional_data: [u8; 5] = [
+        0x17, // opaque_type = application_data = 23
+        0x03, // legacy_record_version = 0x0303
+        0x03, // legacy_record_version
+        (newlen >> 8) as u8,
+        newlen as u8,
+    ];
+
+
+    // println!("encrypt_traffic: tag_len = {}", key.algorithm().tag_len());
+    // println!("encrypt_traffic: nonce = {:?}", BinaryData(&nonce_bytes));
+    // println!("encrypt_traffic: aad = {:?}", BinaryData(&additional_data));
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-    let aad = Aad::from(additional_data.clone());
+    let aad = Aad::from(additional_data);
 
     key.seal_in_place_append_tag(nonce, aad, &mut tls_ciphertext_data)?;
     Ok(tls_ciphertext_data)
 }
 
-fn decrypt_traffic<'a>(
+fn decrypt_traffic(
     hash_alg: HashAlgorithm,
     aead_alg: &'static ring::aead::Algorithm,
     traffic_secret: &[u8],

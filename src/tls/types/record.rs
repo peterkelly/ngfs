@@ -164,29 +164,6 @@ impl TLSCiphertext {
         let consumed = 5 + length;
         Ok((record, consumed))
     }
-
-    pub fn to_raw_data(encrypted_record: &[u8]) -> Vec<u8> {
-        let mut res: Vec<u8> = Vec::new();
-        let opaque_type: u8 = 23; // = application_data; /* 23 */
-        let legacy_record_version: u16 = 0x0303; // = 0x0303; /* TLS v1.2 */
-        let length = encrypted_record.len() as u16;
-        res.push(opaque_type);
-        res.extend_from_slice(&legacy_record_version.to_be_bytes());
-        res.extend_from_slice(&length.to_be_bytes());
-        res.extend_from_slice(encrypted_record);
-        res
-    }
-
-    pub fn to_additional_data(encrypted_record: &[u8], tag_len: usize) -> Vec<u8> {
-        let mut res: Vec<u8> = Vec::new();
-        let opaque_type: u8 = 23; // = application_data; /* 23 */
-        let legacy_record_version: u16 = 0x0303; // = 0x0303; /* TLS v1.2 */
-        let length = (encrypted_record.len()/* + 5*/ + tag_len) as u16;
-        res.push(opaque_type);
-        res.extend_from_slice(&legacy_record_version.to_be_bytes());
-        res.extend_from_slice(&length.to_be_bytes());
-        res
-    }
 }
 
 pub struct TLSPlaintext {
