@@ -147,14 +147,14 @@ impl ClientHelloSent {
                 };
                 println!("Shared secret = {}", BinaryData(&secret));
 
-                let new_prk = get_derived_prk(self.hash_alg, &self.prk, secret);
+                let new_prk = get_derived_prk(self.hash_alg, &self.prk, secret)?;
 
                 println!("Got expected server hello");
 
                 let thash = transcript_hash(self.hash_alg, &self.transcript);
                 let hs = TrafficSecrets {
-                    client: derive_secret(self.hash_alg, &new_prk, b"c hs traffic", &thash),
-                    server: derive_secret(self.hash_alg, &new_prk, b"s hs traffic", &thash),
+                    client: derive_secret(self.hash_alg, &new_prk, b"c hs traffic", &thash)?,
+                    server: derive_secret(self.hash_alg, &new_prk, b"s hs traffic", &thash)?,
                 };
 
                 println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
@@ -261,30 +261,30 @@ impl ServerHelloReceived {
 
                 println!("    Received Handshake::Finished with {} bytes", finished.data.len());
                 let input_psk: &[u8] = &vec_with_len(self.hash_alg.byte_len());
-                let new_prk = get_derived_prk(self.hash_alg, &self.prk, input_psk);
+                let new_prk = get_derived_prk(self.hash_alg, &self.prk, input_psk)?;
 
                 let thash = transcript_hash(self.hash_alg, &self.transcript);
                 let ap = TrafficSecrets {
-                    client: derive_secret(self.hash_alg, &new_prk, b"c ap traffic", &thash),
-                    server: derive_secret(self.hash_alg, &new_prk, b"s ap traffic", &thash),
+                    client: derive_secret(self.hash_alg, &new_prk, b"c ap traffic", &thash)?,
+                    server: derive_secret(self.hash_alg, &new_prk, b"s ap traffic", &thash)?,
                 };
                 println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
                 println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
 
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(self.hash_alg, &self.handshake_secrets.server, b"finished", &[]);
+                        derive_secret(self.hash_alg, &self.handshake_secrets.server, b"finished", &[])?;
                     {
                         println!("server_finished_key = {:?}", BinaryData(&finished_key));
                         println!();
                         println!("server_finish: handshake_hash = {:?}", BinaryData(&old_transcript_hash));
-                        let verify_data: Vec<u8> = self.hash_alg.hmac_sign(&finished_key, &old_transcript_hash);
+                        let verify_data: Vec<u8> = self.hash_alg.hmac_sign(&finished_key, &old_transcript_hash)?;
                         println!("server_finish: verify_data    = {:?}", BinaryData(&verify_data));
                         println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
                         println!();
                     }
 
-                    if self.hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data) {
+                    if self.hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data)? {
                         println!("Finished (self.hash_alg): Verification succeeded");
                     }
                     else {
@@ -296,7 +296,7 @@ impl ServerHelloReceived {
                 // Send Client Finished message
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(self.hash_alg, &self.handshake_secrets.client, b"finished", &[]);
+                        derive_secret(self.hash_alg, &self.handshake_secrets.client, b"finished", &[])?;
 
                     println!("client_finished_key = {:?}", BinaryData(&finished_key));
                     println!();
@@ -304,11 +304,11 @@ impl ServerHelloReceived {
                              BinaryData(&new_transcript_hash));
 
                     let verify_data: Vec<u8> =
-                        self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash);
+                        self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
                     println!("client_finish: verify_data    = {:?}", BinaryData(&verify_data));
 
                     let client_finished = Handshake::Finished(Finished {
-                        data: self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash),
+                        data: self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
                     });
 
                     let mut writer = BinaryWriter::new();

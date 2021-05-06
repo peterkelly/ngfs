@@ -139,12 +139,11 @@ fn test_dh() -> Result<(), Box<dyn Error>> {
     println!("key_material1 = {}", BinaryData(&key_material1));
     println!("key_material2 = {}", BinaryData(&key_material2));
 
-    use crypto::sha2::Sha384;
-    let digest = crypto::sha2::Sha384::new();
+    let hash_alg = HashAlgorithm::SHA384;
     let test_prk: Vec<u8> = Vec::new();
     let test_info: Vec<u8> = Vec::new();
     let mut test_okm: [u8; 32] = [0; 32];
-    crypto::hkdf::hkdf_expand(digest, &test_prk, &test_info, &mut test_okm);
+    hash_alg.hkdf_expand(&test_prk, &test_info, &mut test_okm)?;
 
     Ok(())
 }

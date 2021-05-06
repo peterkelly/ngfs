@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rust-crypto = "0.2.36"
+crypto = { version = "0.2.0", features = ["aead", "digest"] }
 tokio = { version = "1.0.1", features = ["full"] }
 futures = "0.3.8"
 rand = "0.8.0"
@@ -19,4 +19,7 @@ rustls = { version = "0.19.1", features = ["logging", "dangerous_configuration"]
 webpki = "0.21.0"
 webpki-roots = "0.21.0"
 sha-1 = "0.9.5"
+sha2 = "0.9.4"
+hmac = "0.11.0"
+hkdf = "0.11.0"
 generic-array = "0.14.4"

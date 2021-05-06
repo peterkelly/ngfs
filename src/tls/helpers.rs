@@ -1,7 +1,7 @@
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad};
 use ring::error::Unspecified;
-use super::super::crypt::HashAlgorithm;
+use super::super::crypt::{HashAlgorithm, CryptError};
 use super::super::util::{vec_with_len};
 use super::types::handshake::{
     // ClientHello,
@@ -26,7 +26,7 @@ fn hkdf_expand_label(
     label_suffix: &[u8],
     context: &[u8],
     okm: &mut [u8],
-) {
+) -> Result<(), CryptError> {
     let length_field = (okm.len() as u16).to_be_bytes();
 
     let mut label_field: Vec<u8> = Vec::new();
@@ -40,14 +40,15 @@ fn hkdf_expand_label(
     hkdf_label.push(context.len() as u8);
     hkdf_label.extend_from_slice(context);
 
-    alg.hkdf_expand(prk, &hkdf_label, okm);
+    alg.hkdf_expand(prk, &hkdf_label, okm)?;
+    Ok(())
 }
 
-pub fn derive_secret(alg: HashAlgorithm, secret: &[u8], label: &[u8], thash: &[u8]) -> Vec<u8> {
+pub fn derive_secret(alg: HashAlgorithm, secret: &[u8], label: &[u8], thash: &[u8]) -> Result<Vec<u8>, CryptError> {
     let len = alg.byte_len();
     let mut result: Vec<u8> = vec_with_len(len);
-    hkdf_expand_label(alg, &secret, label, &thash, &mut result);
-    result
+    hkdf_expand_label(alg, &secret, label, &thash, &mut result)?;
+    Ok(result)
 }
 
 // fn get_client_hello_x25519_key_share(client_hello: &ClientHello) -> Option<Vec<u8>> {
@@ -108,16 +109,12 @@ fn empty_transcript_hash(alg: HashAlgorithm) -> Vec<u8> {
 pub fn get_zero_prk(alg: HashAlgorithm) -> Vec<u8> {
     let input_zero: &[u8] = &vec_with_len(alg.byte_len());
     let input_psk: &[u8] = &vec_with_len(alg.byte_len());
-    let mut output: Vec<u8> = vec_with_len(alg.byte_len());
-    alg.hkdf_extract(&input_zero, input_psk, &mut output);
-    output
+    alg.hkdf_extract(&input_zero, input_psk)
 }
 
-pub fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Vec<u8> {
-    let salt_bytes: Vec<u8> = derive_secret(alg, &prbytes, b"derived", &empty_transcript_hash(alg));
-    let mut output: Vec<u8> = vec_with_len(alg.byte_len());
-    alg.hkdf_extract(&salt_bytes, secret, &mut output);
-    output
+pub fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Result<Vec<u8>, CryptError> {
+    let salt_bytes: Vec<u8> = derive_secret(alg, &prbytes, b"derived", &empty_transcript_hash(alg))?;
+    Ok(alg.hkdf_extract(&salt_bytes, secret))
 }
 
 pub fn encrypt_traffic(
@@ -130,8 +127,10 @@ pub fn encrypt_traffic(
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
-    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key);
-    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv);
+    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key)
+        .map_err(|_| TLSError::EncryptionFailed)?;
+    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv)
+        .map_err(|_| TLSError::EncryptionFailed)?;
 
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
@@ -177,8 +176,10 @@ fn decrypt_traffic(
     let mut write_key: [u8; 32] = [0; 32];
     let mut write_iv: [u8; 12] = [0; 12];
 
-    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key);
-    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv);
+    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key)
+        .map_err(|_| TLSError::DecryptionFailed)?;
+    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv)
+        .map_err(|_| TLSError::DecryptionFailed)?;
 
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
