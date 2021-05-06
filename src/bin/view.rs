@@ -9,8 +9,6 @@ use std::error::Error;
 use torrent::bencoding;
 use torrent::result::{GeneralError, general_error};
 use torrent::torrent::{Torrent};
-use crypto::digest::Digest;
-use crypto::sha1::Sha1;
 
 fn decode(data: &[u8]) -> Result<bencoding::Value, Box<dyn Error>> {
     match bencoding::parse(data) {

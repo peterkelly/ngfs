@@ -21,19 +21,8 @@ use tokio::sync::{Notify};
 use futures::future::join;
 use torrent::util::{from_hex, escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
-// use torrent::tls::types::alert::*;
-// use torrent::tls::types::handshake::*;
-// use torrent::tls::types::extension::*;
-// use torrent::tls::types::record::*;
-// use torrent::crypt::*;
 use torrent::result::GeneralError;
 use torrent::protobuf::VarInt;
-// use crypto::digest::Digest;
-// use crypto::sha2::Sha384;
-// use crypto::hkdf::{hkdf_extract, hkdf_expand};
-// use crypto::aes_gcm::AesGcm;
-// use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
-// use ring::rand::SystemRandom;
 use rustls::Session;
 
 async fn read_multistream_varint(reader: &mut (impl AsyncRead + Unpin)) -> Result<usize, Box<dyn Error>> {

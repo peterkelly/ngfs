@@ -18,3 +18,5 @@ ring = { version = "0.16", features = ["alloc", "dev_urandom_fallback", "std"] }
 rustls = { version = "0.19.1", features = ["logging", "dangerous_configuration"] }
 webpki = "0.21.0"
 webpki-roots = "0.21.0"
+sha-1 = "0.9.5"
+generic-array = "0.14.4"

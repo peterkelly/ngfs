@@ -7,8 +7,7 @@
 
 use std::fmt;
 use std::error::Error;
-use crypto::digest::Digest;
-use crypto::sha1::Sha1;
+use sha1::{Sha1, Digest};
 use super::bencoding;
 use super::bencoding::{Value};
 use super::result::{general_error};
@@ -124,9 +123,8 @@ impl Torrent {
         }
 
         let mut hasher: Sha1 = Sha1::new();
-        let mut hashdata: [u8; 20] = [0; 20];
-        hasher.input(&data[info.loc.start..info.loc.end]);
-        hasher.result(&mut hashdata);
+        hasher.update(&data[info.loc.start..info.loc.end]);
+        let hashdata: [u8; 20] = hasher.finalize().into();
 
         let info_hash = InfoHash { data: hashdata };
         Ok(Torrent {
