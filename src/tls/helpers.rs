@@ -21,13 +21,13 @@ use super::error::{
 pub struct EncryptionKey {
     pub raw: Vec<u8>,
     pub aead_alg: AeadAlgorithm,
-    pub write_key: [u8; 32],
+    pub write_key: Vec<u8>,
     pub write_iv: [u8; 12],
 }
 
 impl EncryptionKey {
     pub fn new(raw: Vec<u8>, hash_alg: HashAlgorithm, aead_alg: AeadAlgorithm) -> Result<Self, CryptError> {
-        let mut write_key: [u8; 32] = [0; 32];
+        let mut write_key = vec_with_len(aead_alg.key_len());
         let mut write_iv: [u8; 12] = [0; 12];
         hkdf_expand_label(hash_alg, &raw, b"key", &[], &mut write_key)?;
         hkdf_expand_label(hash_alg, &raw, b"iv", &[], &mut write_iv)?;
@@ -160,7 +160,7 @@ pub fn encrypt_traffic(
     ];
 
     traffic_secret.aead_alg.encrypt_in_place(
-        &traffic_secret.write_key[0..32],
+        &traffic_secret.write_key,
         &nonce_bytes,
         &additional_data,
         inout)
@@ -192,11 +192,20 @@ fn decrypt_traffic(
         return Err(TLSError::DecryptionFailed);
     }
 
+    // let mut associated_data: [u8; 5] = [0; 5];
+    let associated_data: [u8; 5] = [
+        plaintext_raw[0],
+        plaintext_raw[1],
+        plaintext_raw[2],
+        plaintext_raw[3],
+        plaintext_raw[4],
+    ];
+
     let mut work: Vec<u8> = tls_ciphertext.encrypted_record;
     traffic_secret.aead_alg.decrypt_in_place(
-        &traffic_secret.write_key[0..32],
+        &traffic_secret.write_key,
         &nonce_bytes,
-        &plaintext_raw[0..5],
+        &associated_data,
         &mut work)
         .map_err(|_| TLSError::DecryptionFailed)?;
     Ok(work)

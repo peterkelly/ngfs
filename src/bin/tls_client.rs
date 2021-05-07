@@ -61,9 +61,9 @@ fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     random_fixed.copy_from_slice(&random);
 
     let mut cipher_suites = Vec::<CipherSuite>::new();
-    cipher_suites.push(CipherSuite::TLS_AES_256_GCM_SHA384);
-    cipher_suites.push(CipherSuite::TLS_CHACHA20_POLY1305_SHA256);
     cipher_suites.push(CipherSuite::TLS_AES_128_GCM_SHA256);
+    cipher_suites.push(CipherSuite::TLS_AES_256_GCM_SHA384);
+    // cipher_suites.push(CipherSuite::TLS_CHACHA20_POLY1305_SHA256);
     cipher_suites.push(CipherSuite::Unknown(0x00ff));
 
     let extensions = vec![
@@ -125,9 +125,6 @@ fn transcript_hash(alg: HashAlgorithm, transcript: &[u8]) -> Vec<u8> {
 }
 
 struct ClientHelloSent {
-    hash_alg: HashAlgorithm,
-    aead_alg: AeadAlgorithm,
-    prk: Vec<u8>,
     transcript: Vec<u8>,
     my_private_key: Option<EphemeralPrivateKey>,
 }
@@ -140,39 +137,60 @@ impl ClientHelloSent {
 
         match handshake {
             Handshake::ServerHello(server_hello) => {
-                let my_private_key2 = self.my_private_key.take().unwrap();
+                let hash_alg: HashAlgorithm;
+                let aead_alg: AeadAlgorithm;
 
+                match server_hello.cipher_suite {
+                    CipherSuite::TLS_AES_128_GCM_SHA256 => {
+                        println!("Received ServerHello: Using cipher suite TLS_AES_128_GCM_SHA256");
+                        hash_alg = HashAlgorithm::SHA256;
+                        aead_alg = AeadAlgorithm::AES_128_GCM_SHA256;
+                    }
+                    CipherSuite::TLS_AES_256_GCM_SHA384 => {
+                        println!("Received ServerHello: Using cipher suite TLS_AES_256_GCM_SHA384");
+                        hash_alg = HashAlgorithm::SHA384;
+                        aead_alg = AeadAlgorithm::AES_256_GCM_SHA384;
+                    }
+                    _ => {
+                        return Err("Unsupported cipher suite".into());
+                    }
+                };
+
+                // let prk = get_zero_prk(hash_alg);
+
+                let my_private_key2 = self.my_private_key.take().unwrap();
                 let secret: &[u8] = &match get_server_hello_x25519_shared_secret(my_private_key2, &server_hello) {
                     Some(r) => r,
                     None => return Err("Cannot get shared secret".into()),
                 };
                 println!("Shared secret = {}", BinaryData(&secret));
 
-                let new_prk = get_derived_prk(self.hash_alg, &self.prk, secret)?;
+                let prk = get_derived_prk(hash_alg, &get_zero_prk(hash_alg), secret)?;
 
                 println!("Got expected server hello");
 
-                let thash = transcript_hash(self.hash_alg, &self.transcript);
+                let thash = transcript_hash(hash_alg, &self.transcript);
                 let hs = TrafficSecrets {
                     client: EncryptionKey::new(
-                        derive_secret(self.hash_alg, &new_prk, b"c hs traffic", &thash)?,
-                        self.hash_alg,
-                        self.aead_alg)?,
+                        derive_secret(hash_alg, &prk, b"c hs traffic", &thash)?,
+                        hash_alg,
+                        aead_alg)?,
                     server: EncryptionKey::new(
-                        derive_secret(self.hash_alg, &new_prk, b"s hs traffic", &thash)?,
-                        self.hash_alg,
-                        self.aead_alg)?,
+                        derive_secret(hash_alg, &prk, b"s hs traffic", &thash)?,
+                        hash_alg,
+                        aead_alg)?,
                 };
 
                 println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client.raw));
                 println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server.raw));
 
                 // handshake_traffic_secrets = Some(hs);
+                //
 
                 Ok(Some(State::ServerHelloReceived(ServerHelloReceived {
-                    hash_alg: self.hash_alg,
-                    aead_alg: self.aead_alg,
-                    prk: new_prk,
+                    hash_alg,
+                    aead_alg,
+                    prk,
                     transcript: self.transcript.clone(), // TODO: Avoid clone
                     handshake_secrets: hs,
                     server_sequence_no: 0,
@@ -642,9 +660,6 @@ fn handshake_to_record(handshake: &Handshake) -> Result<TLSPlaintext, Box<dyn Er
 }
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
-    let hash_alg = HashAlgorithm::SHA384;
-    let aead_alg = AeadAlgorithm::AES_256_GCM_SHA384;
-
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
     let my_public_key = my_private_key.compute_public_key()?;
@@ -669,9 +684,6 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     initial_transcript.extend_from_slice(&client_hello_bytes);
     let mut client = Client {
         state: State::ClientHelloSent(ClientHelloSent {
-            hash_alg: hash_alg,
-            aead_alg: aead_alg,
-            prk: get_zero_prk(hash_alg),
             transcript: initial_transcript,
             my_private_key: my_private_key,
         }),
