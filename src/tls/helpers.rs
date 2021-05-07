@@ -18,6 +18,28 @@ use super::error::{
     TLSError,
 };
 
+pub struct EncryptionKey {
+    pub raw: Vec<u8>,
+    pub aead_alg: AeadAlgorithm,
+    pub write_key: [u8; 32],
+    pub write_iv: [u8; 12],
+}
+
+impl EncryptionKey {
+    pub fn new(raw: Vec<u8>, hash_alg: HashAlgorithm, aead_alg: AeadAlgorithm) -> Result<Self, CryptError> {
+        let mut write_key: [u8; 32] = [0; 32];
+        let mut write_iv: [u8; 12] = [0; 12];
+        hkdf_expand_label(hash_alg, &raw, b"key", &[], &mut write_key)?;
+        hkdf_expand_label(hash_alg, &raw, b"iv", &[], &mut write_iv)?;
+        Ok(EncryptionKey {
+            raw,
+            aead_alg,
+            write_key,
+            write_iv,
+        })
+    }
+}
+
 fn hkdf_expand_label(
     alg: HashAlgorithm,
     prk: &[u8],
@@ -116,28 +138,18 @@ pub fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Res
 }
 
 pub fn encrypt_traffic(
-    hash_alg: HashAlgorithm,
-    aead_alg: AeadAlgorithm,
-    traffic_secret: &[u8],
+    traffic_secret: &EncryptionKey,
     sequence_no: u64,
     inout: &mut Vec<u8>,
 ) -> Result<(), TLSError> {
-    let mut write_key: [u8; 32] = [0; 32];
-    let mut write_iv: [u8; 12] = [0; 12];
-
-    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key)
-        .map_err(|_| TLSError::EncryptionFailed)?;
-    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv)
-        .map_err(|_| TLSError::EncryptionFailed)?;
-
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
     &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
     for i in 0..12 {
-        nonce_bytes[i] ^= write_iv[i];
+        nonce_bytes[i] ^= traffic_secret.write_iv[i];
     }
 
-    let len = inout.len() + aead_alg.tag_len();
+    let len = inout.len() + traffic_secret.aead_alg.tag_len();
 
     let additional_data: [u8; 5] = [
         0x17, // opaque_type = application_data = 23
@@ -147,32 +159,25 @@ pub fn encrypt_traffic(
         len as u8,
     ];
 
-
-    aead_alg.encrypt_in_place(&write_key[0..32], &nonce_bytes, &additional_data, inout)
+    traffic_secret.aead_alg.encrypt_in_place(
+        &traffic_secret.write_key[0..32],
+        &nonce_bytes,
+        &additional_data,
+        inout)
         .map_err(|_| TLSError::EncryptionFailed)?;
     Ok(())
 }
 
 fn decrypt_traffic(
-    hash_alg: HashAlgorithm,
-    aead_alg: AeadAlgorithm,
-    traffic_secret: &[u8],
+    traffic_secret: &EncryptionKey,
     sequence_no: u64,
     plaintext_raw: &[u8],
 ) -> Result<Vec<u8>, TLSError> {
-    let mut write_key: [u8; 32] = [0; 32];
-    let mut write_iv: [u8; 12] = [0; 12];
-
-    hkdf_expand_label(hash_alg, traffic_secret, b"key", &[], &mut write_key)
-        .map_err(|_| TLSError::DecryptionFailed)?;
-    hkdf_expand_label(hash_alg, traffic_secret, b"iv", &[], &mut write_iv)
-        .map_err(|_| TLSError::DecryptionFailed)?;
-
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
     &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
     for i in 0..12 {
-        nonce_bytes[i] ^= write_iv[i];
+        nonce_bytes[i] ^= traffic_secret.write_iv[i];
     }
 
     let (tls_ciphertext, bytes_consumed) = match TLSCiphertext::from_raw_data(&plaintext_raw) {
@@ -188,25 +193,23 @@ fn decrypt_traffic(
     }
 
     let mut work: Vec<u8> = tls_ciphertext.encrypted_record;
-    aead_alg.decrypt_in_place(&write_key[0..32], &nonce_bytes, &plaintext_raw[0..5], &mut work)
+    traffic_secret.aead_alg.decrypt_in_place(
+        &traffic_secret.write_key[0..32],
+        &nonce_bytes,
+        &plaintext_raw[0..5],
+        &mut work)
         .map_err(|_| TLSError::DecryptionFailed)?;
     Ok(work)
 }
 
 pub fn decrypt_message(
-    hash_alg: HashAlgorithm,
-    aead_alg: AeadAlgorithm,
     sequence_no: u64,
-    decryption_key: &[u8],
+    decryption_key: &EncryptionKey,
     plaintext_raw: &[u8],
 ) -> Result<(Message, Vec<u8>), TLSError> {
     println!("ApplicationData for server_sequence_no {}", sequence_no);
 
-    let plaintext = decrypt_traffic(hash_alg,
-                                    aead_alg,
-                                    decryption_key,
-                                    sequence_no,
-                                    plaintext_raw)?;
+    let plaintext = decrypt_traffic(decryption_key, sequence_no, plaintext_raw)?;
 
 
     // TEMP: Add test zero padding

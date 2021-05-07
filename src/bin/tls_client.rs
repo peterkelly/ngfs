@@ -40,6 +40,7 @@ use torrent::tls::types::record::{
     TLSPlaintextError,
 };
 use torrent::tls::helpers::{
+    EncryptionKey,
     derive_secret,
     get_server_hello_x25519_shared_secret,
     get_zero_prk,
@@ -153,12 +154,18 @@ impl ClientHelloSent {
 
                 let thash = transcript_hash(self.hash_alg, &self.transcript);
                 let hs = TrafficSecrets {
-                    client: derive_secret(self.hash_alg, &new_prk, b"c hs traffic", &thash)?,
-                    server: derive_secret(self.hash_alg, &new_prk, b"s hs traffic", &thash)?,
+                    client: EncryptionKey::new(
+                        derive_secret(self.hash_alg, &new_prk, b"c hs traffic", &thash)?,
+                        self.hash_alg,
+                        self.aead_alg)?,
+                    server: EncryptionKey::new(
+                        derive_secret(self.hash_alg, &new_prk, b"s hs traffic", &thash)?,
+                        self.hash_alg,
+                        self.aead_alg)?,
                 };
 
-                println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client));
-                println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server));
+                println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client.raw));
+                println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server.raw));
 
                 // handshake_traffic_secrets = Some(hs);
 
@@ -209,10 +216,8 @@ impl ServerHelloReceived {
 
         let old_transcript_hash: Vec<u8> = transcript_hash(self.hash_alg, &self.transcript);
         let (message, inner_body_vec) = decrypt_message(
-            self.hash_alg,
-            self.aead_alg,
             self.server_sequence_no,
-            decryption_key,
+            &decryption_key,
             &plaintext_raw)?;
         self.server_sequence_no += 1;
         self.transcript.extend_from_slice(&inner_body_vec);
@@ -265,15 +270,21 @@ impl ServerHelloReceived {
 
                 let thash = transcript_hash(self.hash_alg, &self.transcript);
                 let ap = TrafficSecrets {
-                    client: derive_secret(self.hash_alg, &new_prk, b"c ap traffic", &thash)?,
-                    server: derive_secret(self.hash_alg, &new_prk, b"s ap traffic", &thash)?,
+                    client: EncryptionKey::new(
+                        derive_secret(self.hash_alg, &new_prk, b"c ap traffic", &thash)?,
+                        self.hash_alg,
+                        self.aead_alg)?,
+                    server: EncryptionKey::new(
+                        derive_secret(self.hash_alg, &new_prk, b"s ap traffic", &thash)?,
+                        self.hash_alg,
+                        self.aead_alg)?,
                 };
-                println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client));
-                println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server));
+                println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client.raw));
+                println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server.raw));
 
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(self.hash_alg, &self.handshake_secrets.server, b"finished", &[])?;
+                        derive_secret(self.hash_alg, &self.handshake_secrets.server.raw, b"finished", &[])?;
                     {
                         println!("server_finished_key = {:?}", BinaryData(&finished_key));
                         println!();
@@ -296,7 +307,7 @@ impl ServerHelloReceived {
                 // Send Client Finished message
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(self.hash_alg, &self.handshake_secrets.client, b"finished", &[])?;
+                        derive_secret(self.hash_alg, &self.handshake_secrets.client.raw, b"finished", &[])?;
 
                     println!("client_finished_key = {:?}", BinaryData(&finished_key));
                     println!();
@@ -317,8 +328,6 @@ impl ServerHelloReceived {
                     conn.append_encrypted(
                         client_finished_bytes,          // to_encrypt
                         ContentType::Handshake,         // content_type
-                        self.hash_alg,                  // hash_alg
-                        self.aead_alg,                  // aead_alg
                         &self.handshake_secrets.client, // traffic_secret
                         0,                              // client_sequence_no
                     )?;
@@ -333,8 +342,6 @@ impl ServerHelloReceived {
                     conn.append_encrypted(
                         request,                      // to_encrypt
                         ContentType::ApplicationData, // content_type
-                        self.hash_alg,                // hash_alg
-                        self.aead_alg,                // aead_alg
                         &ap.client,                   // traffic_secret
                         client_sequence_no,           // client_sequence_no
                     )?;
@@ -385,10 +392,8 @@ impl Established {
         let decryption_key = &self.application_secrets.server;
 
         let (message, _) = decrypt_message(
-            self.hash_alg,
-            self.aead_alg,
             self.server_sequence_no,
-            decryption_key,
+            &decryption_key,
             &plaintext_raw)?;
         self.server_sequence_no += 1;
 
@@ -412,8 +417,8 @@ impl Established {
 }
 
 struct TrafficSecrets {
-    client: Vec<u8>,
-    server: Vec<u8>,
+    client: EncryptionKey,
+    server: EncryptionKey,
 }
 
 struct ClientConn {
@@ -431,15 +436,11 @@ impl ClientConn {
         &mut self,
         mut data: Vec<u8>,
         content_type: ContentType,
-        hash_alg: HashAlgorithm,
-        aead_alg: AeadAlgorithm,
-        traffic_secret: &[u8],
+        traffic_secret: &EncryptionKey,
         client_sequence_no: u64,
     ) -> Result<(), TLSError> {
         data.push(content_type.to_raw());
         encrypt_traffic(
-            hash_alg,
-            aead_alg,
             traffic_secret,
             client_sequence_no,
             &mut data)?;
