@@ -21,6 +21,7 @@ use torrent::tls::types::handshake::{
     Handshake,
     ClientHello,
     Finished,
+    Certificate,
 };
 use torrent::tls::types::extension::{
     ECPointFormat,
@@ -188,12 +189,14 @@ impl ClientHelloSent {
                 //
 
                 Ok(Some(State::ServerHelloReceived(ServerHelloReceived {
-                    hash_alg,
-                    aead_alg,
-                    prk,
-                    transcript: self.transcript.clone(), // TODO: Avoid clone
-                    handshake_secrets: hs,
-                    server_sequence_no: 0,
+                    common: HandshakeCommon {
+                        hash_alg,
+                        aead_alg,
+                        prk,
+                        transcript: self.transcript.clone(), // TODO: Avoid clone
+                        handshake_secrets: hs,
+                        server_sequence_no: 0,
+                    }
                 })))
             }
             _ => {
@@ -210,13 +213,31 @@ impl ClientHelloSent {
     }
 }
 
-struct ServerHelloReceived {
+#[derive(Clone)] // TODO: Avoid need for clone
+struct HandshakeCommon {
     hash_alg: HashAlgorithm,
     aead_alg: AeadAlgorithm,
     prk: Vec<u8>,
     transcript: Vec<u8>,
     handshake_secrets: TrafficSecrets,
     server_sequence_no: u64,
+}
+
+impl HandshakeCommon {
+    fn decrypt_next_message(&mut self, plaintext_raw: Vec<u8>) -> Result<Message, Box<dyn Error>> {
+        // TODO: Cater for alerts
+        let (message, inner_body_vec) = decrypt_message(
+            self.server_sequence_no,
+            &self.handshake_secrets.server,
+            &plaintext_raw)?;
+        self.server_sequence_no += 1;
+        self.transcript.extend_from_slice(&inner_body_vec);
+        Ok(message)
+    }
+}
+
+struct ServerHelloReceived {
+    common: HandshakeCommon,
 }
 
 impl ServerHelloReceived {
@@ -227,51 +248,49 @@ impl ServerHelloReceived {
     }
 
     fn application_data(&mut self,
-                        conn: &mut ClientConn,
+                        _conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
                         plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
-        let decryption_key = &self.handshake_secrets.server;
-
-        let old_transcript_hash: Vec<u8> = transcript_hash(self.hash_alg, &self.transcript);
-        let (message, inner_body_vec) = decrypt_message(
-            self.server_sequence_no,
-            &decryption_key,
-            &plaintext_raw)?;
-        self.server_sequence_no += 1;
-        self.transcript.extend_from_slice(&inner_body_vec);
-
-        let new_transcript_hash: Vec<u8> = transcript_hash(self.hash_alg, &self.transcript);
-        // println!("transcript hash = {:?}", BinaryData(&transcript_hash(self.hash_alg, &self.transcript)));
-
-        // println!("inner_content_type = {:?}", inner_content_type);
-        // println!("inner_body.len() = {}", inner_body.len());
-
-
-        // println!("plaintext =");
-        // println!("{:#?}", Indent(&DebugHexDump(&plaintext)));
-        // println!("inner_body =");
-        // println!("{:#?}", Indent(&DebugHexDump(&inner_body)));
-
+        let message = self.common.decrypt_next_message(plaintext_raw)?;
 
         match message {
             Message::Handshake(Handshake::Certificate(certificate)) => {
-
                 println!("    Received Handshake::Certificate");
-                println!("        certificate_request_context.len() = {}",
-                    certificate.certificate_request_context.len());
-                println!("        certificate_list.len() = {}",
-                    certificate.certificate_list.len());
-
-                println!("    This is a certificate handshake");
-                for entry in certificate.certificate_list.iter() {
-                    println!("    - entry");
-                    let filename = "certificate.crt";
-                    std::fs::write(filename, &entry.data)?;
-                    println!("    Wrote to {}", filename);
-                }
-                // println!("handshake = {:#?}", inner_handshake);
-
+                return Ok(Some(State::ServerCertificateReceived(ServerCertificateReceived {
+                    common: self.common.clone(), // TODO: Avoid clone
+                    server_certificate: certificate,
+                })));
             }
+            _ => {
+                println!("Unexpected message type {}", message.name());
+            }
+        }
+        Ok(None)
+    }
+}
+
+struct ServerCertificateReceived {
+    common: HandshakeCommon,
+    server_certificate: Certificate,
+}
+
+impl ServerCertificateReceived {
+    fn handshake(&mut self,
+                 _handshake: &Handshake,
+                 _handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+        Err(GeneralError::new("Received Handshake in ServerCertificateReceived state"))
+    }
+
+    fn application_data(&mut self,
+                        conn: &mut ClientConn,
+                        _plaintext: TLSPlaintext,
+                        plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+
+        let old_transcript_hash: Vec<u8> = transcript_hash(self.common.hash_alg, &self.common.transcript);
+        let message = self.common.decrypt_next_message(plaintext_raw)?;
+        let new_transcript_hash: Vec<u8> = transcript_hash(self.common.hash_alg, &self.common.transcript);
+
+        match message {
             Message::Handshake(Handshake::CertificateVerify(certificate_verify)) => {
 
                 println!("    Received Handshake::CertificateVerify with algorithm {:?} and {} signature bytes",
@@ -281,43 +300,46 @@ impl ServerHelloReceived {
 
             }
             Message::Handshake(Handshake::Finished(finished)) => {
+                let hash_alg = self.common.hash_alg;
+                let aead_alg = self.common.aead_alg;
+                let handshake_secrets = &self.common.handshake_secrets;
 
                 println!("    Received Handshake::Finished with {} bytes", finished.data.len());
-                let input_psk: &[u8] = &vec_with_len(self.hash_alg.byte_len());
-                let new_prk = get_derived_prk(self.hash_alg, &self.prk, input_psk)?;
+                let input_psk: &[u8] = &vec_with_len(hash_alg.byte_len());
+                let new_prk = get_derived_prk(hash_alg, &self.common.prk, input_psk)?;
 
-                let thash = transcript_hash(self.hash_alg, &self.transcript);
+                let thash = transcript_hash(hash_alg, &self.common.transcript);
                 let ap = TrafficSecrets {
                     client: EncryptionKey::new(
-                        derive_secret(self.hash_alg, &new_prk, b"c ap traffic", &thash)?,
-                        self.hash_alg,
-                        self.aead_alg)?,
+                        derive_secret(hash_alg, &new_prk, b"c ap traffic", &thash)?,
+                        hash_alg,
+                        aead_alg)?,
                     server: EncryptionKey::new(
-                        derive_secret(self.hash_alg, &new_prk, b"s ap traffic", &thash)?,
-                        self.hash_alg,
-                        self.aead_alg)?,
+                        derive_secret(hash_alg, &new_prk, b"s ap traffic", &thash)?,
+                        hash_alg,
+                        aead_alg)?,
                 };
                 println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client.raw));
                 println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server.raw));
 
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(self.hash_alg, &self.handshake_secrets.server.raw, b"finished", &[])?;
+                        derive_secret(hash_alg, &handshake_secrets.server.raw, b"finished", &[])?;
                     {
                         println!("server_finished_key = {:?}", BinaryData(&finished_key));
                         println!();
                         println!("server_finish: handshake_hash = {:?}", BinaryData(&old_transcript_hash));
-                        let verify_data: Vec<u8> = self.hash_alg.hmac_sign(&finished_key, &old_transcript_hash)?;
+                        let verify_data: Vec<u8> = hash_alg.hmac_sign(&finished_key, &old_transcript_hash)?;
                         println!("server_finish: verify_data    = {:?}", BinaryData(&verify_data));
                         println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
                         println!();
                     }
 
-                    if self.hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data)? {
-                        println!("Finished (self.hash_alg): Verification succeeded");
+                    if hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data)? {
+                        println!("Finished (hash_alg): Verification succeeded");
                     }
                     else {
-                        println!("Finished (self.hash_alg): Verification failed");
+                        println!("Finished (hash_alg): Verification failed");
                         return Err(GeneralError::new("Incorrect finished data"));
                     }
                 }
@@ -325,7 +347,7 @@ impl ServerHelloReceived {
                 // Send Client Finished message
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(self.hash_alg, &self.handshake_secrets.client.raw, b"finished", &[])?;
+                        derive_secret(hash_alg, &handshake_secrets.client.raw, b"finished", &[])?;
 
                     println!("client_finished_key = {:?}", BinaryData(&finished_key));
                     println!();
@@ -333,11 +355,11 @@ impl ServerHelloReceived {
                              BinaryData(&new_transcript_hash));
 
                     let verify_data: Vec<u8> =
-                        self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
+                        hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
                     println!("client_finish: verify_data    = {:?}", BinaryData(&verify_data));
 
                     let client_finished = Handshake::Finished(Finished {
-                        data: self.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
+                        data: hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
                     });
 
                     let mut writer = BinaryWriter::new();
@@ -346,7 +368,7 @@ impl ServerHelloReceived {
                     conn.append_encrypted(
                         client_finished_bytes,          // to_encrypt
                         ContentType::Handshake,         // content_type
-                        &self.handshake_secrets.client, // traffic_secret
+                        &handshake_secrets.client, // traffic_secret
                         0,                              // client_sequence_no
                     )?;
                 }
@@ -370,8 +392,8 @@ impl ServerHelloReceived {
 
                 // println!("handshake = {:#?}", inner_handshake);
                 return Ok(Some(State::Established(Established {
-                    hash_alg: self.hash_alg,
-                    aead_alg: self.aead_alg,
+                    hash_alg: self.common.hash_alg,
+                    aead_alg: self.common.aead_alg,
                     prk: new_prk,
                     application_secrets: ap,
                     client_sequence_no: 0,
@@ -386,6 +408,7 @@ impl ServerHelloReceived {
         Ok(None)
     }
 }
+
 
 struct Established {
     hash_alg: HashAlgorithm,
@@ -434,6 +457,7 @@ impl Established {
     }
 }
 
+#[derive(Clone)] // TODO: Avoid need for clone
 struct TrafficSecrets {
     client: EncryptionKey,
     server: EncryptionKey,
@@ -485,6 +509,7 @@ impl ClientConn {
 enum State {
     ClientHelloSent(ClientHelloSent),
     ServerHelloReceived(ServerHelloReceived),
+    ServerCertificateReceived(ServerCertificateReceived),
     Established(Established),
 }
 
@@ -534,6 +559,7 @@ impl Client {
             let new_state_opt = match &mut self.state {
                 State::ClientHelloSent(state) => state.handshake(&server_handshake, handshake_bytes)?,
                 State::ServerHelloReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
+                State::ServerCertificateReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
                 State::Established(state) => state.handshake(&server_handshake, handshake_bytes)?,
             };
 
@@ -552,6 +578,7 @@ impl Client {
         let new_state_opt = match &mut self.state {
             State::ClientHelloSent(state) => state.application_data(conn, plaintext, plaintext_raw)?,
             State::ServerHelloReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
+            State::ServerCertificateReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
             State::Established(state) => state.application_data(conn, plaintext, plaintext_raw)?,
         };
 

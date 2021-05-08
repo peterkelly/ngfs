@@ -18,6 +18,7 @@ use super::error::{
     TLSError,
 };
 
+#[derive(Clone)] // TODO: Avoid need for clone
 pub struct EncryptionKey {
     pub raw: Vec<u8>,
     pub aead_alg: AeadAlgorithm,
