@@ -40,6 +40,9 @@ use torrent::tls::types::record::{
     TLSPlaintext,
     TLSPlaintextError,
 };
+use torrent::tls::types::alert::{
+    Alert,
+};
 use torrent::tls::helpers::{
     EncryptionKey,
     derive_secret,
@@ -515,6 +518,7 @@ enum State {
 
 struct Client {
     state: State,
+    received_alert: Option<Alert>,
 }
 
 impl Client {
@@ -536,9 +540,16 @@ impl Client {
 
     fn alert(&mut self,
              _conn: &mut ClientConn,
-             _plaintext: TLSPlaintext,
-             _plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
-        println!("Unsupported record type: Alert");
+             plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
+        // TODO: Have this function passed a *complete* plaintext data, even if the alert data
+        // is spread over multiple plaintext records
+        let mut reader = BinaryReader::new(&plaintext.fragment);
+        let alert = reader.read_item::<Alert>()?;
+        println!("Received alert: {:?}", alert);
+        self.received_alert = Some(alert);
+
+
+        // println!("Unsupported record type: Alert");
         Ok(())
     }
 
@@ -714,6 +725,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
             transcript: initial_transcript,
             my_private_key: my_private_key,
         }),
+        received_alert: None,
     };
     let mut conn = ClientConn::new();
 
@@ -723,7 +735,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
         match plaintext.content_type {
             ContentType::Invalid => client.invalid(&mut conn, plaintext, raw)?,
             ContentType::ChangeCipherSpec => client.change_cipher_spec(&mut conn, plaintext, raw)?,
-            ContentType::Alert => client.alert(&mut conn, plaintext, raw)?,
+            ContentType::Alert => client.alert(&mut conn, plaintext)?,
             ContentType::Handshake => client.handshake(&mut conn, plaintext, raw)?,
             ContentType::ApplicationData => client.application_data(&mut conn, plaintext, raw)?,
             ContentType::Unknown(code) => client.unknown(&mut conn, code)?,
