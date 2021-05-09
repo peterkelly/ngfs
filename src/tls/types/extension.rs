@@ -512,6 +512,7 @@ pub enum Extension {
     KeyShareServerHello(KeyShareEntry), // (51), rfc8446
 }
 
+#[derive(Clone, Copy)]
 pub enum ExtensionContext {
     ClientHello,
     ServerHello,
@@ -519,6 +520,19 @@ pub enum ExtensionContext {
 }
 
 impl Extension {
+    pub fn read_extensions(
+        reader: &mut BinaryReader,
+        ctx: ExtensionContext,
+    ) -> Result<Vec<Extension>, Box<dyn Error>> {
+        let mut extensions: Vec<Extension> = Vec::new();
+        let extensions_len = reader.read_u16()? as usize;
+        let mut extensions_reader = reader.read_nested(extensions_len)?;
+        while extensions_reader.remaining() > 0 {
+            extensions.push(Extension::from_binary2(&mut extensions_reader, ctx)?);
+        }
+        Ok(extensions)
+    }
+
     pub fn from_binary2(reader: &mut BinaryReader, ctx: ExtensionContext) -> Result<Self, Box<dyn Error>> {
         let extension_type = reader.read_u16()?;
         let extension_len = reader.read_u16()? as usize;
@@ -526,8 +540,21 @@ impl Extension {
 
         match extension_type {
             0 => {
-                let server_name = nested_reader.read_len16_list::<ServerName>()?;
-                Ok(Extension::ServerName(server_name))
+                match ctx {
+                    ExtensionContext::ClientHello => {
+                        let server_name = nested_reader.read_len16_list::<ServerName>()?;
+                        Ok(Extension::ServerName(server_name))
+                    }
+                    _ => {
+                        // Should be empty
+                        if extension_len > 0 {
+                            Err(GeneralError::new("Expected empty extension data"))
+                        }
+                        else {
+                            Ok(Extension::ServerName(Vec::new()))
+                        }
+                    }
+                }
             }
             10 => {
                 let named_curve = nested_reader.read_len16_list::<NamedCurve>()?;

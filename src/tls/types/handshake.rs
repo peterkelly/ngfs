@@ -273,17 +273,8 @@ impl FromBinary for ServerHello {
         random.copy_from_slice(random_slice);
         let legacy_session_id_echo = Vec::from(reader.read_len8_bytes()?);
         let cipher_suite = reader.read_item::<CipherSuite>()?;
-
         let legacy_compression_method = reader.read_u8()?;
-
-
-
-        let mut extensions: Vec<Extension> = Vec::new();
-        let extensions_len = reader.read_u16()? as usize;
-        let mut extensions_reader = reader.read_nested(extensions_len)?;
-        while extensions_reader.remaining() > 0 {
-            extensions.push(Extension::from_binary2(&mut extensions_reader, ExtensionContext::ServerHello)?);
-        }
+        let extensions = Extension::read_extensions(reader, ExtensionContext::ServerHello)?;
 
         Ok(ServerHello {
             legacy_version,
@@ -310,15 +301,15 @@ impl FromBinary for EndOfEarlyData {
 
 #[derive(Debug)]
 pub struct EncryptedExtensions {
-    todo: String,
+    pub extensions: Vec<Extension>,
 }
 
 impl FromBinary for EncryptedExtensions {
     type Output = EncryptedExtensions;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        // Err(GeneralError::new("EncryptedExtensions::from_binary(): Not implemented"))
-        Ok(EncryptedExtensions { todo: String::from("TODO") })
+        let extensions = Extension::read_extensions(reader, ExtensionContext::ServerHello)?;
+        Ok(EncryptedExtensions { extensions })
     }
 }
 
@@ -330,7 +321,7 @@ impl FromBinary for CertificateRequest {
     type Output = CertificateRequest;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("CertificateRequest::from_binary(): Not implemented"))
+        Ok(CertificateRequest { })
     }
 }
 
@@ -451,12 +442,7 @@ impl FromBinary for NewSessionTicket {
         let ticket_age_add = reader.read_u32()?;
         let ticket_nonce = reader.read_len8_bytes()?.to_vec();
         let ticket = reader.read_len16_bytes()?.to_vec();
-        let mut extensions: Vec<Extension> = Vec::new();
-        let extensions_len = reader.read_u16()? as usize;
-        let mut extensions_reader = reader.read_nested(extensions_len)?;
-        while extensions_reader.remaining() > 0 {
-            extensions.push(Extension::from_binary2(&mut extensions_reader, ExtensionContext::ServerHello)?);
-        }
+        let extensions = Extension::read_extensions(reader, ExtensionContext::ServerHello)?;
 
         Ok(NewSessionTicket {
             ticket_lifetime,

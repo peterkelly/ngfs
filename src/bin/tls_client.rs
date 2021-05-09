@@ -6,6 +6,7 @@
 #![allow(unused_macros)]
 
 use std::error::Error;
+use std::sync::Arc;
 use std::fmt;
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -257,24 +258,69 @@ impl ServerHelloReceived {
         let message = self.common.decrypt_next_message(plaintext_raw)?;
 
         match message {
+            Message::Handshake(Handshake::EncryptedExtensions(eex)) => {
+                println!("    Received Handshake::EncryptedExtensions");
+                println!("{:#?}", eex);
+                Ok(Some(State::EncryptedExtensionsReceived(EncryptedExtensionsReceived {
+                    common: self.common.clone(), // TODO: Avoid clone
+                    encrypted_extensions: Arc::new(eex.extensions),
+                })))
+            }
             Message::Handshake(Handshake::Certificate(certificate)) => {
                 println!("    Received Handshake::Certificate");
-                return Ok(Some(State::ServerCertificateReceived(ServerCertificateReceived {
+                Ok(Some(State::ServerCertificateReceived(ServerCertificateReceived {
                     common: self.common.clone(), // TODO: Avoid clone
                     server_certificate: certificate,
-                })));
+                    encrypted_extensions: Arc::new(Vec::new()),
+                })))
             }
             _ => {
-                println!("Unexpected message type {}", message.name());
+                Err(GeneralError::new(format!(
+                    "Unexpected message type {} in state ServerHelloReceived", message.name())))
             }
         }
-        Ok(None)
+    }
+}
+
+struct EncryptedExtensionsReceived {
+    common: HandshakeCommon,
+    encrypted_extensions: Arc<Vec<Extension>>,
+}
+
+impl EncryptedExtensionsReceived {
+    fn handshake(&mut self,
+                 _handshake: &Handshake,
+                 _handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+        Err(GeneralError::new("Received Handshake in EncryptedExtensionsReceived state"))
+    }
+
+    fn application_data(&mut self,
+                        _conn: &mut ClientConn,
+                        _plaintext: TLSPlaintext,
+                        plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+        let message = self.common.decrypt_next_message(plaintext_raw)?;
+
+        match message {
+            Message::Handshake(Handshake::Certificate(certificate)) => {
+                println!("    Received Handshake::Certificate");
+                Ok(Some(State::ServerCertificateReceived(ServerCertificateReceived {
+                    common: self.common.clone(), // TODO: Avoid clone
+                    server_certificate: certificate,
+                    encrypted_extensions: self.encrypted_extensions.clone(),
+                })))
+            }
+            _ => {
+                Err(GeneralError::new(format!(
+                    "Unexpected message type {} in state EncryptedExtensionsReceived", message.name())))
+            }
+        }
     }
 }
 
 struct ServerCertificateReceived {
     common: HandshakeCommon,
     server_certificate: Certificate,
+    encrypted_extensions: Arc<Vec<Extension>>,
 }
 
 impl ServerCertificateReceived {
@@ -300,7 +346,7 @@ impl ServerCertificateReceived {
                     certificate_verify.algorithm,
                     certificate_verify.signature.len());
                 // println!("handshake = {:#?}", inner_handshake);
-
+                Ok(None)
             }
             Message::Handshake(Handshake::Finished(finished)) => {
                 let hash_alg = self.common.hash_alg;
@@ -394,7 +440,7 @@ impl ServerCertificateReceived {
 
 
                 // println!("handshake = {:#?}", inner_handshake);
-                return Ok(Some(State::Established(Established {
+                Ok(Some(State::Established(Established {
                     hash_alg: self.common.hash_alg,
                     aead_alg: self.common.aead_alg,
                     prk: new_prk,
@@ -402,13 +448,13 @@ impl ServerCertificateReceived {
                     client_sequence_no: 0,
                     // server_sequence_no: self.server_sequence_no,
                     server_sequence_no: 0,
-                })));
+                })))
             }
             _ => {
-                println!("Unexpected message type {}", message.name());
+                Err(GeneralError::new(format!(
+                    "Unexpected message type {} in state ServerCertificateReceived", message.name())))
             }
         }
-        Ok(None)
     }
 }
 
@@ -453,7 +499,7 @@ impl Established {
                 // println!("inner_alert = {:?}", Indent(&alert));
             }
             _ => {
-                println!("Unexpected message type {}", message.name());
+                println!("Unexpected message type {} in state Established", message.name());
             }
         }
         Ok(None)
@@ -512,6 +558,7 @@ impl ClientConn {
 enum State {
     ClientHelloSent(ClientHelloSent),
     ServerHelloReceived(ServerHelloReceived),
+    EncryptedExtensionsReceived(EncryptedExtensionsReceived),
     ServerCertificateReceived(ServerCertificateReceived),
     Established(Established),
 }
@@ -570,6 +617,7 @@ impl Client {
             let new_state_opt = match &mut self.state {
                 State::ClientHelloSent(state) => state.handshake(&server_handshake, handshake_bytes)?,
                 State::ServerHelloReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
+                State::EncryptedExtensionsReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
                 State::ServerCertificateReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
                 State::Established(state) => state.handshake(&server_handshake, handshake_bytes)?,
             };
@@ -589,6 +637,7 @@ impl Client {
         let new_state_opt = match &mut self.state {
             State::ClientHelloSent(state) => state.application_data(conn, plaintext, plaintext_raw)?,
             State::ServerHelloReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
+            State::EncryptedExtensionsReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
             State::ServerCertificateReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
             State::Established(state) => state.application_data(conn, plaintext, plaintext_raw)?,
         };
