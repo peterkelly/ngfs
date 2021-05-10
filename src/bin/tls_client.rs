@@ -809,7 +809,8 @@ impl Receiver {
 
 
 
-pub struct Session {
+struct Session {
+    client: Client,
     incoming_data: Vec<u8>,
     outgoing_data: Vec<u8>,
     read_closed: bool,
@@ -818,8 +819,9 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new() -> Self {
+    pub fn new(client: Client) -> Self {
         Session {
+            client: client,
             incoming_data: Vec::new(),
             outgoing_data: Vec::new(),
             // wants_read: true,
@@ -857,14 +859,31 @@ impl Session {
                 Ok((record, bytes_consumed)) => {
                     let to_remove = bytes_consumed;
                     let record_raw = Vec::from(&self.incoming_data[0..bytes_consumed]);
-                    self.process_record(&record, &record_raw);
+                    match self.process_record(record, record_raw) {
+                        Ok(()) => (),
+                        Err(e) => {
+                            self.report_error(&format!("{}", e));
+                            break;
+                        }
+                    }
                     self.incoming_data = self.incoming_data.split_off(to_remove);
                 }
             }
         }
     }
 
-    fn process_record(&mut self, record: &TLSPlaintext, record_raw: &Vec<u8>) {
+    fn process_record(&mut self, plaintext: TLSPlaintext, raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+        let mut conn = ClientConn::new();
+        match plaintext.content_type {
+            ContentType::Invalid => self.client.invalid(&mut conn, plaintext, raw)?,
+            ContentType::ChangeCipherSpec => self.client.change_cipher_spec(&mut conn, plaintext, raw)?,
+            ContentType::Alert => self.client.alert(&mut conn, plaintext)?,
+            ContentType::Handshake => self.client.handshake(&mut conn, plaintext, raw)?,
+            ContentType::ApplicationData => self.client.application_data(&mut conn, plaintext, raw)?,
+            ContentType::Unknown(code) => self.client.unknown(&mut conn, code)?,
+        }
+        self.outgoing_data.extend_from_slice(&conn.to_send);
+        Ok(())
     }
 
     fn on_read_end(&mut self) {
@@ -1022,23 +1041,47 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
         })),
         received_alert: None,
     };
-    let mut conn = ClientConn::new();
 
-    let mut receiver = Receiver::new();
+    let session = Session::new(client);
+    let mut conn = Connection::new(session);
+    conn.debug = true;
+    let conn = Arc::new(conn);
 
-    while let Some((plaintext, raw)) = receiver.next(&mut socket).await? {
-        match plaintext.content_type {
-            ContentType::Invalid => client.invalid(&mut conn, plaintext, raw)?,
-            ContentType::ChangeCipherSpec => client.change_cipher_spec(&mut conn, plaintext, raw)?,
-            ContentType::Alert => client.alert(&mut conn, plaintext)?,
-            ContentType::Handshake => client.handshake(&mut conn, plaintext, raw)?,
-            ContentType::ApplicationData => client.application_data(&mut conn, plaintext, raw)?,
-            ContentType::Unknown(code) => client.unknown(&mut conn, code)?,
-        }
+    let read_conn = conn.clone();
+    let write_conn = conn.clone();
 
-        conn.send_pending_data(&mut socket).await?;
-    }
-    println!("Server closed connection");
+
+    let (mut read_half, mut write_half) = socket.into_split();
+    let read_handle = tokio::spawn(async move {
+        read_loop(read_conn, &mut read_half).await
+    });
+
+    let write_handle = tokio::spawn(async move {
+        write_loop(write_conn, &mut write_half).await
+    });
+
+    read_handle.await.unwrap();
+    write_handle.await.unwrap();
+
+
+
+    // let mut conn = ClientConn::new();
+
+    // let mut receiver = Receiver::new();
+
+    // while let Some((plaintext, raw)) = receiver.next(&mut socket).await? {
+    //     match plaintext.content_type {
+    //         ContentType::Invalid => client.invalid(&mut conn, plaintext, raw)?,
+    //         ContentType::ChangeCipherSpec => client.change_cipher_spec(&mut conn, plaintext, raw)?,
+    //         ContentType::Alert => client.alert(&mut conn, plaintext)?,
+    //         ContentType::Handshake => client.handshake(&mut conn, plaintext, raw)?,
+    //         ContentType::ApplicationData => client.application_data(&mut conn, plaintext, raw)?,
+    //         ContentType::Unknown(code) => client.unknown(&mut conn, code)?,
+    //     }
+
+    //     conn.send_pending_data(&mut socket).await?;
+    // }
+    // println!("Server closed connection");
     Ok(())
 }
 
