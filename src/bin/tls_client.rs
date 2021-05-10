@@ -912,6 +912,7 @@ struct Connection {
     read_not: Notify,
     write_not: Notify,
     debug: bool,
+    established_not: Notify,
 }
 
 impl Connection {
@@ -921,27 +922,54 @@ impl Connection {
             read_not: Notify::new(),
             write_not: Notify::new(),
             debug: false,
+            established_not: Notify::new(),
+        }
+    }
+
+    async fn wait_till_established(&self) -> Result<(), Box<dyn Error>> {
+        self.established_not.notified().await;
+        match &self.session.lock().unwrap().error {
+            Some(s) => Err(GeneralError::new(s)),
+            None => Ok(())
+        }
+    }
+
+    fn check_events(&self) {
+        // FIXME: Not sure if this is reliable due to the possibilitt that client.state could
+        // be None.
+        let established = match self.session.lock().unwrap().client.state {
+            Some(State::Established(_)) => true,
+            _ => false,
+        };
+        if established {
+            self.established_not.notify_one();
         }
     }
 
     fn on_read_end(&self) {
-        self.session.lock().unwrap().on_read_end()
+        self.session.lock().unwrap().on_read_end();
+        self.check_events();
     }
 
     fn on_read_data(&self, data: &[u8]) {
-        self.session.lock().unwrap().on_read_data(data)
+        self.session.lock().unwrap().on_read_data(data);
+        self.check_events();
     }
 
     fn on_read_error(&self, e: &std::io::Error) {
-        self.session.lock().unwrap().on_read_error(e)
+        self.session.lock().unwrap().on_read_error(e);
+        self.check_events();
     }
 
     fn on_write_error(&self, e: &std::io::Error) {
-        self.session.lock().unwrap().on_write_error(e)
+        self.session.lock().unwrap().on_write_error(e);
+        self.check_events();
     }
 
     pub fn remove_outgoing_data(&self) -> Vec<u8> {
-        self.session.lock().unwrap().remove_outgoing_data()
+        let res = self.session.lock().unwrap().remove_outgoing_data();
+        self.check_events();
+        res
     }
 }
 
@@ -1060,9 +1088,13 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
         write_loop(write_conn, &mut write_half).await
     });
 
+    println!("**** before wait_till_established()");
+    conn.wait_till_established().await?;
+    println!("**** after wait_till_established()");
+
+
     read_handle.await.unwrap();
     write_handle.await.unwrap();
-
 
 
     // let mut conn = ClientConn::new();
