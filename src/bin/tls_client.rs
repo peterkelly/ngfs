@@ -136,9 +136,9 @@ struct ClientHelloSent {
 }
 
 impl ClientHelloSent {
-    fn handshake(&mut self,
+    fn handshake(mut self,
                           handshake: &Handshake,
-                          handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+                          handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
         self.transcript.extend_from_slice(handshake_bytes);
 
         match handshake {
@@ -193,7 +193,7 @@ impl ClientHelloSent {
                 // handshake_traffic_secrets = Some(hs);
                 //
 
-                Ok(Some(State::ServerHelloReceived(ServerHelloReceived {
+                Ok(State::ServerHelloReceived(ServerHelloReceived {
                     common: HandshakeCommon {
                         hash_alg,
                         aead_alg,
@@ -202,7 +202,7 @@ impl ClientHelloSent {
                         handshake_secrets: hs,
                         server_sequence_no: 0,
                     }
-                })))
+                }))
             }
             _ => {
                 Err(GeneralError::new("Received unexpected handshake type"))
@@ -210,10 +210,10 @@ impl ClientHelloSent {
         }
     }
 
-    fn application_data(&mut self,
+    fn application_data(mut self,
                         _conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
-                        _plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+                        _plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
         Err(GeneralError::new("Received ApplicationData in ClientHelloSent state"))
     }
 }
@@ -246,43 +246,43 @@ struct ServerHelloReceived {
 }
 
 impl ServerHelloReceived {
-    fn handshake(&mut self,
+    fn handshake(mut self,
                  _handshake: &Handshake,
-                 _handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+                 _handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
         Err(GeneralError::new("Received Handshake in ServerHelloReceived state"))
     }
 
-    fn application_data(&mut self,
+    fn application_data(mut self,
                         _conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
         let message = self.common.decrypt_next_message(plaintext_raw)?;
 
         match message {
             Message::Handshake(Handshake::EncryptedExtensions(eex)) => {
                 println!("    Received Handshake::EncryptedExtensions");
                 println!("{:#?}", eex);
-                Ok(Some(State::EncryptedExtensionsReceived(EncryptedExtensionsReceived {
+                Ok(State::EncryptedExtensionsReceived(EncryptedExtensionsReceived {
                     common: self.common.clone(), // TODO: Avoid clone
                     encrypted_extensions: Arc::new(eex.extensions),
-                })))
+                }))
             }
             Message::Handshake(Handshake::CertificateRequest(creq)) => {
                 println!("    Received Handshake::CertificateRequest");
-                Ok(Some(State::CertificateRequestReceived(CertificateRequestReceived {
+                Ok(State::CertificateRequestReceived(CertificateRequestReceived {
                     common: self.common.clone(), // TODO: Avoid clone
                     encrypted_extensions: Arc::new(Vec::new()),
                     certificate_request: Some(Arc::new(creq)),
-                })))
+                }))
             }
             Message::Handshake(Handshake::Certificate(certificate)) => {
                 println!("    Received Handshake::Certificate");
-                Ok(Some(State::ServerCertificateReceived(ServerCertificateReceived {
+                Ok(State::ServerCertificateReceived(ServerCertificateReceived {
                     common: self.common.clone(), // TODO: Avoid clone
                     server_certificate: certificate,
                     encrypted_extensions: Arc::new(Vec::new()),
                     certificate_request: None,
-                })))
+                }))
             }
             _ => {
                 Err(GeneralError::new(format!(
@@ -298,35 +298,35 @@ struct EncryptedExtensionsReceived {
 }
 
 impl EncryptedExtensionsReceived {
-    fn handshake(&mut self,
+    fn handshake(mut self,
                  _handshake: &Handshake,
-                 _handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+                 _handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
         Err(GeneralError::new("Received Handshake in EncryptedExtensionsReceived state"))
     }
 
-    fn application_data(&mut self,
+    fn application_data(mut self,
                         _conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
         let message = self.common.decrypt_next_message(plaintext_raw)?;
 
         match message {
             Message::Handshake(Handshake::CertificateRequest(creq)) => {
                 println!("    Received Handshake::CertificateRequest");
-                Ok(Some(State::CertificateRequestReceived(CertificateRequestReceived {
+                Ok(State::CertificateRequestReceived(CertificateRequestReceived {
                     common: self.common.clone(), // TODO: Avoid clone
                     encrypted_extensions: self.encrypted_extensions.clone(),
                     certificate_request: Some(Arc::new(creq)),
-                })))
+                }))
             }
             Message::Handshake(Handshake::Certificate(certificate)) => {
                 println!("    Received Handshake::Certificate");
-                Ok(Some(State::ServerCertificateReceived(ServerCertificateReceived {
+                Ok(State::ServerCertificateReceived(ServerCertificateReceived {
                     common: self.common.clone(), // TODO: Avoid clone
                     server_certificate: certificate,
                     encrypted_extensions: self.encrypted_extensions.clone(),
                     certificate_request: None,
-                })))
+                }))
             }
             _ => {
                 Err(GeneralError::new(format!(
@@ -343,27 +343,27 @@ struct CertificateRequestReceived {
 }
 
 impl CertificateRequestReceived {
-    fn handshake(&mut self,
+    fn handshake(mut self,
                  _handshake: &Handshake,
-                 _handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+                 _handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
         Err(GeneralError::new("Received Handshake in CertificateRequestReceived state"))
     }
 
-    fn application_data(&mut self,
+    fn application_data(mut self,
                         _conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
         let message = self.common.decrypt_next_message(plaintext_raw)?;
 
         match message {
             Message::Handshake(Handshake::Certificate(certificate)) => {
                 println!("    Received Handshake::Certificate");
-                Ok(Some(State::ServerCertificateReceived(ServerCertificateReceived {
+                Ok(State::ServerCertificateReceived(ServerCertificateReceived {
                     common: self.common.clone(), // TODO: Avoid clone
                     server_certificate: certificate,
                     encrypted_extensions: self.encrypted_extensions.clone(),
                     certificate_request: None,
-                })))
+                }))
             }
             _ => {
                 Err(GeneralError::new(format!(
@@ -381,16 +381,16 @@ struct ServerCertificateReceived {
 }
 
 impl ServerCertificateReceived {
-    fn handshake(&mut self,
+    fn handshake(mut self,
                  _handshake: &Handshake,
-                 _handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+                 _handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
         Err(GeneralError::new("Received Handshake in ServerCertificateReceived state"))
     }
 
-    fn application_data(&mut self,
+    fn application_data(mut self,
                         conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
 
         let old_transcript_hash: Vec<u8> = transcript_hash(self.common.hash_alg, &self.common.transcript);
         let message = self.common.decrypt_next_message(plaintext_raw)?;
@@ -403,7 +403,7 @@ impl ServerCertificateReceived {
                     certificate_verify.algorithm,
                     certificate_verify.signature.len());
                 // println!("handshake = {:#?}", inner_handshake);
-                Ok(None)
+                Ok(State::ServerCertificateReceived(self))
             }
             Message::Handshake(Handshake::Finished(finished)) => {
                 let hash_alg = self.common.hash_alg;
@@ -497,7 +497,7 @@ impl ServerCertificateReceived {
 
 
                 // println!("handshake = {:#?}", inner_handshake);
-                Ok(Some(State::Established(Established {
+                Ok(State::Established(Established {
                     hash_alg: self.common.hash_alg,
                     aead_alg: self.common.aead_alg,
                     prk: new_prk,
@@ -505,7 +505,7 @@ impl ServerCertificateReceived {
                     client_sequence_no: 0,
                     // server_sequence_no: self.server_sequence_no,
                     server_sequence_no: 0,
-                })))
+                }))
             }
             _ => {
                 Err(GeneralError::new(format!(
@@ -526,16 +526,16 @@ struct Established {
 }
 
 impl Established {
-    fn handshake(&mut self,
+    fn handshake(mut self,
                  _handshake: &Handshake,
-                 _handshake_bytes: &[u8]) -> Result<Option<State>, Box<dyn Error>> {
+                 _handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
         Err(GeneralError::new("Received Handshake in Established state"))
     }
 
-    fn application_data(&mut self,
+    fn application_data(mut self,
                         _conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<Option<State>, Box<dyn Error>> {
+                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
         let decryption_key = &self.application_secrets.server;
 
         let (message, _) = decrypt_message(
@@ -559,7 +559,7 @@ impl Established {
                 println!("Unexpected message type {} in state Established", message.name());
             }
         }
-        Ok(None)
+        Ok(State::Established(self))
     }
 }
 
@@ -621,8 +621,21 @@ enum State {
     Established(Established),
 }
 
+impl State {
+    fn name(&self) -> &'static str {
+        match self {
+            State::ClientHelloSent(_) => "ClientHelloSent",
+            State::ServerHelloReceived(_) => "ServerHelloReceived",
+            State::EncryptedExtensionsReceived(_) => "EncryptedExtensionsReceived",
+            State::CertificateRequestReceived(_) => "CertificateRequestReceived",
+            State::ServerCertificateReceived(_) => "ServerCertificateReceived",
+            State::Established(_) => "Established",
+        }
+    }
+}
+
 struct Client {
-    state: State,
+    state: Option<State>,
     received_alert: Option<Alert>,
 }
 
@@ -672,19 +685,18 @@ impl Client {
 
             println!("{:#?}", server_handshake);
 
-            let new_state_opt = match &mut self.state {
-                State::ClientHelloSent(state) => state.handshake(&server_handshake, handshake_bytes)?,
-                State::ServerHelloReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
-                State::EncryptedExtensionsReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
-                State::CertificateRequestReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
-                State::ServerCertificateReceived(state) => state.handshake(&server_handshake, handshake_bytes)?,
-                State::Established(state) => state.handshake(&server_handshake, handshake_bytes)?,
-            };
-
-            match new_state_opt {
-                Some(state) => self.state = state,
-                None => (),
-            };
+            // FIXME: This will panic if an earlier message handler returned an error, causing
+            // the state to be None
+            self.state = Some(
+                match self.state.take().unwrap() {
+                    State::ClientHelloSent(s) => s.handshake(&server_handshake, handshake_bytes)?,
+                    State::ServerHelloReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
+                    State::EncryptedExtensionsReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
+                    State::CertificateRequestReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
+                    State::ServerCertificateReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
+                    State::Established(s) => s.handshake(&server_handshake, handshake_bytes)?,
+                });
+            println!("state = {}", self.state.as_ref().unwrap().name());
         }
         Ok(())
     }
@@ -693,19 +705,19 @@ impl Client {
                         conn: &mut ClientConn,
                         plaintext: TLSPlaintext,
                         plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
-        let new_state_opt = match &mut self.state {
-            State::ClientHelloSent(state) => state.application_data(conn, plaintext, plaintext_raw)?,
-            State::ServerHelloReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
-            State::EncryptedExtensionsReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
-            State::CertificateRequestReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
-            State::ServerCertificateReceived(state) => state.application_data(conn, plaintext, plaintext_raw)?,
-            State::Established(state) => state.application_data(conn, plaintext, plaintext_raw)?,
-        };
+        // FIXME: This will panic if an earlier message handler returned an error, causing
+        // the state to be None
+        self.state = Some(
+            match self.state.take().unwrap() {
+                State::ClientHelloSent(s) => s.application_data(conn, plaintext, plaintext_raw)?,
+                State::ServerHelloReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
+                State::EncryptedExtensionsReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
+                State::CertificateRequestReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
+                State::ServerCertificateReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
+                State::Established(s) => s.application_data(conn, plaintext, plaintext_raw)?,
+            });
+        println!("state = {}", self.state.as_ref().unwrap().name());
 
-        match new_state_opt {
-            Some(state) => self.state = state,
-            None => (),
-        };
         Ok(())
     }
 
@@ -830,10 +842,10 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let mut initial_transcript: Vec<u8> = Vec::new();
     initial_transcript.extend_from_slice(&client_hello_bytes);
     let mut client = Client {
-        state: State::ClientHelloSent(ClientHelloSent {
+        state: Some(State::ClientHelloSent(ClientHelloSent {
             transcript: initial_transcript,
             my_private_key: my_private_key,
-        }),
+        })),
         received_alert: None,
     };
     let mut conn = ClientConn::new();
