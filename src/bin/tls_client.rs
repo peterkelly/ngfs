@@ -11,6 +11,8 @@ use std::fmt;
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
+use tokio::time::sleep;
+use std::time::Duration;
 use ring::agreement::{EphemeralPrivateKey, X25519};
 use ring::rand::SystemRandom;
 use torrent::result::GeneralError;
@@ -480,31 +482,12 @@ impl ServerCertificateReceived {
                     )?;
                 }
 
-                // Start of application traffic
-                let mut client_sequence_no: u64 = 0;
-
-                // HTTP request
-                {
-                    let request = b"GET / HTTP/1.1\r\n\r\n".to_vec();
-                    conn.append_encrypted(
-                        request,                      // to_encrypt
-                        ContentType::ApplicationData, // content_type
-                        &ap.client,                   // traffic_secret
-                        client_sequence_no,           // client_sequence_no
-                    )?;
-                }
-                client_sequence_no += 1;
-
-
-
-                // println!("handshake = {:#?}", inner_handshake);
                 Ok(State::Established(Established {
                     hash_alg: self.common.hash_alg,
                     aead_alg: self.common.aead_alg,
                     prk: new_prk,
                     application_secrets: ap,
                     client_sequence_no: 0,
-                    // server_sequence_no: self.server_sequence_no,
                     server_sequence_no: 0,
                 }))
             }
@@ -530,6 +513,7 @@ impl Established {
     fn handshake(mut self,
                  _handshake: &Handshake,
                  _handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
+        println!("------------- Received Handshake in Established state");
         Err(GeneralError::new("Received Handshake in Established state"))
     }
 
@@ -537,12 +521,14 @@ impl Established {
                         _conn: &mut ClientConn,
                         _plaintext: TLSPlaintext,
                         plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
+        println!("Established.application_data: server_sequence_no = {}", self.server_sequence_no);
         let decryption_key = &self.application_secrets.server;
 
         let (message, _) = decrypt_message(
             self.server_sequence_no,
             &decryption_key,
             &plaintext_raw)?;
+        println!("Received message in Established state: {}", message.name());
         self.server_sequence_no += 1;
 
         match message {
@@ -553,8 +539,8 @@ impl Established {
                 println!("data =");
                 println!("{:#?}", Indent(&DebugHexDump(&data)));
             }
-            Message::Alert(_) => {
-                // println!("inner_alert = {:?}", Indent(&alert));
+            Message::Alert(alert) => {
+                println!("inner_alert = {:?}", Indent(&alert));
             }
             _ => {
                 println!("Unexpected message type {} in state Established", message.name());
@@ -832,6 +818,33 @@ impl Session {
         }
     }
 
+    pub fn write_plaintext(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
+        match &mut self.client.state {
+            Some(State::Established(established)) => {
+                println!("write_plaintext: state = Established");
+                let mut conn = ClientConn::new();
+                conn.append_encrypted(
+                    data.to_vec(),
+                    ContentType::ApplicationData,
+                    &established.application_secrets.client,
+                    established.client_sequence_no,
+                )?;
+                established.client_sequence_no += 1;
+                println!("write_plaintext: conn.to_send.len() = {}", conn.to_send.len());
+                self.outgoing_data.extend_from_slice(&conn.to_send);
+                Ok(())
+            }
+            None => {
+                println!("write_plaintext: state = None");
+                Err(GeneralError::new("client.state is None"))
+            }
+            _ => {
+                println!("write_plaintext: state = Other");
+                Err(GeneralError::new("Session is not yet established"))
+            }
+        }
+    }
+
     pub fn add_incoming_data(&mut self, data: &[u8]) {
         self.incoming_data.extend_from_slice(data);
     }
@@ -841,6 +854,7 @@ impl Session {
     }
 
     pub fn report_error(&mut self, error: &str) {
+        println!("Session::report_error: {}", error);
         self.error = Some(String::from(error));
         self.read_closed = true;
         self.write_closed = true;
@@ -897,12 +911,12 @@ impl Session {
     }
 
     fn on_read_error(&mut self, e: &std::io::Error) {
-        self.error = Some(format!("read from underlying transport: {}", e));
+        self.report_error(&format!("read from underlying transport: {}", e));
         self.process();
     }
 
     fn on_write_error(&mut self, e: &std::io::Error) {
-        self.error = Some(format!("read from underlying transport: {}", e));
+        self.report_error(&format!("read from underlying transport: {}", e));
         self.process();
     }
 }
@@ -934,6 +948,19 @@ impl Connection {
         }
     }
 
+    async fn write_plaintext(&self, data: &[u8]) -> Result<(), Box<dyn Error>> {
+        self.session.lock().unwrap().write_plaintext(data)?;
+        println!("write_plaintext: now outgoing_data.len() = {}",
+            self.session.lock().unwrap().outgoing_data.len());
+        self.read_not.notify_one();
+        self.write_not.notify_one();
+        Ok(())
+    }
+
+    async fn write_plaintext_string(&self, data: &str) -> Result<(), Box<dyn Error>> {
+        self.write_plaintext(data.as_bytes()).await
+    }
+
     fn check_events(&self) {
         // FIXME: Not sure if this is reliable due to the possibilitt that client.state could
         // be None.
@@ -941,6 +968,7 @@ impl Connection {
             Some(State::Established(_)) => true,
             _ => false,
         };
+        println!("Notifying that session has been established");
         if established {
             self.established_not.notify_one();
         }
@@ -1091,6 +1119,55 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     println!("**** before wait_till_established()");
     conn.wait_till_established().await?;
     println!("**** after wait_till_established()");
+
+
+    sleep(Duration::from_millis(1000)).await;
+    conn.write_plaintext_string(
+        "The primary goal of TLS is to provide a secure channel between two \
+         communicating peers; the only requirement from the underlying \
+         transport is a reliable, in-order data stream.  Specifically, the \
+         secure channel should provide the following properties:").await?;
+
+    sleep(Duration::from_millis(1000)).await;
+    conn.write_plaintext_string(
+        "-  Authentication: The server side of the channel is always \
+         authenticated; the client side is optionally authenticated. \
+         Authentication can happen via asymmetric cryptography (e.g., RSA \
+         [RSA], the Elliptic Curve Digital Signature Algorithm (ECDSA) \
+         [ECDSA], or the Edwards-Curve Digital Signature Algorithm (EdDSA) \
+         [RFC8032]) or a symmetric pre-shared key (PSK).").await?;
+
+    sleep(Duration::from_millis(1000)).await;
+    conn.write_plaintext_string(
+        "-  Confidentiality: Data sent over the channel after establishment is \
+         only visible to the endpoints.  TLS does not hide the length of \
+         the data it transmits, though endpoints are able to pad TLS \
+         records in order to obscure lengths and improve protection against \
+         traffic analysis techniques.").await?;
+
+    sleep(Duration::from_millis(1000)).await;
+    conn.write_plaintext_string(
+        "-  Integrity: Data sent over the channel after establishment cannot \
+         be modified by attackers without detection.").await?;
+
+    sleep(Duration::from_millis(1000)).await;
+    conn.write_plaintext_string(
+        "These properties should be true even in the face of an attacker who \
+         has complete control of the network, as described in [RFC3552].  See \
+         Appendix E for a more complete statement of the relevant security \
+         properties.").await?;
+
+    // println!();
+    // for i in 1..=5 {
+    //     sleep(Duration::from_millis(1000)).await;
+    //     let message = format!("Message from client {}\n", i);
+    //     conn.write_plaintext(&message.as_bytes()).await?;
+    //     print!("Wrote: {}", message);
+    // }
+
+
+
+
 
 
     read_handle.await.unwrap();
