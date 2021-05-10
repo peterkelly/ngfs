@@ -6,10 +6,11 @@
 #![allow(unused_macros)]
 
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::fmt;
 use tokio::net::{TcpStream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Notify;
 use ring::agreement::{EphemeralPrivateKey, X25519};
 use ring::rand::SystemRandom;
 use torrent::result::GeneralError;
@@ -805,6 +806,179 @@ impl Receiver {
         }
     }
 }
+
+
+
+pub struct Session {
+    incoming_data: Vec<u8>,
+    outgoing_data: Vec<u8>,
+    read_closed: bool,
+    write_closed: bool,
+    error: Option<String>,
+}
+
+impl Session {
+    pub fn new() -> Self {
+        Session {
+            incoming_data: Vec::new(),
+            outgoing_data: Vec::new(),
+            // wants_read: true,
+            // wants_write: true,
+            read_closed: false,
+            write_closed: false,
+            error: None,
+        }
+    }
+
+    pub fn add_incoming_data(&mut self, data: &[u8]) {
+        self.incoming_data.extend_from_slice(data);
+    }
+
+    pub fn remove_outgoing_data(&mut self) -> Vec<u8> {
+        self.outgoing_data.split_off(0)
+    }
+
+    pub fn report_error(&mut self, error: &str) {
+        self.error = Some(String::from(error));
+        self.read_closed = true;
+        self.write_closed = true;
+    }
+
+    pub fn process(&mut self) {
+        loop {
+            match TLSPlaintext::from_raw_data(&self.incoming_data) {
+                Err(TLSPlaintextError::InsufficientData) => {
+                    return;
+                }
+                Err(TLSPlaintextError::InvalidLength) => {
+                    self.report_error("Invalid record length");
+                    return;
+                }
+                Ok((record, bytes_consumed)) => {
+                    let to_remove = bytes_consumed;
+                    let record_raw = Vec::from(&self.incoming_data[0..bytes_consumed]);
+                    self.process_record(&record, &record_raw);
+                    self.incoming_data = self.incoming_data.split_off(to_remove);
+                }
+            }
+        }
+    }
+
+    fn process_record(&mut self, record: &TLSPlaintext, record_raw: &Vec<u8>) {
+    }
+
+    fn on_read_end(&mut self) {
+        self.read_closed = true;
+        self.process();
+    }
+
+    fn on_read_data(&mut self, data: &[u8]) {
+        self.add_incoming_data(data);
+        self.process();
+    }
+
+    fn on_read_error(&mut self, e: &std::io::Error) {
+        self.error = Some(format!("read from underlying transport: {}", e));
+        self.process();
+    }
+
+    fn on_write_error(&mut self, e: &std::io::Error) {
+        self.error = Some(format!("read from underlying transport: {}", e));
+        self.process();
+    }
+}
+
+struct Connection {
+    session: Mutex<Session>,
+    read_not: Notify,
+    write_not: Notify,
+    debug: bool,
+}
+
+impl Connection {
+    fn new(session: Session) -> Self {
+        Connection {
+            session: Mutex::new(session),
+            read_not: Notify::new(),
+            write_not: Notify::new(),
+            debug: false,
+        }
+    }
+
+    fn on_read_end(&self) {
+        self.session.lock().unwrap().on_read_end()
+    }
+
+    fn on_read_data(&self, data: &[u8]) {
+        self.session.lock().unwrap().on_read_data(data)
+    }
+
+    fn on_read_error(&self, e: &std::io::Error) {
+        self.session.lock().unwrap().on_read_error(e)
+    }
+
+    fn on_write_error(&self, e: &std::io::Error) {
+        self.session.lock().unwrap().on_write_error(e)
+    }
+
+    pub fn remove_outgoing_data(&self) -> Vec<u8> {
+        self.session.lock().unwrap().remove_outgoing_data()
+    }
+}
+
+async fn read_loop(conn: Arc<Connection>, reader: &mut (dyn AsyncRead + Unpin + Send)) {
+    const READ_SIZE: usize = 1024;
+    loop {
+        let wants_read = true;
+        if wants_read {
+            let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
+            match reader.read(&mut buf).await {
+                Ok(0) => {
+                    if conn.debug { println!("read_loop: end") }
+                    conn.on_read_end();
+                    return;
+                }
+                Ok(r) => {
+                    if conn.debug { println!("read_loop: read {} bytes", r) }
+                    conn.on_read_data(&buf[0..r]);
+                }
+                Err(e) => {
+                    if conn.debug { println!("read_loop: error {}", e) }
+                    conn.on_read_error(&e);
+                    break;
+                }
+            }
+        }
+
+        conn.write_not.notify_one();
+        conn.read_not.notified().await;
+    }
+}
+
+async fn write_loop(conn: Arc<Connection>, writer: &mut (dyn AsyncWrite + Unpin + Send)) {
+    const WRITE_SIZE: usize = 1024;
+    loop {
+        let data = conn.remove_outgoing_data();
+        if data.len() > 0 {
+            match writer.write_all(&data).await {
+                Ok(()) => {
+                    if conn.debug { println!("write_loop: wrote {} bytes", data.len()) }
+                }
+                Err(e) => {
+                    if conn.debug { println!("write_loop: error {}", e) }
+                    conn.on_write_error(&e);
+                    break;
+                }
+            }
+        }
+
+        conn.read_not.notify_one();
+        conn.write_not.notified().await;
+    }
+}
+
+
+
 
 fn handshake_to_record(handshake: &Handshake) -> Result<TLSPlaintext, Box<dyn Error>> {
     let mut writer = BinaryWriter::new();
