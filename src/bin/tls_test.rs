@@ -148,64 +148,6 @@ fn test_dh() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn process_record<'a>(record: &'a TLSPlaintext, record_raw: &'a [u8]) -> Result<(), Box<dyn Error>> {
-    let received_filename = "record-received.bin";
-    std::fs::write(received_filename, record_raw)?;
-    println!("Wrote {}", received_filename);
-
-    let mut reader = BinaryReader::new(&record.fragment);
-    let handshake = reader.read_item::<Handshake>()?;
-
-    println!("{:#?}", handshake);
-
-    // println!("--------------------------");
-    let mut writer = BinaryWriter::new();
-    writer.write_item(&handshake)?;
-
-    let output_record = TLSPlaintext {
-        content_type: ContentType::Handshake,
-        legacy_record_version: 0x0301,
-        fragment: Vec::<u8>::from(writer),
-    };
-
-    let serialized_filename = "record-serialized.bin";
-    std::fs::write(serialized_filename, &output_record.to_vec())?;
-    println!("Wrote {}", serialized_filename);
-
-    Ok(())
-}
-
-// async fn process_connection_inner(receiver: &mut Receiver, socket: &mut TcpStream) ->
-//                                   Result<(), Box<dyn Error>> {
-//     while let Some((record, record_raw)) = receiver.next(socket).await? {
-//         process_record(&record, &record_raw)?;
-//     }
-//     Ok(())
-// }
-
-// async fn process_connection(mut socket: TcpStream, addr: SocketAddr) {
-//     println!("Received connection from {}", addr);
-//     let mut receiver = Receiver::new();
-
-//     match process_connection_inner(&mut receiver, &mut socket).await {
-//         Ok(()) => {},
-//         Err(e) => {
-//             eprintln!("Error processing connection: {}", e);
-//         }
-//     };
-// }
-
-// async fn test_server() -> Result<(), Box<dyn Error>> {
-//     let listener = TcpListener::bind("127.0.01:8080").await?;
-//     println!("Listening for connections");
-//     loop {
-//         let (socket, addr) = listener.accept().await?;
-//         tokio::spawn(process_connection(socket, addr));
-//         // let x: TcpStream = socket;
-//         // let y: SocketAddr = addr;
-//     }
-// }
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let command = match std::env::args().nth(1) {

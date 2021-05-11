@@ -43,6 +43,7 @@ use torrent::tls::types::record::{
     ContentType,
     Message,
     TLSPlaintext,
+    TLSOutputPlaintext,
     TLSPlaintextError,
 };
 use torrent::tls::types::alert::{
@@ -580,7 +581,7 @@ impl ClientConn {
             client_sequence_no,
             &mut data)?;
 
-        let output_record = TLSPlaintext {
+        let output_record = TLSOutputPlaintext {
             content_type: ContentType::ApplicationData,
             legacy_record_version: 0x0303,
             fragment: data,
@@ -976,11 +977,11 @@ async fn write_loop(conn: Arc<Connection>, writer: &mut (dyn AsyncWrite + Unpin 
 
 
 
-fn handshake_to_record(handshake: &Handshake) -> Result<TLSPlaintext, Box<dyn Error>> {
+fn handshake_to_record(handshake: &Handshake) -> Result<TLSOutputPlaintext, Box<dyn Error>> {
     let mut writer = BinaryWriter::new();
     writer.write_item(handshake)?;
 
-    let output_record = TLSPlaintext {
+    let output_record = TLSOutputPlaintext {
         content_type: ContentType::Handshake,
         legacy_record_version: 0x0301,
         fragment: Vec::<u8>::from(writer),
@@ -998,7 +999,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
     let client_hello = make_client_hello(my_public_key_bytes);
     let handshake = Handshake::ClientHello(client_hello);
-    let client_hello_plaintext_record: TLSPlaintext = handshake_to_record(&handshake)?;
+    let client_hello_plaintext_record: TLSOutputPlaintext = handshake_to_record(&handshake)?;
     let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
     let client_hello_bytes: Vec<u8> = Vec::from(client_hello_plaintext_record.fragment);
 

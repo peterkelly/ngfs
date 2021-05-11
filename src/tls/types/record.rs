@@ -207,7 +207,15 @@ impl TLSPlaintext {
         let consumed = 5 + length;
         Ok((record, consumed))
     }
+}
 
+pub struct TLSOutputPlaintext {
+    pub content_type: ContentType,
+    pub legacy_record_version: u16,
+    pub fragment: Vec<u8>,
+}
+
+impl TLSOutputPlaintext {
     pub fn to_vec(&self) -> Vec<u8> {
         let mut res: Vec<u8> = Vec::new();
         res.push(self.content_type.to_raw());
