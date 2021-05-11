@@ -716,85 +716,6 @@ impl Client {
     }
 }
 
-
-pub enum ReceiverError {
-    ConnectionClosedByPeer,
-    InvalidRecordLength,
-    SocketRecv(String),
-}
-
-impl fmt::Display for ReceiverError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ReceiverError::ConnectionClosedByPeer => write!(f, "Connection closed by peer"),
-            ReceiverError::InvalidRecordLength => write!(f, "Invalid record length"),
-            ReceiverError::SocketRecv(msg) => write!(f, "{}", msg),
-        }
-    }
-}
-
-impl fmt::Debug for ReceiverError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self)
-    }
-}
-
-impl std::error::Error for ReceiverError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-struct Receiver {
-    incoming_data: Vec<u8>,
-    to_remove: usize,
-}
-
-impl Receiver {
-    fn new() -> Self {
-        Receiver {
-            incoming_data: Vec::new(),
-            to_remove: 0,
-        }
-    }
-}
-
-impl Receiver {
-    async fn next(&mut self, socket: &mut TcpStream) ->
-                  Result<Option<(TLSPlaintext, Vec<u8>)>, ReceiverError> {
-        const READ_SIZE: usize = 1024;
-        loop {
-            if self.to_remove > 0 {
-                self.incoming_data = self.incoming_data.split_off(self.to_remove);
-                self.to_remove = 0;
-            }
-
-            match TLSPlaintext::from_raw_data(&self.incoming_data) {
-                Err(TLSPlaintextError::InsufficientData) => {
-                    // need to read some more data from the socket before we can decode the record
-                    let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
-                    let r = match socket.read(&mut buf).await {
-                        Err(e) => return Err(ReceiverError::SocketRecv(format!("{}", e))),
-                        Ok(0) => return Ok(None),
-                        Ok(r) => r,
-                    };
-                    self.incoming_data.extend_from_slice(&buf[0..r]);
-                }
-                Err(TLSPlaintextError::InvalidLength) => {
-                    return Err(ReceiverError::InvalidRecordLength);
-                }
-                Ok((record, bytes_consumed)) => {
-                    self.to_remove = bytes_consumed;
-                    let record_raw = Vec::from(&self.incoming_data[0..bytes_consumed]);
-                    return Ok(Some((record, record_raw)));
-                }
-            }
-        }
-    }
-}
-
-
-
 struct Session {
     client: Client,
     incoming_data: Vec<u8>,
@@ -1166,31 +1087,8 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     // }
 
 
-
-
-
-
     read_handle.await.unwrap();
     write_handle.await.unwrap();
-
-
-    // let mut conn = ClientConn::new();
-
-    // let mut receiver = Receiver::new();
-
-    // while let Some((plaintext, raw)) = receiver.next(&mut socket).await? {
-    //     match plaintext.content_type {
-    //         ContentType::Invalid => client.invalid(&mut conn, plaintext, raw)?,
-    //         ContentType::ChangeCipherSpec => client.change_cipher_spec(&mut conn, plaintext, raw)?,
-    //         ContentType::Alert => client.alert(&mut conn, plaintext)?,
-    //         ContentType::Handshake => client.handshake(&mut conn, plaintext, raw)?,
-    //         ContentType::ApplicationData => client.application_data(&mut conn, plaintext, raw)?,
-    //         ContentType::Unknown(code) => client.unknown(&mut conn, code)?,
-    //     }
-
-    //     conn.send_pending_data(&mut socket).await?;
-    // }
-    // println!("Server closed connection");
     Ok(())
 }
 
