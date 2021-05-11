@@ -216,8 +216,7 @@ impl ClientHelloSent {
 
     fn application_data(mut self,
                         _conn: &mut ClientConn,
-                        _plaintext: TLSPlaintext,
-                        _plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
+                        _plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
         Err(GeneralError::new("Received ApplicationData in ClientHelloSent state"))
     }
 }
@@ -233,12 +232,12 @@ struct HandshakeCommon {
 }
 
 impl HandshakeCommon {
-    fn decrypt_next_message(&mut self, plaintext_raw: Vec<u8>) -> Result<Message, Box<dyn Error>> {
+    fn decrypt_next_message(&mut self, plaintext_raw: &[u8]) -> Result<Message, Box<dyn Error>> {
         // TODO: Cater for alerts
         let (message, inner_body_vec) = decrypt_message(
             self.server_sequence_no,
             &self.handshake_secrets.server,
-            &plaintext_raw)?;
+            plaintext_raw)?;
         self.server_sequence_no += 1;
         self.transcript.extend_from_slice(&inner_body_vec);
         Ok(message)
@@ -258,9 +257,8 @@ impl ServerHelloReceived {
 
     fn application_data(mut self,
                         _conn: &mut ClientConn,
-                        _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
-        let message = self.common.decrypt_next_message(plaintext_raw)?;
+                        plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
+        let message = self.common.decrypt_next_message(plaintext.raw)?;
 
         match message {
             Message::Handshake(Handshake::EncryptedExtensions(eex)) => {
@@ -310,9 +308,8 @@ impl EncryptedExtensionsReceived {
 
     fn application_data(mut self,
                         _conn: &mut ClientConn,
-                        _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
-        let message = self.common.decrypt_next_message(plaintext_raw)?;
+                        plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
+        let message = self.common.decrypt_next_message(plaintext.raw)?;
 
         match message {
             Message::Handshake(Handshake::CertificateRequest(creq)) => {
@@ -355,9 +352,8 @@ impl CertificateRequestReceived {
 
     fn application_data(mut self,
                         _conn: &mut ClientConn,
-                        _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
-        let message = self.common.decrypt_next_message(plaintext_raw)?;
+                        plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
+        let message = self.common.decrypt_next_message(plaintext.raw)?;
 
         match message {
             Message::Handshake(Handshake::Certificate(certificate)) => {
@@ -393,11 +389,10 @@ impl ServerCertificateReceived {
 
     fn application_data(mut self,
                         conn: &mut ClientConn,
-                        _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
+                        plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
 
         let old_transcript_hash: Vec<u8> = transcript_hash(self.common.hash_alg, &self.common.transcript);
-        let message = self.common.decrypt_next_message(plaintext_raw)?;
+        let message = self.common.decrypt_next_message(plaintext.raw)?;
         let new_transcript_hash: Vec<u8> = transcript_hash(self.common.hash_alg, &self.common.transcript);
 
         match message {
@@ -520,15 +515,14 @@ impl Established {
 
     fn application_data(mut self,
                         _conn: &mut ClientConn,
-                        _plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<State, Box<dyn Error>> {
+                        plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
         println!("Established.application_data: server_sequence_no = {}", self.server_sequence_no);
         let decryption_key = &self.application_secrets.server;
 
         let (message, _) = decrypt_message(
             self.server_sequence_no,
             &decryption_key,
-            &plaintext_raw)?;
+            plaintext.raw)?;
         println!("Received message in Established state: {}", message.name());
         self.server_sequence_no += 1;
 
@@ -630,16 +624,14 @@ struct Client {
 impl Client {
     fn invalid(&mut self,
                _conn: &mut ClientConn,
-               _plaintext: TLSPlaintext,
-               _plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+               _plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
         println!("Unsupported record type: Invalid");
         Ok(())
     }
 
     fn change_cipher_spec(&mut self,
                           _conn: &mut ClientConn,
-                          _plaintext: TLSPlaintext,
-                          _plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+                          _plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
         println!("ChangeCipherSpec record: Ignoring");
         Ok(())
     }
@@ -649,7 +641,7 @@ impl Client {
              plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
         // TODO: Have this function passed a *complete* plaintext data, even if the alert data
         // is spread over multiple plaintext records
-        let mut reader = BinaryReader::new(&plaintext.fragment);
+        let mut reader = BinaryReader::new(plaintext.fragment);
         let alert = reader.read_item::<Alert>()?;
         println!("Received alert: {:?}", alert);
         self.received_alert = Some(alert);
@@ -661,10 +653,9 @@ impl Client {
 
     fn handshake(&mut self,
                  _conn: &mut ClientConn,
-                 plaintext: TLSPlaintext,
-                 _plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+                 plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
         println!("Handshake record");
-        let mut reader = BinaryReader::new(&plaintext.fragment);
+        let mut reader = BinaryReader::new(plaintext.fragment);
         while reader.remaining() > 0 {
             let old_offset = reader.abs_offset();
             let server_handshake = reader.read_item::<Handshake>()?;
@@ -692,17 +683,17 @@ impl Client {
     fn application_data(&mut self,
                         conn: &mut ClientConn,
                         plaintext: TLSPlaintext,
-                        plaintext_raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+                        ) -> Result<(), Box<dyn Error>> {
         // FIXME: This will panic if an earlier message handler returned an error, causing
         // the state to be None
         self.state = Some(
             match self.state.take().unwrap() {
-                State::ClientHelloSent(s) => s.application_data(conn, plaintext, plaintext_raw)?,
-                State::ServerHelloReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
-                State::EncryptedExtensionsReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
-                State::CertificateRequestReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
-                State::ServerCertificateReceived(s) => s.application_data(conn, plaintext, plaintext_raw)?,
-                State::Established(s) => s.application_data(conn, plaintext, plaintext_raw)?,
+                State::ClientHelloSent(s) => s.application_data(conn, plaintext)?,
+                State::ServerHelloReceived(s) => s.application_data(conn, plaintext)?,
+                State::EncryptedExtensionsReceived(s) => s.application_data(conn, plaintext)?,
+                State::CertificateRequestReceived(s) => s.application_data(conn, plaintext)?,
+                State::ServerCertificateReceived(s) => s.application_data(conn, plaintext)?,
+                State::Established(s) => s.application_data(conn, plaintext)?,
             });
         println!("state = {}", self.state.as_ref().unwrap().name());
 
@@ -792,10 +783,9 @@ impl Session {
                     self.report_error("Invalid record length");
                     return;
                 }
-                Ok((record, bytes_consumed)) => {
-                    let to_remove = bytes_consumed;
-                    let record_raw = Vec::from(&self.incoming_data[0..bytes_consumed]);
-                    match self.process_record(record, record_raw) {
+                Ok(record) => {
+                    let to_remove = record.raw.len();
+                    match Self::process_record(&mut self.client, &mut self.outgoing_data, record) {
                         Ok(()) => (),
                         Err(e) => {
                             self.report_error(&format!("{}", e));
@@ -808,17 +798,22 @@ impl Session {
         }
     }
 
-    fn process_record(&mut self, plaintext: TLSPlaintext, raw: Vec<u8>) -> Result<(), Box<dyn Error>> {
+    fn process_record(
+        client: &mut Client,
+        outgoing_data: &mut Vec<u8>,
+        plaintext: TLSPlaintext,
+    ) -> Result<(), Box<dyn Error>> {
+        let raw = plaintext.raw.to_vec();
         let mut conn = ClientConn::new();
         match plaintext.content_type {
-            ContentType::Invalid => self.client.invalid(&mut conn, plaintext, raw)?,
-            ContentType::ChangeCipherSpec => self.client.change_cipher_spec(&mut conn, plaintext, raw)?,
-            ContentType::Alert => self.client.alert(&mut conn, plaintext)?,
-            ContentType::Handshake => self.client.handshake(&mut conn, plaintext, raw)?,
-            ContentType::ApplicationData => self.client.application_data(&mut conn, plaintext, raw)?,
-            ContentType::Unknown(code) => self.client.unknown(&mut conn, code)?,
+            ContentType::Invalid => client.invalid(&mut conn, plaintext)?,
+            ContentType::ChangeCipherSpec => client.change_cipher_spec(&mut conn, plaintext)?,
+            ContentType::Alert => client.alert(&mut conn, plaintext)?,
+            ContentType::Handshake => client.handshake(&mut conn, plaintext)?,
+            ContentType::ApplicationData => client.application_data(&mut conn, plaintext)?,
+            ContentType::Unknown(code) => client.unknown(&mut conn, code)?,
         }
-        self.outgoing_data.extend_from_slice(&conn.to_send);
+        outgoing_data.extend_from_slice(&conn.to_send);
         Ok(())
     }
 

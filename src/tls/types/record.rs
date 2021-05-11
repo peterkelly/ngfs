@@ -166,14 +166,15 @@ impl TLSCiphertext {
     }
 }
 
-pub struct TLSPlaintext {
+pub struct TLSPlaintext<'a> {
     pub content_type: ContentType,
     pub legacy_record_version: u16,
-    pub fragment: Vec<u8>,
+    pub fragment: &'a [u8],
+    pub raw: &'a [u8],
 }
 
-impl TLSPlaintext {
-    pub fn from_raw_data(data: &[u8]) -> Result<(TLSPlaintext, usize), TLSPlaintextError> {
+impl TLSPlaintext<'_> {
+    pub fn from_raw_data<'x>(data: &'x [u8]) -> Result<TLSPlaintext<'x>, TLSPlaintextError> {
         if data.len() < 5 {
             return Err(TLSPlaintextError::InsufficientData);
         }
@@ -197,15 +198,15 @@ impl TLSPlaintext {
             return Err(TLSPlaintextError::InsufficientData);
         }
 
-        let fragment = Vec::from(&data[5..5 + length]);
+        let consumed = 5 + length;
 
         let record = TLSPlaintext {
             content_type,
             legacy_record_version,
-            fragment,
+            fragment: &data[5..5 + length],
+            raw: &data[0..5 + length],
         };
-        let consumed = 5 + length;
-        Ok((record, consumed))
+        Ok(record)
     }
 }
 
