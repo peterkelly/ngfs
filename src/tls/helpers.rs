@@ -4,6 +4,7 @@ use super::super::util::{vec_with_len};
 use super::types::handshake::{
     // ClientHello,
     ServerHello,
+    Finished,
 };
 use super::types::extension::{
     Extension,
@@ -245,4 +246,28 @@ pub fn decrypt_message(
     println!("======== Received {}", message.name());
 
     Ok((message, inner_body_vec))
+}
+
+pub fn verify_finished(
+    hash_alg: HashAlgorithm,
+    encryption_key: &EncryptionKey,
+    transcript_hash: &[u8],
+    finished: &Finished,
+) -> Result<(), TLSError> {
+    let finished_key = derive_secret(hash_alg, &encryption_key.raw, b"finished", &[])?;
+
+    // println!("finished_key = {:?}", BinaryData(&finished_key));
+    // println!();
+    // println!("finish: handshake_hash = {:?}", BinaryData(&transcript_hash));
+    // let verify_data: Vec<u8> = hash_alg.hmac_sign(&finished_key, &transcript_hash)?;
+    // println!("finish: verify_data    = {:?}", BinaryData(&verify_data));
+    // println!("finish: finished.data  = {:?}", BinaryData(&finished.verify_data));
+    // println!();
+
+    if hash_alg.hmac_verify(&finished_key, &transcript_hash, &finished.verify_data)? {
+        Ok(())
+    }
+    else {
+        Err(TLSError::FinishedVerificationFailed)
+    }
 }

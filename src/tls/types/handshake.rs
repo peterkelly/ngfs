@@ -404,23 +404,20 @@ impl FromBinary for CertificateVerify {
 
 #[derive(Debug)]
 pub struct Finished {
-    pub data: Vec<u8>,
-    // todo: String,
+    pub verify_data: Vec<u8>,
 }
 
 impl FromBinary for Finished {
     type Output = Finished;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        // Err(GeneralError::new("Finished::from_binary(): Not implemented"))
-        // Ok(Finished { todo: String::from("TODO") })
-        Ok(Finished { data: reader.remaining_data().to_vec() })
+        Ok(Finished { verify_data: reader.remaining_data().to_vec() })
     }
 }
 
 impl ToBinary for Finished {
     fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
-        writer.write_raw(&self.data);
+        writer.write_raw(&self.verify_data);
         Ok(())
     }
 }

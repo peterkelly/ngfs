@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use super::super::crypt::CryptError;
 
 #[derive(Debug)]
 pub enum TLSError {
@@ -7,6 +8,8 @@ pub enum TLSError {
     DecryptionFailed,
     InvalidPlaintextRecord,
     InvalidMessageRecord,
+    Internal(CryptError),
+    FinishedVerificationFailed,
 }
 
 impl fmt::Display for TLSError {
@@ -18,5 +21,11 @@ impl fmt::Display for TLSError {
 impl Error for TLSError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         None
+    }
+}
+
+impl From<CryptError> for TLSError {
+    fn from(error: CryptError) -> Self {
+        TLSError::Internal(error)
     }
 }

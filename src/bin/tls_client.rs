@@ -58,6 +58,7 @@ use torrent::tls::helpers::{
     get_derived_prk,
     encrypt_traffic,
     decrypt_message,
+    verify_finished,
 };
 
 fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
@@ -164,9 +165,6 @@ impl ClientHelloSent {
                 let hs = TrafficSecrets::derive_from(&ciphers, &self.transcript, &prk, "hs")?;
                 println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client.raw));
                 println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server.raw));
-
-                // handshake_traffic_secrets = Some(hs);
-                //
 
                 Ok(State::ServerHelloReceived(ServerHelloReceived {
                     common: HandshakeCommon {
@@ -405,7 +403,7 @@ impl ServerCertificateReceived {
                 let ciphers = self.common.ciphers;
                 let handshake_secrets = &self.common.handshake_secrets;
 
-                println!("    Received Handshake::Finished with {} bytes", finished.data.len());
+                println!("    Received Handshake::Finished with {} bytes", finished.verify_data.len());
                 let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
                 let new_prk = get_derived_prk(ciphers.hash_alg, &self.common.prk, input_psk)?;
 
@@ -413,27 +411,10 @@ impl ServerCertificateReceived {
                 println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client.raw));
                 println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server.raw));
 
-                {
-                    let finished_key: Vec<u8> =
-                        derive_secret(ciphers.hash_alg, &handshake_secrets.server.raw, b"finished", &[])?;
-                    {
-                        println!("server_finished_key = {:?}", BinaryData(&finished_key));
-                        println!();
-                        println!("server_finish: handshake_hash = {:?}", BinaryData(&old_transcript_hash));
-                        let verify_data: Vec<u8> = ciphers.hash_alg.hmac_sign(&finished_key, &old_transcript_hash)?;
-                        println!("server_finish: verify_data    = {:?}", BinaryData(&verify_data));
-                        println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
-                        println!();
-                    }
 
-                    if ciphers.hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data)? {
-                        println!("Finished (hash_alg): Verification succeeded");
-                    }
-                    else {
-                        println!("Finished (hash_alg): Verification failed");
-                        return Err(GeneralError::new("Incorrect finished data"));
-                    }
-                }
+                // let mut bad_finished = Finished { verify_data: finished.verify_data.clone() };
+                // bad_finished.verify_data.push(0);
+                verify_finished(ciphers.hash_alg, &handshake_secrets.server, &old_transcript_hash, &finished)?;
 
                 // Send Client Finished message
                 {
@@ -450,7 +431,7 @@ impl ServerCertificateReceived {
                     println!("client_finish: verify_data    = {:?}", BinaryData(&verify_data));
 
                     let client_finished = Handshake::Finished(Finished {
-                        data: ciphers.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
+                        verify_data: ciphers.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
                     });
 
                     let mut writer = BinaryWriter::new();
@@ -885,14 +866,13 @@ impl Connection {
     }
 
     fn check_events(&self) {
-        // FIXME: Not sure if this is reliable due to the possibilitt that client.state could
-        // be None.
         let established = match self.session.lock().unwrap().client.state {
             Some(State::Established(_)) => true,
             _ => false,
         };
-        println!("Notifying that session has been established");
         if established {
+            // FIXME: Do this only once, not on every call
+            // println!("Notifying that session has been established");
             self.established_not.notify_one();
         }
     }
