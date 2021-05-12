@@ -167,6 +167,25 @@ fn send_finished(
     Ok(())
 }
 
+struct Start {
+    transcript: Vec<u8>,
+    my_private_key: Option<EphemeralPrivateKey>,
+}
+
+impl Start {
+    fn handshake(mut self,
+                 _handshake: &Handshake,
+                 _handshake_bytes: &[u8]) -> Result<State, Box<dyn Error>> {
+        Err(GeneralError::new("Received Handshake in Start state"))
+    }
+
+    fn application_data(mut self,
+                        _conn: &mut ClientConn,
+                        _plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
+        Err(GeneralError::new("Received ApplicationData in Start state"))
+    }
+}
+
 struct ClientHelloSent {
     transcript: Vec<u8>,
     my_private_key: Option<EphemeralPrivateKey>,
@@ -585,6 +604,7 @@ impl ClientConn {
 }
 
 enum State {
+    Start(Start),
     ClientHelloSent(ClientHelloSent),
     ServerHelloReceived(ServerHelloReceived),
     EncryptedExtensionsReceived(EncryptedExtensionsReceived),
@@ -596,6 +616,7 @@ enum State {
 impl State {
     fn name(&self) -> &'static str {
         match self {
+            State::Start(_) => "Start",
             State::ClientHelloSent(_) => "ClientHelloSent",
             State::ServerHelloReceived(_) => "ServerHelloReceived",
             State::EncryptedExtensionsReceived(_) => "EncryptedExtensionsReceived",
@@ -656,6 +677,7 @@ impl Client {
 
             self.state = Some(
                 match self.state.take() {
+                    Some(State::Start(s)) => s.handshake(&server_handshake, handshake_bytes)?,
                     Some(State::ClientHelloSent(s)) => s.handshake(&server_handshake, handshake_bytes)?,
                     Some(State::ServerHelloReceived(s)) => s.handshake(&server_handshake, handshake_bytes)?,
                     Some(State::EncryptedExtensionsReceived(s)) => s.handshake(&server_handshake, handshake_bytes)?,
@@ -678,6 +700,7 @@ impl Client {
                         ) -> Result<(), Box<dyn Error>> {
         self.state = Some(
             match self.state.take() {
+                Some(State::Start(s)) => s.application_data(conn, plaintext)?,
                 Some(State::ClientHelloSent(s)) => s.application_data(conn, plaintext)?,
                 Some(State::ServerHelloReceived(s)) => s.application_data(conn, plaintext)?,
                 Some(State::EncryptedExtensionsReceived(s)) => s.application_data(conn, plaintext)?,
@@ -722,6 +745,69 @@ impl Session {
             read_closed: false,
             write_closed: false,
             error: None,
+        }
+    }
+
+    pub fn write_client_hello(&mut self, handshake: &Handshake) -> Result<(), Box<dyn Error>> {
+        match &mut self.client.state {
+            Some(State::Start(start)) => {
+                let client_hello_plaintext_record: TLSOutputPlaintext = handshake_to_record(&handshake)?;
+
+                let my_private_key: EphemeralPrivateKey = match start.my_private_key.take() {
+                    Some(v) => v,
+                    None => {
+                        return Err(GeneralError::new("my_private_key is None"));
+                    }
+                };
+
+
+                // let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
+                // self.outgoing_data.extend_from_slice(&client_hello_plaintext_record_bytes);
+
+                // let mut transcript: Vec<u8> = start.transcript.clone();
+                // transcript.extend_from_slice(&client_hello_plaintext_record.fragment);
+
+                let mut transcript: Vec<u8> = start.transcript.clone();
+                transcript.extend_from_slice(&client_hello_plaintext_record.fragment);
+
+                self.write_plaintext_record(&client_hello_plaintext_record)?;
+
+
+
+                self.client.state = Some(State::ClientHelloSent(ClientHelloSent {
+                    my_private_key: Some(my_private_key),
+                    transcript: transcript,
+                }));
+
+                // let mut initial_transcript: Vec<u8> = Vec::new();
+                // initial_transcript.extend_from_slice(&client_hello_bytes);
+
+                Ok(())
+            }
+            _ => {
+                Err(GeneralError::new("Attempt to write ClientHello when not in Start state"))
+            }
+        }
+    }
+
+    pub fn write_plaintext_record(&mut self, client_hello_plaintext_record: &TLSOutputPlaintext) -> Result<(), Box<dyn Error>> {
+        match &mut self.client.state {
+            Some(State::Start(start)) => {
+                let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
+                self.outgoing_data.extend_from_slice(&client_hello_plaintext_record_bytes);
+
+
+
+                Ok(())
+            }
+            None => {
+                println!("write_plaintext: state = None");
+                Err(GeneralError::new("client.state is None"))
+            }
+            _ => {
+                println!("write_plaintext: state = Other");
+                Err(GeneralError::new("Session is not yet established"))
+            }
         }
     }
 
@@ -849,6 +935,13 @@ impl Connection {
             debug: false,
             established_not: Notify::new(),
         }
+    }
+
+    async fn write_client_hello(&self, handshake: &Handshake) -> Result<(), Box<dyn Error>> {
+        self.session.lock().unwrap().write_client_hello(handshake)?;
+        self.read_not.notify_one();
+        self.write_not.notify_one();
+        Ok(())
     }
 
     async fn wait_till_established(&self) -> Result<(), Box<dyn Error>> {
@@ -987,22 +1080,13 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
     let client_hello = make_client_hello(my_public_key_bytes);
     let handshake = Handshake::ClientHello(client_hello);
-    let client_hello_plaintext_record: TLSOutputPlaintext = handshake_to_record(&handshake)?;
-    let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
-    let client_hello_bytes: Vec<u8> = Vec::from(client_hello_plaintext_record.fragment);
 
-    let serialized_filename = "record-constructed.bin";
-    std::fs::write(serialized_filename, &client_hello_plaintext_record_bytes)?;
-    println!("Wrote {}", serialized_filename);
 
     let mut socket = TcpStream::connect("localhost:443").await?;
-    socket.write_all(&client_hello_plaintext_record_bytes).await?;
 
-    let mut initial_transcript: Vec<u8> = Vec::new();
-    initial_transcript.extend_from_slice(&client_hello_bytes);
     let mut client = Client {
-        state: Some(State::ClientHelloSent(ClientHelloSent {
-            transcript: initial_transcript,
+        state: Some(State::Start(Start {
+            transcript: Vec::new(),
             my_private_key: my_private_key,
         })),
         received_alert: None,
@@ -1025,6 +1109,8 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let write_handle = tokio::spawn(async move {
         write_loop(write_conn, &mut write_half).await
     });
+
+    conn.write_client_hello(&handshake).await?;
 
     println!("**** before wait_till_established()");
     conn.wait_till_established().await?;
