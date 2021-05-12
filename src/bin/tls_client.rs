@@ -147,19 +147,22 @@ impl ClientHelloSent {
 
         match handshake {
             Handshake::ServerHello(server_hello) => {
-                let hash_alg: HashAlgorithm;
-                let aead_alg: AeadAlgorithm;
+                let ciphers: Ciphers;
 
                 match server_hello.cipher_suite {
                     CipherSuite::TLS_AES_128_GCM_SHA256 => {
                         println!("Received ServerHello: Using cipher suite TLS_AES_128_GCM_SHA256");
-                        hash_alg = HashAlgorithm::SHA256;
-                        aead_alg = AeadAlgorithm::AES_128_GCM_SHA256;
+                        ciphers = Ciphers {
+                            hash_alg: HashAlgorithm::SHA256,
+                            aead_alg: AeadAlgorithm::AES_128_GCM_SHA256,
+                        };
                     }
                     CipherSuite::TLS_AES_256_GCM_SHA384 => {
                         println!("Received ServerHello: Using cipher suite TLS_AES_256_GCM_SHA384");
-                        hash_alg = HashAlgorithm::SHA384;
-                        aead_alg = AeadAlgorithm::AES_256_GCM_SHA384;
+                        ciphers = Ciphers {
+                            hash_alg: HashAlgorithm::SHA384,
+                            aead_alg: AeadAlgorithm::AES_256_GCM_SHA384,
+                        };
                     }
                     _ => {
                         return Err("Unsupported cipher suite".into());
@@ -175,20 +178,20 @@ impl ClientHelloSent {
                 };
                 println!("Shared secret = {}", BinaryData(&secret));
 
-                let prk = get_derived_prk(hash_alg, &get_zero_prk(hash_alg), secret)?;
+                let prk = get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), secret)?;
 
                 println!("Got expected server hello");
 
-                let thash = transcript_hash(hash_alg, &self.transcript);
+                let thash = transcript_hash(ciphers.hash_alg, &self.transcript);
                 let hs = TrafficSecrets {
                     client: EncryptionKey::new(
-                        derive_secret(hash_alg, &prk, b"c hs traffic", &thash)?,
-                        hash_alg,
-                        aead_alg)?,
+                        derive_secret(ciphers.hash_alg, &prk, b"c hs traffic", &thash)?,
+                        ciphers.hash_alg,
+                        ciphers.aead_alg)?,
                     server: EncryptionKey::new(
-                        derive_secret(hash_alg, &prk, b"s hs traffic", &thash)?,
-                        hash_alg,
-                        aead_alg)?,
+                        derive_secret(ciphers.hash_alg, &prk, b"s hs traffic", &thash)?,
+                        ciphers.hash_alg,
+                        ciphers.aead_alg)?,
                 };
 
                 println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client.raw));
@@ -199,8 +202,7 @@ impl ClientHelloSent {
 
                 Ok(State::ServerHelloReceived(ServerHelloReceived {
                     common: HandshakeCommon {
-                        hash_alg,
-                        aead_alg,
+                        ciphers,
                         prk,
                         transcript: self.transcript.clone(), // TODO: Avoid clone
                         handshake_secrets: hs,
@@ -222,9 +224,14 @@ impl ClientHelloSent {
 }
 
 #[derive(Clone)] // TODO: Avoid need for clone
-struct HandshakeCommon {
+struct Ciphers {
     hash_alg: HashAlgorithm,
     aead_alg: AeadAlgorithm,
+}
+
+#[derive(Clone)] // TODO: Avoid need for clone
+struct HandshakeCommon {
+    ciphers: Ciphers,
     prk: Vec<u8>,
     transcript: Vec<u8>,
     handshake_secrets: TrafficSecrets,
@@ -391,9 +398,9 @@ impl ServerCertificateReceived {
                         conn: &mut ClientConn,
                         plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
 
-        let old_transcript_hash: Vec<u8> = transcript_hash(self.common.hash_alg, &self.common.transcript);
+        let old_transcript_hash: Vec<u8> = transcript_hash(self.common.ciphers.hash_alg, &self.common.transcript);
         let message = self.common.decrypt_next_message(plaintext.raw)?;
-        let new_transcript_hash: Vec<u8> = transcript_hash(self.common.hash_alg, &self.common.transcript);
+        let new_transcript_hash: Vec<u8> = transcript_hash(self.common.ciphers.hash_alg, &self.common.transcript);
 
         match message {
             Message::Handshake(Handshake::CertificateVerify(certificate_verify)) => {
@@ -405,42 +412,41 @@ impl ServerCertificateReceived {
                 Ok(State::ServerCertificateReceived(self))
             }
             Message::Handshake(Handshake::Finished(finished)) => {
-                let hash_alg = self.common.hash_alg;
-                let aead_alg = self.common.aead_alg;
+                let ciphers = self.common.ciphers;
                 let handshake_secrets = &self.common.handshake_secrets;
 
                 println!("    Received Handshake::Finished with {} bytes", finished.data.len());
-                let input_psk: &[u8] = &vec_with_len(hash_alg.byte_len());
-                let new_prk = get_derived_prk(hash_alg, &self.common.prk, input_psk)?;
+                let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
+                let new_prk = get_derived_prk(ciphers.hash_alg, &self.common.prk, input_psk)?;
 
-                let thash = transcript_hash(hash_alg, &self.common.transcript);
+                let thash = transcript_hash(ciphers.hash_alg, &self.common.transcript);
                 let ap = TrafficSecrets {
                     client: EncryptionKey::new(
-                        derive_secret(hash_alg, &new_prk, b"c ap traffic", &thash)?,
-                        hash_alg,
-                        aead_alg)?,
+                        derive_secret(ciphers.hash_alg, &new_prk, b"c ap traffic", &thash)?,
+                        ciphers.hash_alg,
+                        ciphers.aead_alg)?,
                     server: EncryptionKey::new(
-                        derive_secret(hash_alg, &new_prk, b"s ap traffic", &thash)?,
-                        hash_alg,
-                        aead_alg)?,
+                        derive_secret(ciphers.hash_alg, &new_prk, b"s ap traffic", &thash)?,
+                        ciphers.hash_alg,
+                        ciphers.aead_alg)?,
                 };
                 println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client.raw));
                 println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server.raw));
 
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(hash_alg, &handshake_secrets.server.raw, b"finished", &[])?;
+                        derive_secret(ciphers.hash_alg, &handshake_secrets.server.raw, b"finished", &[])?;
                     {
                         println!("server_finished_key = {:?}", BinaryData(&finished_key));
                         println!();
                         println!("server_finish: handshake_hash = {:?}", BinaryData(&old_transcript_hash));
-                        let verify_data: Vec<u8> = hash_alg.hmac_sign(&finished_key, &old_transcript_hash)?;
+                        let verify_data: Vec<u8> = ciphers.hash_alg.hmac_sign(&finished_key, &old_transcript_hash)?;
                         println!("server_finish: verify_data    = {:?}", BinaryData(&verify_data));
                         println!("server_finish: finished.data  = {:?}", BinaryData(&finished.data));
                         println!();
                     }
 
-                    if hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data)? {
+                    if ciphers.hash_alg.hmac_verify(&finished_key, &old_transcript_hash, &finished.data)? {
                         println!("Finished (hash_alg): Verification succeeded");
                     }
                     else {
@@ -452,7 +458,7 @@ impl ServerCertificateReceived {
                 // Send Client Finished message
                 {
                     let finished_key: Vec<u8> =
-                        derive_secret(hash_alg, &handshake_secrets.client.raw, b"finished", &[])?;
+                        derive_secret(ciphers.hash_alg, &handshake_secrets.client.raw, b"finished", &[])?;
 
                     println!("client_finished_key = {:?}", BinaryData(&finished_key));
                     println!();
@@ -460,11 +466,11 @@ impl ServerCertificateReceived {
                              BinaryData(&new_transcript_hash));
 
                     let verify_data: Vec<u8> =
-                        hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
+                        ciphers.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
                     println!("client_finish: verify_data    = {:?}", BinaryData(&verify_data));
 
                     let client_finished = Handshake::Finished(Finished {
-                        data: hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
+                        data: ciphers.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
                     });
 
                     let mut writer = BinaryWriter::new();
@@ -479,8 +485,7 @@ impl ServerCertificateReceived {
                 }
 
                 Ok(State::Established(Established {
-                    hash_alg: self.common.hash_alg,
-                    aead_alg: self.common.aead_alg,
+                    ciphers,
                     prk: new_prk,
                     application_secrets: ap,
                     client_sequence_no: 0,
@@ -497,8 +502,7 @@ impl ServerCertificateReceived {
 
 
 struct Established {
-    hash_alg: HashAlgorithm,
-    aead_alg: AeadAlgorithm,
+    ciphers: Ciphers,
     prk: Vec<u8>,
     application_secrets: TrafficSecrets,
     client_sequence_no: u64,
