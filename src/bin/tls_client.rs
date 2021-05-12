@@ -136,6 +136,37 @@ fn transcript_hash(alg: HashAlgorithm, transcript: &[u8]) -> Vec<u8> {
     alg.hash(transcript)
 }
 
+fn send_finished(
+    hash_alg: HashAlgorithm,
+    encryption_key: &EncryptionKey,
+    new_transcript_hash: &[u8],
+    conn: &mut ClientConn,
+    sequence_no: u64,
+) -> Result<(), Box<dyn Error>> {
+    let finished_key: Vec<u8> = derive_secret(hash_alg, &encryption_key.raw, b"finished", &[])?;
+
+    // println!("send_finished(): key = {:?}", BinaryData(&finished_key));
+    // println!();
+    // println!("send_finished(): handshake_hash = {:?}", BinaryData(&new_transcript_hash));
+
+    let verify_data: Vec<u8> = hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
+    // println!("send_finished(): verify_data    = {:?}", BinaryData(&verify_data));
+
+    let client_finished = Handshake::Finished(Finished { verify_data });
+
+    let mut writer = BinaryWriter::new();
+    writer.write_item(&client_finished)?;
+    let finished_bytes: Vec<u8> = Vec::from(writer);
+    conn.append_encrypted(
+        finished_bytes,         // to_encrypt
+        ContentType::Handshake, // content_type
+        &encryption_key,        // traffic_secret
+        sequence_no,            // sequence_no
+    )?;
+
+    Ok(())
+}
+
 struct ClientHelloSent {
     transcript: Vec<u8>,
     my_private_key: Option<EphemeralPrivateKey>,
@@ -386,9 +417,9 @@ impl ServerCertificateReceived {
                         conn: &mut ClientConn,
                         plaintext: TLSPlaintext) -> Result<State, Box<dyn Error>> {
 
-        let old_transcript_hash: Vec<u8> = transcript_hash(self.common.ciphers.hash_alg, &self.common.transcript);
+        let old_thash: Vec<u8> = transcript_hash(self.common.ciphers.hash_alg, &self.common.transcript);
         let message = self.common.decrypt_next_message(plaintext.raw)?;
-        let new_transcript_hash: Vec<u8> = transcript_hash(self.common.ciphers.hash_alg, &self.common.transcript);
+        let new_thash: Vec<u8> = transcript_hash(self.common.ciphers.hash_alg, &self.common.transcript);
 
         match message {
             Message::Handshake(Handshake::CertificateVerify(certificate_verify)) => {
@@ -401,7 +432,7 @@ impl ServerCertificateReceived {
             }
             Message::Handshake(Handshake::Finished(finished)) => {
                 let ciphers = self.common.ciphers;
-                let handshake_secrets = &self.common.handshake_secrets;
+                let secrets = &self.common.handshake_secrets;
 
                 println!("    Received Handshake::Finished with {} bytes", finished.verify_data.len());
                 let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
@@ -414,36 +445,12 @@ impl ServerCertificateReceived {
 
                 // let mut bad_finished = Finished { verify_data: finished.verify_data.clone() };
                 // bad_finished.verify_data.push(0);
-                verify_finished(ciphers.hash_alg, &handshake_secrets.server, &old_transcript_hash, &finished)?;
+                verify_finished(ciphers.hash_alg, &secrets.server, &old_thash, &finished)?;
 
-                // Send Client Finished message
-                {
-                    let finished_key: Vec<u8> =
-                        derive_secret(ciphers.hash_alg, &handshake_secrets.client.raw, b"finished", &[])?;
-
-                    println!("client_finished_key = {:?}", BinaryData(&finished_key));
-                    println!();
-                    println!("client_finish: handshake_hash = {:?}",
-                             BinaryData(&new_transcript_hash));
-
-                    let verify_data: Vec<u8> =
-                        ciphers.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
-                    println!("client_finish: verify_data    = {:?}", BinaryData(&verify_data));
-
-                    let client_finished = Handshake::Finished(Finished {
-                        verify_data: ciphers.hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?,
-                    });
-
-                    let mut writer = BinaryWriter::new();
-                    writer.write_item(&client_finished)?;
-                    let client_finished_bytes: Vec<u8> = Vec::from(writer);
-                    conn.append_encrypted(
-                        client_finished_bytes,          // to_encrypt
-                        ContentType::Handshake,         // content_type
-                        &handshake_secrets.client, // traffic_secret
-                        0,                              // client_sequence_no
-                    )?;
-                }
+                // let mut bad_new_thash = new_thash.clone();
+                // bad_new_thash.push(0);
+                let client_sequence_no: u64 = 0;
+                send_finished(ciphers.hash_alg, &secrets.client, &new_thash, conn, client_sequence_no)?;
 
                 Ok(State::Established(Established {
                     ciphers,
