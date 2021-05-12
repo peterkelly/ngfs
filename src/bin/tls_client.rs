@@ -24,6 +24,7 @@ use torrent::tls::types::handshake::{
     CipherSuite,
     Handshake,
     ClientHello,
+    ServerHello,
     Finished,
     Certificate,
     CertificateRequest,
@@ -147,29 +148,7 @@ impl ClientHelloSent {
 
         match handshake {
             Handshake::ServerHello(server_hello) => {
-                let ciphers: Ciphers;
-
-                match server_hello.cipher_suite {
-                    CipherSuite::TLS_AES_128_GCM_SHA256 => {
-                        println!("Received ServerHello: Using cipher suite TLS_AES_128_GCM_SHA256");
-                        ciphers = Ciphers {
-                            hash_alg: HashAlgorithm::SHA256,
-                            aead_alg: AeadAlgorithm::AES_128_GCM_SHA256,
-                        };
-                    }
-                    CipherSuite::TLS_AES_256_GCM_SHA384 => {
-                        println!("Received ServerHello: Using cipher suite TLS_AES_256_GCM_SHA384");
-                        ciphers = Ciphers {
-                            hash_alg: HashAlgorithm::SHA384,
-                            aead_alg: AeadAlgorithm::AES_256_GCM_SHA384,
-                        };
-                    }
-                    _ => {
-                        return Err("Unsupported cipher suite".into());
-                    }
-                };
-
-                // let prk = get_zero_prk(hash_alg);
+                let ciphers = Ciphers::from_server_hello(server_hello)?;
 
                 let my_private_key2 = self.my_private_key.take().unwrap();
                 let secret: &[u8] = &match get_server_hello_x25519_shared_secret(my_private_key2, &server_hello) {
@@ -227,6 +206,28 @@ impl ClientHelloSent {
 struct Ciphers {
     hash_alg: HashAlgorithm,
     aead_alg: AeadAlgorithm,
+}
+
+impl Ciphers {
+    fn from_server_hello(server_hello: &ServerHello) -> Result<Self, Box<dyn Error>> {
+        match server_hello.cipher_suite {
+            CipherSuite::TLS_AES_128_GCM_SHA256 => {
+                Ok(Ciphers {
+                    hash_alg: HashAlgorithm::SHA256,
+                    aead_alg: AeadAlgorithm::AES_128_GCM_SHA256,
+                })
+            }
+            CipherSuite::TLS_AES_256_GCM_SHA384 => {
+                Ok(Ciphers {
+                    hash_alg: HashAlgorithm::SHA384,
+                    aead_alg: AeadAlgorithm::AES_256_GCM_SHA384,
+                })
+            }
+            _ => {
+                Err("Unsupported cipher suite".into())
+            }
+        }
+    }
 }
 
 #[derive(Clone)] // TODO: Avoid need for clone
