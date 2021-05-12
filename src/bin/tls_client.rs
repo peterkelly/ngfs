@@ -161,18 +161,7 @@ impl ClientHelloSent {
 
                 println!("Got expected server hello");
 
-                let thash = transcript_hash(ciphers.hash_alg, &self.transcript);
-                let hs = TrafficSecrets {
-                    client: EncryptionKey::new(
-                        derive_secret(ciphers.hash_alg, &prk, b"c hs traffic", &thash)?,
-                        ciphers.hash_alg,
-                        ciphers.aead_alg)?,
-                    server: EncryptionKey::new(
-                        derive_secret(ciphers.hash_alg, &prk, b"s hs traffic", &thash)?,
-                        ciphers.hash_alg,
-                        ciphers.aead_alg)?,
-                };
-
+                let hs = TrafficSecrets::derive_from(&ciphers, &self.transcript, &prk, "hs")?;
                 println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client.raw));
                 println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server.raw));
 
@@ -420,17 +409,7 @@ impl ServerCertificateReceived {
                 let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
                 let new_prk = get_derived_prk(ciphers.hash_alg, &self.common.prk, input_psk)?;
 
-                let thash = transcript_hash(ciphers.hash_alg, &self.common.transcript);
-                let ap = TrafficSecrets {
-                    client: EncryptionKey::new(
-                        derive_secret(ciphers.hash_alg, &new_prk, b"c ap traffic", &thash)?,
-                        ciphers.hash_alg,
-                        ciphers.aead_alg)?,
-                    server: EncryptionKey::new(
-                        derive_secret(ciphers.hash_alg, &new_prk, b"s ap traffic", &thash)?,
-                        ciphers.hash_alg,
-                        ciphers.aead_alg)?,
-                };
+                let ap = TrafficSecrets::derive_from(&ciphers, &self.common.transcript, &new_prk, "ap")?;
                 println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client.raw));
                 println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server.raw));
 
@@ -556,6 +535,24 @@ struct TrafficSecrets {
     server: EncryptionKey,
 }
 
+impl TrafficSecrets {
+    fn derive_from(ciphers: &Ciphers, transcript: &[u8], prk: &[u8], label: &str) -> Result<Self, Box<dyn Error>> {
+        let client_label = format!("c {} traffic", label);
+        let server_label = format!("s {} traffic", label);
+        let thash = transcript_hash(ciphers.hash_alg, transcript);
+        Ok(TrafficSecrets {
+            client: EncryptionKey::new(
+                derive_secret(ciphers.hash_alg, &prk, client_label.as_bytes(), &thash)?,
+                ciphers.hash_alg,
+                ciphers.aead_alg)?,
+            server: EncryptionKey::new(
+                derive_secret(ciphers.hash_alg, &prk, server_label.as_bytes(), &thash)?,
+                ciphers.hash_alg,
+                ciphers.aead_alg)?,
+        })
+    }
+}
+
 struct ClientConn {
     to_send: Vec<u8>,
 }
@@ -669,18 +666,20 @@ impl Client {
 
             println!("{:#?}", server_handshake);
 
-            // FIXME: This will panic if an earlier message handler returned an error, causing
-            // the state to be None
             self.state = Some(
-                match self.state.take().unwrap() {
-                    State::ClientHelloSent(s) => s.handshake(&server_handshake, handshake_bytes)?,
-                    State::ServerHelloReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
-                    State::EncryptedExtensionsReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
-                    State::CertificateRequestReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
-                    State::ServerCertificateReceived(s) => s.handshake(&server_handshake, handshake_bytes)?,
-                    State::Established(s) => s.handshake(&server_handshake, handshake_bytes)?,
+                match self.state.take() {
+                    Some(State::ClientHelloSent(s)) => s.handshake(&server_handshake, handshake_bytes)?,
+                    Some(State::ServerHelloReceived(s)) => s.handshake(&server_handshake, handshake_bytes)?,
+                    Some(State::EncryptedExtensionsReceived(s)) => s.handshake(&server_handshake, handshake_bytes)?,
+                    Some(State::CertificateRequestReceived(s)) => s.handshake(&server_handshake, handshake_bytes)?,
+                    Some(State::ServerCertificateReceived(s)) => s.handshake(&server_handshake, handshake_bytes)?,
+                    Some(State::Established(s)) => s.handshake(&server_handshake, handshake_bytes)?,
+                    None => return Err(GeneralError::new("state is None")),
                 });
-            println!("state = {}", self.state.as_ref().unwrap().name());
+            match &self.state {
+                Some(state) => println!("state = {}", state.name()),
+                None => println!("state = None"),
+            };
         }
         Ok(())
     }
@@ -689,18 +688,20 @@ impl Client {
                         conn: &mut ClientConn,
                         plaintext: TLSPlaintext,
                         ) -> Result<(), Box<dyn Error>> {
-        // FIXME: This will panic if an earlier message handler returned an error, causing
-        // the state to be None
         self.state = Some(
-            match self.state.take().unwrap() {
-                State::ClientHelloSent(s) => s.application_data(conn, plaintext)?,
-                State::ServerHelloReceived(s) => s.application_data(conn, plaintext)?,
-                State::EncryptedExtensionsReceived(s) => s.application_data(conn, plaintext)?,
-                State::CertificateRequestReceived(s) => s.application_data(conn, plaintext)?,
-                State::ServerCertificateReceived(s) => s.application_data(conn, plaintext)?,
-                State::Established(s) => s.application_data(conn, plaintext)?,
+            match self.state.take() {
+                Some(State::ClientHelloSent(s)) => s.application_data(conn, plaintext)?,
+                Some(State::ServerHelloReceived(s)) => s.application_data(conn, plaintext)?,
+                Some(State::EncryptedExtensionsReceived(s)) => s.application_data(conn, plaintext)?,
+                Some(State::CertificateRequestReceived(s)) => s.application_data(conn, plaintext)?,
+                Some(State::ServerCertificateReceived(s)) => s.application_data(conn, plaintext)?,
+                Some(State::Established(s)) => s.application_data(conn, plaintext)?,
+                None => return Err(GeneralError::new("state is None")),
             });
-        println!("state = {}", self.state.as_ref().unwrap().name());
+        match &self.state {
+            Some(state) => println!("state = {}", state.name()),
+            None => println!("state = None"),
+        };
 
         Ok(())
     }
