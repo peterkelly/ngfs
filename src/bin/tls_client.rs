@@ -64,9 +64,7 @@ use torrent::tls::helpers::{
     verify_finished,
 };
 use torrent::tls::protocol::client::{
-    ClientConn,
-    Phase,
-    PhaseOne,
+    Client,
 };
 
 fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
@@ -140,102 +138,6 @@ fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     }
 }
 
-struct Client {
-    received_alert: Option<Alert>,
-    phase: Option<Phase>,
-}
-
-impl Client {
-    fn handshake(&mut self,
-                 conn: &mut ClientConn,
-                 plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
-        // println!("Handshake record");
-        let mut reader = BinaryReader::new(plaintext.fragment);
-        while reader.remaining() > 0 {
-            let old_offset = reader.abs_offset();
-            let server_handshake = reader.read_item::<Handshake>()?;
-            let new_offset = reader.abs_offset();
-            let handshake_bytes: &[u8] = &plaintext.fragment[old_offset..new_offset];
-            self.handshake_one(conn, &server_handshake, handshake_bytes)?;
-        }
-        Ok(())
-    }
-
-    fn handshake_one(
-        &mut self,
-        conn: &mut ClientConn,
-        handshake: &Handshake,
-        handshake_bytes: &[u8],
-    ) -> Result<(), Box<dyn Error>> {
-        let phase = self.phase.take();
-        match phase {
-            Some(phase) => {
-                let transition = phase.handshake(handshake, handshake_bytes);
-                self.phase = Some(transition.phase);
-                match transition.error {
-                    Some(e) => Err(e),
-                    None => Ok(())
-                }
-            }
-            None => {
-                Err(GeneralError::new("phase is None"))
-            }
-        }
-    }
-
-    fn application_data(
-        &mut self,
-        conn: &mut ClientConn,
-        plaintext: TLSPlaintext,
-    ) -> Result<(), Box<dyn Error>> {
-        let phase = self.phase.take();
-        match phase {
-            Some(phase) => {
-                let transition = phase.application_data(conn, plaintext);
-                self.phase = Some(transition.phase);
-                match transition.error {
-                    Some(e) => Err(e),
-                    None => Ok(())
-                }
-            }
-            None => {
-                Err(GeneralError::new("phase is None"))
-            }
-        }
-    }
-
-    fn process_record(
-        &mut self,
-        outgoing_data: &mut Vec<u8>,
-        plaintext: TLSPlaintext,
-    ) -> Result<(), Box<dyn Error>> {
-        let mut conn = ClientConn::new();
-        match plaintext.content_type {
-            ContentType::Handshake => self.handshake(&mut conn, plaintext)?,
-            ContentType::ApplicationData => self.application_data(&mut conn, plaintext)?,
-            ContentType::Invalid => {
-                println!("Unsupported record type: Invalid");
-            }
-            ContentType::ChangeCipherSpec => {
-                println!("ChangeCipherSpec record: Ignoring");
-            }
-            ContentType::Alert => {
-                // TODO: Have this function passed a *complete* plaintext data, even if the alert data
-                // is spread over multiple plaintext records
-                let mut reader = BinaryReader::new(plaintext.fragment);
-                let alert = reader.read_item::<Alert>()?;
-                println!("Received alert: {:?}", alert);
-                self.received_alert = Some(alert);
-            }
-            ContentType::Unknown(code) => {
-                println!("Unsupported record type: {}", code);
-            }
-        }
-        outgoing_data.extend_from_slice(&conn.to_send);
-        Ok(())
-    }
-}
-
 struct Session {
     client: Client,
     incoming_data: Vec<u8>,
@@ -260,63 +162,7 @@ impl Session {
     }
 
     pub fn write_client_hello(&mut self, handshake: &Handshake) -> Result<(), Box<dyn Error>> {
-        match &mut self.client.phase {
-            Some(Phase::One(phase)) => {
-                let client_hello_plaintext_record: TLSOutputPlaintext = handshake_to_record(&handshake)?;
-
-                let my_private_key: EphemeralPrivateKey = match phase.my_private_key.take() {
-                    Some(v) => v,
-                    None => {
-                        return Err(GeneralError::new("my_private_key is None"));
-                    }
-                };
-
-
-                // let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
-                // self.outgoing_data.extend_from_slice(&client_hello_plaintext_record_bytes);
-
-                // let mut transcript: Vec<u8> = start.transcript.clone();
-                // transcript.extend_from_slice(&client_hello_plaintext_record.fragment);
-
-                let mut transcript: Vec<u8> = phase.transcript.clone();
-                transcript.extend_from_slice(&client_hello_plaintext_record.fragment);
-
-                self.write_plaintext_record(&client_hello_plaintext_record)?;
-
-
-
-                self.client.phase = Some(Phase::One(PhaseOne {
-                    my_private_key: Some(my_private_key),
-                    transcript: transcript,
-                }));
-
-                // let mut initial_transcript: Vec<u8> = Vec::new();
-                // initial_transcript.extend_from_slice(&client_hello_bytes);
-
-                Ok(())
-            }
-            _ => {
-                Err(GeneralError::new("Attempt to write ClientHello when not in Phase::One"))
-            }
-        }
-    }
-
-    pub fn write_plaintext_record(&mut self, client_hello_plaintext_record: &TLSOutputPlaintext) -> Result<(), Box<dyn Error>> {
-        match &mut self.client.phase {
-            Some(Phase::One(_)) => {
-                let client_hello_plaintext_record_bytes: Vec<u8> = client_hello_plaintext_record.to_vec();
-                self.outgoing_data.extend_from_slice(&client_hello_plaintext_record_bytes);
-                Ok(())
-            }
-            None => {
-                println!("write_plaintext: phase = None");
-                Err(GeneralError::new("client.phase is None"))
-            }
-            _ => {
-                println!("write_plaintext: phase = Other");
-                Err(GeneralError::new("Session is not yet established"))
-            }
-        }
+        self.client.write_client_hello(handshake, &mut self.outgoing_data)
     }
 
     pub fn write_plaintext(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
@@ -324,30 +170,7 @@ impl Session {
             Some(_) => return Err(GeneralError::new("Session is dead")),
             None => (),
         };
-        match &mut self.client.phase {
-            Some(Phase::Three(phase)) => {
-                println!("write_plaintext: phase = Three (Established)");
-                let mut conn = ClientConn::new();
-                conn.append_encrypted(
-                    data.to_vec(),
-                    ContentType::ApplicationData,
-                    &phase.application_secrets.client,
-                    phase.client_sequence_no,
-                )?;
-                phase.client_sequence_no += 1;
-                println!("write_plaintext: conn.to_send.len() = {}", conn.to_send.len());
-                self.outgoing_data.extend_from_slice(&conn.to_send);
-                Ok(())
-            }
-            None => {
-                println!("write_plaintext: phase = None");
-                Err(GeneralError::new("client.phase is None"))
-            }
-            _ => {
-                println!("write_plaintext: phase = Other");
-                Err(GeneralError::new("Session is not yet established"))
-            }
-        }
+        self.client.write_plaintext(data, &mut self.outgoing_data)
     }
 
     pub fn add_incoming_data(&mut self, data: &[u8]) {
@@ -459,10 +282,7 @@ impl Connection {
     }
 
     fn check_events(&self) {
-        let established = match self.session.lock().unwrap().client.phase {
-            Some(Phase::Three(_)) => true,
-            _ => false,
-        };
+        let established = self.session.lock().unwrap().client.is_established();
         if established || self.had_error() {
             // FIXME: Do this only once, not on every call
             // println!("Notifying that session has been established");
@@ -564,39 +384,18 @@ async fn write_loop(conn: Arc<Connection>, writer: &mut (dyn AsyncWrite + Unpin 
 
 
 
-fn handshake_to_record(handshake: &Handshake) -> Result<TLSOutputPlaintext, Box<dyn Error>> {
-    let mut writer = BinaryWriter::new();
-    writer.write_item(handshake)?;
-
-    let output_record = TLSOutputPlaintext {
-        content_type: ContentType::Handshake,
-        legacy_record_version: 0x0301,
-        fragment: Vec::<u8>::from(writer),
-    };
-    Ok(output_record)
-}
-
 async fn test_client() -> Result<(), Box<dyn Error>> {
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
     let my_public_key = my_private_key.compute_public_key()?;
     let my_public_key_bytes: &[u8] = my_public_key.as_ref();
     println!("my_public_key_bytes    = {}", BinaryData(my_public_key_bytes));
-    let my_private_key: Option<EphemeralPrivateKey> = Some(my_private_key);
 
     let client_hello = make_client_hello(my_public_key_bytes);
     let handshake = Handshake::ClientHello(client_hello);
 
-
     let mut socket = TcpStream::connect("localhost:443").await?;
-
-    let mut client = Client {
-        received_alert: None,
-        phase: Some(Phase::One(PhaseOne {
-            transcript: Vec::new(),
-            my_private_key: my_private_key,
-        })),
-    };
+    let mut client = Client::new(my_private_key);
 
     let session = Session::new(client);
     let mut conn = Connection::new(session);

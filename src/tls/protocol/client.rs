@@ -35,6 +35,9 @@ use super::super::types::record::{
     TLSPlaintext,
     TLSOutputPlaintext,
 };
+use super::super::types::alert::{
+    Alert,
+};
 use super::super::error::{
     TLSError,
 };
@@ -45,18 +48,18 @@ use super::super::super::binary::{BinaryReader, BinaryWriter};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub struct ClientConn {
-    pub to_send: Vec<u8>,
+struct ClientConn {
+    to_send: Vec<u8>,
 }
 
 impl ClientConn {
-    pub fn new() -> Self {
+    fn new() -> Self {
         ClientConn {
             to_send: Vec::new(),
         }
     }
 
-    pub fn append_encrypted(
+    fn append_encrypted(
         &mut self,
         mut data: Vec<u8>,
         content_type: ContentType,
@@ -112,20 +115,20 @@ fn send_finished(
     Ok(())
 }
 
-pub struct PhaseTransition {
-    pub phase: Phase,
-    pub error: Option<Box<dyn Error>>,
+struct PhaseTransition {
+    phase: Phase,
+    error: Option<Box<dyn Error>>,
 }
 
 impl PhaseTransition {
-    pub fn ok(phase: Phase) -> Self {
+    fn ok(phase: Phase) -> Self {
         PhaseTransition {
             phase: phase,
             error: None,
         }
     }
 
-    pub fn err(phase: Phase, error: Box<dyn Error>) -> Self {
+    fn err(phase: Phase, error: Box<dyn Error>) -> Self {
         PhaseTransition {
             phase: phase,
             error: Some(error),
@@ -134,35 +137,35 @@ impl PhaseTransition {
 }
 
 // Unencrypted data at start of handshake (ClientHello and ServerHello)
-pub struct PhaseOne {
-    pub transcript: Vec<u8>,
-    pub my_private_key: Option<EphemeralPrivateKey>,
+struct PhaseOne {
+    transcript: Vec<u8>,
+    my_private_key: Option<EphemeralPrivateKey>,
 }
 
 // Handshake once encryption established
-pub struct PhaseTwo {
-    pub ciphers: Ciphers,
-    pub prk: Vec<u8>,
-    pub transcript: Vec<u8>,
-    pub handshake_secrets: TrafficSecrets,
-    pub server_sequence_no: u64,
+struct PhaseTwo {
+    ciphers: Ciphers,
+    prk: Vec<u8>,
+    transcript: Vec<u8>,
+    handshake_secrets: TrafficSecrets,
+    server_sequence_no: u64,
 
-    pub encrypted_extensions: Option<Vec<Extension>>,
-    pub server_certificate: Option<Certificate>,
-    pub certificate_request: Option<CertificateRequest>,
-    pub certificate_verify: Option<CertificateVerify>,
+    encrypted_extensions: Option<Vec<Extension>>,
+    server_certificate: Option<Certificate>,
+    certificate_request: Option<CertificateRequest>,
+    certificate_verify: Option<CertificateVerify>,
 }
 
 // Established
-pub struct PhaseThree {
-    pub ciphers: Ciphers,
-    pub prk: Vec<u8>,
-    pub application_secrets: TrafficSecrets,
-    pub client_sequence_no: u64,
-    pub server_sequence_no: u64,
+struct PhaseThree {
+    ciphers: Ciphers,
+    prk: Vec<u8>,
+    application_secrets: TrafficSecrets,
+    client_sequence_no: u64,
+    server_sequence_no: u64,
 }
 
-pub enum Phase {
+enum Phase {
     One(PhaseOne),
     Two(PhaseTwo),
     Three(PhaseThree),
@@ -373,7 +376,7 @@ impl PhaseThree {
 }
 
 impl Phase {
-    pub fn handshake(mut self, handshake: &Handshake, handshake_bytes: &[u8]) -> PhaseTransition {
+    fn handshake(mut self, handshake: &Handshake, handshake_bytes: &[u8]) -> PhaseTransition {
         match self {
             Phase::One(p) => p.handshake(handshake, handshake_bytes),
             Phase::Two(p) => p.handshake(handshake, handshake_bytes),
@@ -381,11 +384,211 @@ impl Phase {
         }
     }
 
-    pub fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
+    fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
         match self {
             Phase::One(p) => p.application_data(conn, plaintext),
             Phase::Two(p) => p.application_data(conn, plaintext),
             Phase::Three(p) => p.application_data(conn, plaintext),
         }
     }
+}
+
+pub struct Client {
+    received_alert: Option<Alert>,
+    phase: Option<Phase>,
+}
+
+impl Client {
+    pub fn new(my_private_key: EphemeralPrivateKey) -> Self {
+        Client {
+            received_alert: None,
+            phase: Some(Phase::One(PhaseOne {
+                transcript: Vec::new(),
+                my_private_key: Some(my_private_key),
+            })),
+        }
+    }
+
+    fn handshake(&mut self,
+                 conn: &mut ClientConn,
+                 plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
+        // println!("Handshake record");
+        let mut reader = BinaryReader::new(plaintext.fragment);
+        while reader.remaining() > 0 {
+            let old_offset = reader.abs_offset();
+            let server_handshake = reader.read_item::<Handshake>()?;
+            let new_offset = reader.abs_offset();
+            let handshake_bytes: &[u8] = &plaintext.fragment[old_offset..new_offset];
+            self.handshake_one(conn, &server_handshake, handshake_bytes)?;
+        }
+        Ok(())
+    }
+
+    fn handshake_one(
+        &mut self,
+        conn: &mut ClientConn,
+        handshake: &Handshake,
+        handshake_bytes: &[u8],
+    ) -> Result<(), Box<dyn Error>> {
+        let phase = self.phase.take();
+        match phase {
+            Some(phase) => {
+                let transition = phase.handshake(handshake, handshake_bytes);
+                self.phase = Some(transition.phase);
+                match transition.error {
+                    Some(e) => Err(e),
+                    None => Ok(())
+                }
+            }
+            None => {
+                Err(GeneralError::new("phase is None"))
+            }
+        }
+    }
+
+    fn application_data(
+        &mut self,
+        conn: &mut ClientConn,
+        plaintext: TLSPlaintext,
+    ) -> Result<(), Box<dyn Error>> {
+        let phase = self.phase.take();
+        match phase {
+            Some(phase) => {
+                let transition = phase.application_data(conn, plaintext);
+                self.phase = Some(transition.phase);
+                match transition.error {
+                    Some(e) => Err(e),
+                    None => Ok(())
+                }
+            }
+            None => {
+                Err(GeneralError::new("phase is None"))
+            }
+        }
+    }
+
+    pub fn process_record(
+        &mut self,
+        outgoing_data: &mut Vec<u8>,
+        plaintext: TLSPlaintext,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut conn = ClientConn::new();
+        match plaintext.content_type {
+            ContentType::Handshake => self.handshake(&mut conn, plaintext)?,
+            ContentType::ApplicationData => self.application_data(&mut conn, plaintext)?,
+            ContentType::Invalid => {
+                println!("Unsupported record type: Invalid");
+            }
+            ContentType::ChangeCipherSpec => {
+                println!("ChangeCipherSpec record: Ignoring");
+            }
+            ContentType::Alert => {
+                // TODO: Have this function passed a *complete* plaintext data, even if the alert data
+                // is spread over multiple plaintext records
+                let mut reader = BinaryReader::new(plaintext.fragment);
+                let alert = reader.read_item::<Alert>()?;
+                println!("Received alert: {:?}", alert);
+                self.received_alert = Some(alert);
+            }
+            ContentType::Unknown(code) => {
+                println!("Unsupported record type: {}", code);
+            }
+        }
+        outgoing_data.extend_from_slice(&conn.to_send);
+        Ok(())
+    }
+
+    pub fn write_client_hello(&mut self, handshake: &Handshake, output: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
+        match &mut self.phase {
+            Some(Phase::One(phase)) => {
+                let client_hello_plaintext_record: TLSOutputPlaintext = handshake_to_record(&handshake)?;
+
+                let my_private_key: EphemeralPrivateKey = match phase.my_private_key.take() {
+                    Some(v) => v,
+                    None => {
+                        return Err(GeneralError::new("my_private_key is None"));
+                    }
+                };
+
+                let mut transcript: Vec<u8> = phase.transcript.clone();
+                transcript.extend_from_slice(&client_hello_plaintext_record.fragment);
+
+                self.write_plaintext_record(&client_hello_plaintext_record, output)?;
+
+                self.phase = Some(Phase::One(PhaseOne {
+                    my_private_key: Some(my_private_key),
+                    transcript: transcript,
+                }));
+
+                Ok(())
+            }
+            _ => {
+                Err(GeneralError::new("Attempt to write ClientHello when not in Phase::One"))
+            }
+        }
+    }
+
+    pub fn write_plaintext_record(&mut self, record: &TLSOutputPlaintext,
+                                  output: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
+        match &mut self.phase {
+            Some(Phase::One(_)) => {
+                output.extend_from_slice(&record.to_vec());
+                Ok(())
+            }
+            None => {
+                println!("write_plaintext: phase = None");
+                Err(GeneralError::new("client.phase is None"))
+            }
+            _ => {
+                println!("write_plaintext: phase = Other");
+                Err(GeneralError::new("Session is not yet established"))
+            }
+        }
+    }
+
+    pub fn write_plaintext(&mut self, data: &[u8], outgoing_data: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
+        match &mut self.phase {
+            Some(Phase::Three(phase)) => {
+                println!("write_plaintext: phase = Three (Established)");
+                let mut conn = ClientConn::new();
+                conn.append_encrypted(
+                    data.to_vec(),
+                    ContentType::ApplicationData,
+                    &phase.application_secrets.client,
+                    phase.client_sequence_no,
+                )?;
+                phase.client_sequence_no += 1;
+                println!("write_plaintext: conn.to_send.len() = {}", conn.to_send.len());
+                outgoing_data.extend_from_slice(&conn.to_send);
+                Ok(())
+            }
+            None => {
+                println!("write_plaintext: phase = None");
+                Err(GeneralError::new("client.phase is None"))
+            }
+            _ => {
+                println!("write_plaintext: phase = Other");
+                Err(GeneralError::new("Session is not yet established"))
+            }
+        }
+    }
+
+    pub fn is_established(&self) -> bool {
+        match &self.phase {
+            Some(Phase::Three(_)) => true,
+            _ => false,
+        }
+    }
+}
+
+fn handshake_to_record(handshake: &Handshake) -> Result<TLSOutputPlaintext, Box<dyn Error>> {
+    let mut writer = BinaryWriter::new();
+    writer.write_item(handshake)?;
+
+    let output_record = TLSOutputPlaintext {
+        content_type: ContentType::Handshake,
+        legacy_record_version: 0x0301,
+        fragment: Vec::<u8>::from(writer),
+    };
+    Ok(output_record)
 }
