@@ -5,6 +5,7 @@ use super::types::handshake::{
     // ClientHello,
     ServerHello,
     Finished,
+    CipherSuite,
 };
 use super::types::extension::{
     Extension,
@@ -38,6 +39,56 @@ impl EncryptionKey {
             aead_alg,
             write_key,
             write_iv,
+        })
+    }
+}
+
+pub struct Ciphers {
+    pub hash_alg: HashAlgorithm,
+    pub aead_alg: AeadAlgorithm,
+}
+
+impl Ciphers {
+    pub fn from_server_hello(server_hello: &ServerHello) -> Result<Self, TLSError> {
+        match server_hello.cipher_suite {
+            CipherSuite::TLS_AES_128_GCM_SHA256 => {
+                Ok(Ciphers {
+                    hash_alg: HashAlgorithm::SHA256,
+                    aead_alg: AeadAlgorithm::AES_128_GCM_SHA256,
+                })
+            }
+            CipherSuite::TLS_AES_256_GCM_SHA384 => {
+                Ok(Ciphers {
+                    hash_alg: HashAlgorithm::SHA384,
+                    aead_alg: AeadAlgorithm::AES_256_GCM_SHA384,
+                })
+            }
+            _ => {
+                Err(TLSError::UnsupportedCipherSuite)
+            }
+        }
+    }
+}
+
+pub struct TrafficSecrets {
+    pub client: EncryptionKey,
+    pub server: EncryptionKey,
+}
+
+impl TrafficSecrets {
+    pub fn derive_from(ciphers: &Ciphers, transcript: &[u8], prk: &[u8], label: &str) -> Result<Self, CryptError> {
+        let client_label = format!("c {} traffic", label);
+        let server_label = format!("s {} traffic", label);
+        let thash = ciphers.hash_alg.hash(transcript);
+        Ok(TrafficSecrets {
+            client: EncryptionKey::new(
+                derive_secret(ciphers.hash_alg, &prk, client_label.as_bytes(), &thash)?,
+                ciphers.hash_alg,
+                ciphers.aead_alg)?,
+            server: EncryptionKey::new(
+                derive_secret(ciphers.hash_alg, &prk, server_label.as_bytes(), &thash)?,
+                ciphers.hash_alg,
+                ciphers.aead_alg)?,
         })
     }
 }

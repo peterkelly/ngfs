@@ -53,6 +53,8 @@ use torrent::tls::types::alert::{
 };
 use torrent::tls::helpers::{
     EncryptionKey,
+    Ciphers,
+    TrafficSecrets,
     derive_secret,
     get_server_hello_x25519_shared_secret,
     get_zero_prk,
@@ -133,10 +135,6 @@ fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     }
 }
 
-fn transcript_hash(alg: HashAlgorithm, transcript: &[u8]) -> Vec<u8> {
-    alg.hash(transcript)
-}
-
 fn send_finished(
     hash_alg: HashAlgorithm,
     encryption_key: &EncryptionKey,
@@ -166,33 +164,6 @@ fn send_finished(
     )?;
 
     Ok(())
-}
-
-struct Ciphers {
-    hash_alg: HashAlgorithm,
-    aead_alg: AeadAlgorithm,
-}
-
-impl Ciphers {
-    fn from_server_hello(server_hello: &ServerHello) -> Result<Self, Box<dyn Error>> {
-        match server_hello.cipher_suite {
-            CipherSuite::TLS_AES_128_GCM_SHA256 => {
-                Ok(Ciphers {
-                    hash_alg: HashAlgorithm::SHA256,
-                    aead_alg: AeadAlgorithm::AES_128_GCM_SHA256,
-                })
-            }
-            CipherSuite::TLS_AES_256_GCM_SHA384 => {
-                Ok(Ciphers {
-                    hash_alg: HashAlgorithm::SHA384,
-                    aead_alg: AeadAlgorithm::AES_256_GCM_SHA384,
-                })
-            }
-            _ => {
-                Err("Unsupported cipher suite".into())
-            }
-        }
-    }
 }
 
 struct PhaseTransition {
@@ -331,12 +302,12 @@ impl PhaseTwo {
 
     fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
 
-        let old_thash: Vec<u8> = transcript_hash(self.ciphers.hash_alg, &self.transcript);
+        let old_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
         let message = match self.decrypt_next_message(plaintext.raw) {
             Ok(v) => v,
             Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
         };
-        let new_thash: Vec<u8> = transcript_hash(self.ciphers.hash_alg, &self.transcript);
+        let new_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
         match message {
             Message::Handshake(Handshake::EncryptedExtensions(eex)) => {
                 self.encrypted_extensions = Some(eex.extensions);
@@ -470,29 +441,6 @@ impl Phase {
             Phase::Two(p) => p.application_data(conn, plaintext),
             Phase::Three(p) => p.application_data(conn, plaintext),
         }
-    }
-}
-
-struct TrafficSecrets {
-    client: EncryptionKey,
-    server: EncryptionKey,
-}
-
-impl TrafficSecrets {
-    fn derive_from(ciphers: &Ciphers, transcript: &[u8], prk: &[u8], label: &str) -> Result<Self, Box<dyn Error>> {
-        let client_label = format!("c {} traffic", label);
-        let server_label = format!("s {} traffic", label);
-        let thash = transcript_hash(ciphers.hash_alg, transcript);
-        Ok(TrafficSecrets {
-            client: EncryptionKey::new(
-                derive_secret(ciphers.hash_alg, &prk, client_label.as_bytes(), &thash)?,
-                ciphers.hash_alg,
-                ciphers.aead_alg)?,
-            server: EncryptionKey::new(
-                derive_secret(ciphers.hash_alg, &prk, server_label.as_bytes(), &thash)?,
-                ciphers.hash_alg,
-                ciphers.aead_alg)?,
-        })
     }
 }
 

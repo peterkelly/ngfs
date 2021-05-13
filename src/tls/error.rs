@@ -10,6 +10,7 @@ pub enum TLSError {
     InvalidMessageRecord,
     Internal(CryptError),
     FinishedVerificationFailed,
+    UnsupportedCipherSuite,
 }
 
 impl fmt::Display for TLSError {
