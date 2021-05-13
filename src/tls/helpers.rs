@@ -269,7 +269,7 @@ pub fn decrypt_message(
     decryption_key: &EncryptionKey,
     plaintext_raw: &[u8],
 ) -> Result<(Message, Vec<u8>), TLSError> {
-    println!("ApplicationData for server_sequence_no {}", sequence_no);
+    // println!("ApplicationData for server_sequence_no {}", sequence_no);
 
     let plaintext = decrypt_traffic(decryption_key, sequence_no, plaintext_raw)?;
 
@@ -294,7 +294,7 @@ pub fn decrypt_message(
     inner_body_vec.extend_from_slice(inner_body);
     let message = Message::from_raw(inner_body, inner_content_type)
         .map_err(|_| TLSError::InvalidMessageRecord)?;
-    println!("======== Received {}", message.name());
+    // println!("======== Received {}", message.name());
 
     Ok((message, inner_body_vec))
 }

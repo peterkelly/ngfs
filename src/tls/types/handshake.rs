@@ -10,6 +10,7 @@ use std::fmt;
 use super::super::super::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use super::super::super::result::GeneralError;
 use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
+use super::super::super::x509;
 use super::extension::*;
 
 #[derive(Debug)]
@@ -328,6 +329,7 @@ impl FromBinary for CertificateRequest {
 // #[derive(Debug)]
 pub struct CertificateEntry {
     pub data: Vec<u8>,
+    pub certificate: x509::Certificate,
     pub extensions: Vec<Extension>,
 }
 
@@ -336,6 +338,7 @@ impl FromBinary for CertificateEntry {
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         let data = reader.read_len24_bytes()?.to_vec();
+        let certificate = x509::Certificate::from_bytes(&data)?;
 
         let mut extensions: Vec<Extension> = Vec::new();
         let extensions_len = reader.read_u16()? as usize;
@@ -346,10 +349,9 @@ impl FromBinary for CertificateEntry {
 
         Ok(CertificateEntry {
             data,
+            certificate,
             extensions,
         })
-        // unimplemented!()
-        // Ok(CertificateEntry{})
     }
 }
 
@@ -379,10 +381,6 @@ impl FromBinary for Certificate {
             certificate_request_context,
             certificate_list,
         })
-
-
-        // Err(GeneralError::new("Certificate::from_binary(): Not implemented"))
-        // Ok(Certificate { todo: String::from("TODO") })
     }
 }
 

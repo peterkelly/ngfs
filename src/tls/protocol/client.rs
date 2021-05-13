@@ -45,6 +45,8 @@ use super::super::super::util::{from_hex, vec_with_len, BinaryData, DebugHexDump
 use super::super::super::result::GeneralError;
 use super::super::super::crypt::{HashAlgorithm, AeadAlgorithm};
 use super::super::super::binary::{BinaryReader, BinaryWriter};
+use super::super::super::asn1;
+use super::super::super::x509;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -267,6 +269,15 @@ impl PhaseTwo {
                 PhaseTransition::ok(Phase::Two(self))
             }
             Message::Handshake(Handshake::Certificate(certificate)) => {
+                println!("PhaseTwo: Received Certificate");
+                println!("{:#?}", &Indent(&certificate));
+
+                for entry in certificate.certificate_list.iter() {
+                    let mut registry = asn1::printer::ObjectRegistry::new();
+                    x509::populate_registry(&mut registry);
+                    x509::print_certificate(&registry, &entry.certificate);
+                }
+
                 self.server_certificate = Some(certificate);
                 PhaseTransition::ok(Phase::Two(self))
             }

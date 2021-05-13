@@ -14,6 +14,7 @@ use super::binary::BinaryReader;
 use super::result::GeneralError;
 use super::asn1::value::{ObjectIdentifier, BitString, Integer, Value};
 use super::asn1::printer::ObjectRegistry;
+use super::asn1;
 
 pub const X509_COMMON_NAME: [u64; 4] = [2, 5, 4, 3]; // [other identifier: cn]
 pub const X509_SURNAME: [u64; 4] = [2, 5, 4, 4]; // [other identifier: sn]
@@ -73,6 +74,12 @@ pub struct Certificate {
 }
 
 impl Certificate {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, Box<dyn Error>> {
+        let mut certificate_reader = BinaryReader::new(&data);
+        let value = asn1::reader::read_value(&mut certificate_reader)?;
+        Certificate::from_asn1(&value)
+    }
+
     pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
         // let items = match value {
         //     Value::Sequence(items) => items,
@@ -368,9 +375,11 @@ pub fn print_tbs_certificate(tbs: &TBSCertificate, reg: &ObjectRegistry, indent:
 pub fn print_certificate(reg: &ObjectRegistry, certificate: &Certificate) {
     let tbs: &TBSCertificate = &certificate.tbs_certificate;
     println!("Certificate");
-    println!("    TBSCertificate");
+    println!("    tbs_certificate");
     let child_indent: &str = &"        ";
     print_tbs_certificate(tbs, reg, child_indent);
+    println!("    signature_algorithm = {}", certificate.signature_algorithm.to_string(reg));
+    println!("    signature_value = <{} bytes>", certificate.signature_value.len());
 }
 
 pub fn populate_registry(registry: &mut ObjectRegistry) {

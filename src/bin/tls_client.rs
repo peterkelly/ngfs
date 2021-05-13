@@ -277,10 +277,6 @@ impl Connection {
         Ok(())
     }
 
-    async fn write_plaintext_string(&self, data: &str) -> Result<(), Box<dyn Error>> {
-        self.write_plaintext(data.as_bytes()).await
-    }
-
     fn check_events(&self) {
         let established = self.session.lock().unwrap().client.is_established();
         if established || self.had_error() {
@@ -397,8 +393,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let mut socket = TcpStream::connect("localhost:443").await?;
     let mut client = Client::new(my_private_key);
 
-    let session = Session::new(client);
-    let mut conn = Connection::new(session);
+    let mut conn = Connection::new(Session::new(client));
     conn.debug = true;
     let conn = Arc::new(conn);
 
@@ -417,46 +412,49 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
     conn.write_client_hello(&handshake).await?;
 
-    println!("**** before wait_till_established()");
     conn.wait_till_established().await?;
-    println!("**** after wait_till_established()");
+    if conn.debug {
+        println!("Connection established");
+    }
+
+    conn.write_plaintext(b"GET / HTTP/1.1\r\n\r\n").await?;
 
 
-    sleep(Duration::from_millis(1000)).await;
-    conn.write_plaintext_string(
-        "The primary goal of TLS is to provide a secure channel between two \
-         communicating peers; the only requirement from the underlying \
-         transport is a reliable, in-order data stream.  Specifically, the \
-         secure channel should provide the following properties:").await?;
+    // sleep(Duration::from_millis(1000)).await;
+    // conn.write_plaintext(
+    //     b"The primary goal of TLS is to provide a secure channel between two \
+    //      communicating peers; the only requirement from the underlying \
+    //      transport is a reliable, in-order data stream.  Specifically, the \
+    //      secure channel should provide the following properties:").await?;
 
-    sleep(Duration::from_millis(1000)).await;
-    conn.write_plaintext_string(
-        "-  Authentication: The server side of the channel is always \
-         authenticated; the client side is optionally authenticated. \
-         Authentication can happen via asymmetric cryptography (e.g., RSA \
-         [RSA], the Elliptic Curve Digital Signature Algorithm (ECDSA) \
-         [ECDSA], or the Edwards-Curve Digital Signature Algorithm (EdDSA) \
-         [RFC8032]) or a symmetric pre-shared key (PSK).").await?;
+    // sleep(Duration::from_millis(1000)).await;
+    // conn.write_plaintext(
+    //     b"-  Authentication: The server side of the channel is always \
+    //      authenticated; the client side is optionally authenticated. \
+    //      Authentication can happen via asymmetric cryptography (e.g., RSA \
+    //      [RSA], the Elliptic Curve Digital Signature Algorithm (ECDSA) \
+    //      [ECDSA], or the Edwards-Curve Digital Signature Algorithm (EdDSA) \
+    //      [RFC8032]) or a symmetric pre-shared key (PSK).").await?;
 
-    sleep(Duration::from_millis(1000)).await;
-    conn.write_plaintext_string(
-        "-  Confidentiality: Data sent over the channel after establishment is \
-         only visible to the endpoints.  TLS does not hide the length of \
-         the data it transmits, though endpoints are able to pad TLS \
-         records in order to obscure lengths and improve protection against \
-         traffic analysis techniques.").await?;
+    // sleep(Duration::from_millis(1000)).await;
+    // conn.write_plaintext(
+    //     b"-  Confidentiality: Data sent over the channel after establishment is \
+    //      only visible to the endpoints.  TLS does not hide the length of \
+    //      the data it transmits, though endpoints are able to pad TLS \
+    //      records in order to obscure lengths and improve protection against \
+    //      traffic analysis techniques.").await?;
 
-    sleep(Duration::from_millis(1000)).await;
-    conn.write_plaintext_string(
-        "-  Integrity: Data sent over the channel after establishment cannot \
-         be modified by attackers without detection.").await?;
+    // sleep(Duration::from_millis(1000)).await;
+    // conn.write_plaintext(
+    //     b"-  Integrity: Data sent over the channel after establishment cannot \
+    //      be modified by attackers without detection.").await?;
 
-    sleep(Duration::from_millis(1000)).await;
-    conn.write_plaintext_string(
-        "These properties should be true even in the face of an attacker who \
-         has complete control of the network, as described in [RFC3552].  See \
-         Appendix E for a more complete statement of the relevant security \
-         properties.").await?;
+    // sleep(Duration::from_millis(1000)).await;
+    // conn.write_plaintext(
+    //     b"These properties should be true even in the face of an attacker who \
+    //      has complete control of the network, as described in [RFC3552].  See \
+    //      Appendix E for a more complete statement of the relevant security \
+    //      properties.").await?;
 
     // println!();
     // for i in 1..=5 {
