@@ -265,13 +265,14 @@ impl PhaseTwo {
                 PhaseTransition::ok(Phase::Two(self))
             }
             Message::Handshake(Handshake::CertificateRequest(creq)) => {
+                // println!("PhaseTwo: Received CertificateRequest");
+                println!("{:#?}", &Indent(&creq));
                 self.certificate_request = Some(creq);
                 PhaseTransition::ok(Phase::Two(self))
             }
             Message::Handshake(Handshake::Certificate(certificate)) => {
-                println!("PhaseTwo: Received Certificate");
+                // println!("PhaseTwo: Received Certificate");
                 println!("{:#?}", &Indent(&certificate));
-
                 for entry in certificate.certificate_list.iter() {
                     let mut registry = asn1::printer::ObjectRegistry::new();
                     x509::populate_registry(&mut registry);
@@ -282,6 +283,9 @@ impl PhaseTwo {
                 PhaseTransition::ok(Phase::Two(self))
             }
             Message::Handshake(Handshake::CertificateVerify(certificate_verify)) => {
+                // println!("PhaseTwo: Received CertificateVerify");
+                // println!("    algorithm = {:?}", certificate_verify.algorithm);
+                // println!("    signature = <{} bytes>", certificate_verify.signature.len());
                 self.certificate_verify = Some(certificate_verify);
                 PhaseTransition::ok(Phase::Two(self))
             }

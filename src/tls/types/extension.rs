@@ -493,6 +493,25 @@ impl fmt::Debug for KeyShareEntry {
     }
 }
 
+pub struct DistinguishedName {
+    pub data: Vec<u8>,
+}
+
+impl fmt::Debug for DistinguishedName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", BinaryData(&self.data))
+    }
+}
+
+impl FromBinary for DistinguishedName {
+    type Output = DistinguishedName;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+        println!("read distinguished name");
+        let data = reader.read_len16_bytes()?.to_vec();
+        Ok(DistinguishedName { data })
+    }
+}
+
 // https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
 #[derive(Debug)]
 pub enum Extension {
@@ -508,6 +527,7 @@ pub enum Extension {
     PostHandshakeAuth, // (49) rfc8446
     SupportedVersions(Vec<u8>), // (43) rfc8446
     PskKeyExchangeModes(Vec<PskKeyExchangeMode>), // (45) rfc8446
+    CertificateAuthorities(Vec<DistinguishedName>), // (47)  rfc8446
     KeyShareClientHello(Vec<KeyShareEntry>), // (51), rfc8446
     KeyShareServerHello(KeyShareEntry), // (51), rfc8446
 }
@@ -593,6 +613,10 @@ impl Extension {
             45 => {
                 Ok(Extension::PskKeyExchangeModes(nested_reader.read_len8_list::<PskKeyExchangeMode>()?))
             }
+            47 => {
+                let distinguished_names = nested_reader.read_len16_list::<DistinguishedName>()?;
+                Ok(Extension::CertificateAuthorities(distinguished_names))
+            }
             51 => {
                 match ctx {
                     ExtensionContext::ServerHello => {
@@ -665,6 +689,10 @@ impl ToBinary for Extension {
             Extension::PskKeyExchangeModes(psk_exchange_modes) => {
                 writer.write_u16(45);
                 writer.write_u16_nested(|w| w.write_len8_list(psk_exchange_modes))
+            }
+            Extension::CertificateAuthorities(distinguished_names) => {
+                writer.write_u16(47);
+                unimplemented!()
             }
             Extension::KeyShareClientHello(key_share_entries) => {
                 writer.write_u16(51);

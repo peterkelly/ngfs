@@ -316,13 +316,27 @@ impl FromBinary for EncryptedExtensions {
 
 #[derive(Debug)]
 pub struct CertificateRequest {
+    pub certificate_request_context: Vec<u8>,
+    pub extensions: Vec<Extension>,
 }
 
 impl FromBinary for CertificateRequest {
     type Output = CertificateRequest;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Ok(CertificateRequest { })
+        let certificate_request_context = reader.read_len8_bytes()?.to_vec();
+
+        let mut extensions: Vec<Extension> = Vec::new();
+        let extensions_len = reader.read_u16()? as usize;
+        let mut extensions_reader = reader.read_nested(extensions_len)?;
+        while extensions_reader.remaining() > 0 {
+            extensions.push(Extension::from_binary2(&mut extensions_reader, ExtensionContext::Certificate)?);
+        }
+
+        Ok(CertificateRequest {
+            certificate_request_context,
+            extensions,
+        })
     }
 }
 
