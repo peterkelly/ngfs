@@ -43,6 +43,7 @@ Table 6/X.208 List of character string types
 
 use std::fmt;
 use std::error::Error;
+use std::ops::Range;
 use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::super::binary::BinaryReader;
 use super::super::result::GeneralError;
@@ -168,12 +169,11 @@ fn read_object_identifier<'a>(reader: &mut BinaryReader) -> Result<ObjectIdentif
 }
 
 pub fn read_item<'a>(reader: &mut BinaryReader) -> Result<Item, Box<dyn Error>> {
-    let start_offset = reader.abs_offset();
+    let start = reader.abs_offset();
     let value = read_value(reader)?;
-    let end_offset = reader.abs_offset();
+    let end = reader.abs_offset();
     Ok(Item {
-        offset: start_offset,
-        len: end_offset - start_offset,
+        range: Range { start, end },
         value: value,
     })
 }
