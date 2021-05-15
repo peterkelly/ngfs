@@ -47,8 +47,8 @@ pub const CRYPTO_RSA_ENCRYPTION: [u64; 7] = [1, 2, 840, 113549, 1, 1, 1];
 //        signatureValue       BIT STRING  }
 
 pub struct AlgorithmIdentifier {
-    algorithm: ObjectIdentifier,
-    parameters: Item,
+    pub algorithm: ObjectIdentifier,
+    pub parameters: Item,
 }
 
 impl AlgorithmIdentifier {

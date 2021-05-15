@@ -81,6 +81,14 @@ impl Handshake {
                 finished.to_binary(temp_writer)?;
                 Ok(20)
             }
+            Handshake::Certificate(certificate) => {
+                certificate.to_binary(temp_writer)?;
+                Ok(11)
+            }
+            Handshake::CertificateVerify(certificate_verify) => {
+                certificate_verify.to_binary(temp_writer)?;
+                Ok(15)
+            }
             _ => unimplemented!(), // TODO
         }
     }
@@ -369,6 +377,14 @@ impl FromBinary for CertificateEntry {
     }
 }
 
+impl ToBinary for CertificateEntry {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_len24_bytes(&self.data)?;
+        writer.write_len16_list(&self.extensions)?;
+        Ok(())
+    }
+}
+
 impl fmt::Debug for CertificateEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("CertificateEntry")
@@ -398,6 +414,17 @@ impl FromBinary for Certificate {
     }
 }
 
+impl ToBinary for Certificate {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Certificate::to_binary() 1");
+        writer.write_len8_bytes(&self.certificate_request_context)?;
+        println!("Certificate::to_binary() 2");
+        writer.write_len24_list(&self.certificate_list)?;
+        println!("Certificate::to_binary() 3");
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct CertificateVerify {
     pub algorithm: SignatureScheme,
@@ -411,6 +438,14 @@ impl FromBinary for CertificateVerify {
         let algorithm = reader.read_item::<SignatureScheme>()?;
         let signature = reader.read_len16_bytes()?.to_vec();
         Ok(CertificateVerify { algorithm, signature })
+    }
+}
+
+impl ToBinary for CertificateVerify {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_item(&self.algorithm)?;
+        writer.write_len16_bytes(&self.signature)?;
+        Ok(())
     }
 }
 

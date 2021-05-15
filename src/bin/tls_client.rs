@@ -8,6 +8,7 @@
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::fmt;
+use std::fs;
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
@@ -65,7 +66,11 @@ use torrent::tls::helpers::{
 };
 use torrent::tls::protocol::client::{
     Client,
+    ServerAuth,
+    ClientAuth,
+    ClientConfig,
 };
+use torrent::x509;
 
 fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     let random = from_hex("1a87a2e2f77536fcfa071500af3c7dffa5830e6c61214e2dee7623c2b925aed8").unwrap();
@@ -377,10 +382,66 @@ async fn write_loop(conn: Arc<Connection>, writer: &mut (dyn AsyncWrite + Unpin 
     }
 }
 
+fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    let mut argno = 1;
 
+    let mut ca_cert: Option<Vec<u8>> = None;
+    let mut client_cert: Option<Vec<u8>> = None;
+    let mut client_key: Option<Vec<u8>> = None;
 
+    while argno < args.len() {
+        if args[argno] == "--ca-cert" && argno + 1 < args.len() {
+            ca_cert = Some(fs::read(&args[argno + 1])?);
+            argno += 2;
+        }
+        else if args[argno] == "--client-cert" && argno + 1 < args.len() {
+            client_cert = Some(fs::read(&args[argno + 1])?);
+            argno += 2;
+        }
+        else if args[argno] == "--client-key" && argno + 1 < args.len() {
+            client_key = Some(fs::read(&args[argno + 1])?);
+            argno += 2;
+        }
+        else {
+            return Err(GeneralError::new(format!("Unexpected argument: {}", args[argno])));
+        }
+    }
+
+    let server_auth: ServerAuth;
+    match &ca_cert {
+        Some(crt) => server_auth = ServerAuth::CertificateAuthority(crt.clone()),
+        None => server_auth = ServerAuth::None,
+    }
+
+    let client_auth: ClientAuth;
+    match (&client_cert, &client_key) {
+        (Some(cert), Some(key)) => {
+            client_auth = ClientAuth::Certificate {
+                cert: cert.clone(),
+                key: key.clone(),
+            };
+        }
+        (Some(_), None) => {
+            return Err(GeneralError::new("--client-cert option requires --client-key"));
+        }
+        (None, Some(_)) => {
+            return Err(GeneralError::new("--client-key option requires --client-cert"));
+        }
+        _ => {
+            client_auth = ClientAuth::None;
+        }
+    }
+
+    Ok(ClientConfig {
+        client_auth,
+        server_auth,
+    })
+}
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
+    let config = parse_args()?;
+
     let rng = SystemRandom::new();
     let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
     let my_public_key = my_private_key.compute_public_key()?;
@@ -391,7 +452,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let handshake = Handshake::ClientHello(client_hello);
 
     let mut socket = TcpStream::connect("localhost:443").await?;
-    let mut client = Client::new(my_private_key);
+    let mut client = Client::new(my_private_key, config);
 
     let mut conn = Connection::new(Session::new(client));
     conn.debug = true;
@@ -417,7 +478,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
         println!("Connection established");
     }
 
-    conn.write_plaintext(b"GET / HTTP/1.1\r\n\r\n").await?;
+    conn.write_plaintext(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
 
 
     // sleep(Duration::from_millis(1000)).await;

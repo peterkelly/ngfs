@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 use super::super::crypt::CryptError;
+use ring::error::KeyRejected;
 
 #[derive(Debug)]
 pub enum TLSError {
@@ -11,6 +12,14 @@ pub enum TLSError {
     Internal(CryptError),
     FinishedVerificationFailed,
     UnsupportedCipherSuite,
+    UnsupportedSignatureScheme,
+    VerifyCertificateFailed,
+    VerifyTranscriptFailed,
+    RsaKeyRejected(KeyRejected),
+    SignatureFailed,
+    SignatureVerificationFailed,
+    InvalidCertificate,
+    UnsupportedCertificateSignatureAlgorithm,
 }
 
 impl fmt::Display for TLSError {

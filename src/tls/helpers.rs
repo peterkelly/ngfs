@@ -1,4 +1,6 @@
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
+use ring::signature::{RsaEncoding, RsaKeyPair};
+use ring::rand::SecureRandom;
 use super::super::crypt::{HashAlgorithm, AeadAlgorithm, CryptError};
 use super::super::util::{vec_with_len};
 use super::types::handshake::{
@@ -10,6 +12,7 @@ use super::types::handshake::{
 use super::types::extension::{
     Extension,
     NamedGroup,
+    SignatureScheme,
 };
 use super::types::record::{
     TLSCiphertext,
@@ -321,4 +324,43 @@ pub fn verify_finished(
     else {
         Err(TLSError::FinishedVerificationFailed)
     }
+}
+
+pub fn rsa_sign(
+    key_data: &[u8],
+    input: &[u8],
+    scheme: SignatureScheme,
+    rng: &dyn SecureRandom,
+) -> Result<Vec<u8>, TLSError> {
+    let encoding: &dyn RsaEncoding = match scheme {
+        SignatureScheme::RsaPssRsaeSha256 => &ring::signature::RSA_PSS_SHA256,
+        SignatureScheme::RsaPssRsaeSha384 => &ring::signature::RSA_PSS_SHA384,
+        SignatureScheme::RsaPssRsaeSha512 => &ring::signature::RSA_PSS_SHA512,
+        _ => return Err(TLSError::UnsupportedSignatureScheme),
+    };
+    let key_pair = RsaKeyPair::from_der(&key_data).map_err(|e| TLSError::RsaKeyRejected(e))?;
+    let mut signature = vec![0; key_pair.public_modulus_len()];
+    key_pair.sign(encoding, rng, &input, &mut signature).map_err(|_| TLSError::SignatureFailed)?;
+    Ok(signature)
+}
+
+pub fn rsa_verify(
+    scheme: SignatureScheme,
+    key: &[u8],
+    input: &[u8],
+    signature: &[u8],
+) -> Result<(), TLSError> {
+    let rsa_parameters = match scheme {
+        SignatureScheme::RsaPssRsaeSha256 => &ring::signature::RSA_PSS_2048_8192_SHA256,
+        SignatureScheme::RsaPssRsaeSha384 => &ring::signature::RSA_PSS_2048_8192_SHA384,
+        SignatureScheme::RsaPssRsaeSha512 => &ring::signature::RSA_PSS_2048_8192_SHA512,
+        _ => {
+            return Err(TLSError::UnsupportedSignatureScheme);
+        }
+    };
+    let ring_public_key = ring::signature::UnparsedPublicKey::new(
+        rsa_parameters,
+        key);
+    ring_public_key.verify(&input, signature)
+        .map_err(|_| TLSError::SignatureVerificationFailed)
 }

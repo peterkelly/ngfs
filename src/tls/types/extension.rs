@@ -37,6 +37,7 @@ impl fmt::Debug for ProtocolName {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum SignatureScheme {
     RsaPkcs1Sha256,
     RsaPkcs1Sha384,

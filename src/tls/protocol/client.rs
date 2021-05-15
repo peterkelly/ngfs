@@ -18,16 +18,20 @@ use super::super::helpers::{
     decrypt_message,
     verify_finished,
     derive_secret,
+    rsa_sign,
+    rsa_verify,
 };
 use super::super::types::handshake::{
     Handshake,
     Certificate,
+    CertificateEntry,
     CertificateRequest,
     CertificateVerify,
     Finished,
 };
 use super::super::types::extension::{
     Extension,
+    SignatureScheme,
 };
 use super::super::types::record::{
     Message,
@@ -48,6 +52,21 @@ use super::super::super::binary::{BinaryReader, BinaryWriter};
 use super::super::super::asn1;
 use super::super::super::x509;
 
+pub enum ServerAuth {
+    None,
+    CertificateAuthority(Vec<u8>),
+}
+
+pub enum ClientAuth {
+    None,
+    Certificate { cert: Vec<u8>, key: Vec<u8> },
+}
+
+pub struct ClientConfig {
+    pub client_auth: ClientAuth,
+    pub server_auth: ServerAuth,
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct ClientConn {
@@ -67,7 +86,12 @@ impl ClientConn {
         content_type: ContentType,
         traffic_secret: &EncryptionKey,
         client_sequence_no: u64,
+        transcript: Option<&mut Vec<u8>>,
     ) -> Result<(), TLSError> {
+        match transcript {
+            Some(transcript) => transcript.extend_from_slice(&data),
+            None => (),
+        }
         data.push(content_type.to_raw());
         encrypt_traffic(
             traffic_secret,
@@ -79,42 +103,192 @@ impl ClientConn {
             legacy_record_version: 0x0303,
             fragment: data,
         };
-        self.to_send.extend_from_slice(&output_record.to_vec());
+        let output_record_bytes = output_record.to_vec();
+        // match transcript {
+        //     Some(transcript) => transcript.extend_from_slice(&output_record_bytes),
+        //     None => (),
+        // }
+        self.to_send.extend_from_slice(&output_record_bytes);
         Ok(())
     }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+enum Endpoint {
+    Client,
+    Server,
+}
+
 fn send_finished(
     hash_alg: HashAlgorithm,
     encryption_key: &EncryptionKey,
     new_transcript_hash: &[u8],
     conn: &mut ClientConn,
-    sequence_no: u64,
+    sequence_no: &mut u64,
 ) -> Result<(), Box<dyn Error>> {
-    let finished_key: Vec<u8> = derive_secret(hash_alg, &encryption_key.raw, b"finished", &[])?;
-
-    // println!("send_finished(): key = {:?}", BinaryData(&finished_key));
-    // println!();
-    // println!("send_finished(): handshake_hash = {:?}", BinaryData(&new_transcript_hash));
-
-    let verify_data: Vec<u8> = hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
-    // println!("send_finished(): verify_data    = {:?}", BinaryData(&verify_data));
-
+    let finished_key = derive_secret(hash_alg, &encryption_key.raw, b"finished", &[])?;
+    let verify_data = hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
     let client_finished = Handshake::Finished(Finished { verify_data });
+    send_handshake(encryption_key, conn, *sequence_no, &client_finished, None)?;
+    *sequence_no += 1;
+    Ok(())
+}
 
+fn send_client_certificate(
+    hash_alg: HashAlgorithm,
+    encryption_key: &EncryptionKey,
+    conn: &mut ClientConn,
+    sequence_no: &mut u64,
+    transcript: &mut Vec<u8>,
+    client_cert_data: &[u8],
+    client_key_data: &[u8],
+    signature_scheme: SignatureScheme,
+    rng: &dyn ring::rand::SecureRandom,
+) -> Result<(), Box<dyn Error>> {
+    let client_cert = x509::Certificate::from_bytes(client_cert_data)?;
+    let handshake = Handshake::Certificate(Certificate {
+        certificate_request_context: Vec::new(),
+        certificate_list: vec![
+            CertificateEntry {
+                data: Vec::from(client_cert_data),
+                certificate: client_cert,
+                extensions: vec![],
+            }
+        ],
+    });
+
+
+    println!("old transcript len = {}", transcript.len());
+    send_handshake(encryption_key, conn, *sequence_no, &handshake, Some(transcript))?;
+    println!("new transcript len = {}", transcript.len());
+    *sequence_no += 1;
+
+    let thash: Vec<u8> = hash_alg.hash(transcript);
+
+    let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
+
+    let signature = rsa_sign(client_key_data, &verify_input, signature_scheme, rng)?;
+
+
+    let handshake = Handshake::CertificateVerify(CertificateVerify {
+        algorithm: signature_scheme,
+        signature: signature,
+    });
+    send_handshake(encryption_key, conn, *sequence_no, &handshake, Some(transcript))?;
+    *sequence_no += 1;
+
+    Ok(())
+}
+
+fn send_handshake(
+    encryption_key: &EncryptionKey,
+    conn: &mut ClientConn,
+    sequence_no: u64,
+    handshake: &Handshake,
+    transcript: Option<&mut Vec<u8>>,
+) -> Result<(), Box<dyn Error>> {
     let mut writer = BinaryWriter::new();
-    writer.write_item(&client_finished)?;
+    writer.write_item(handshake)?;
     let finished_bytes: Vec<u8> = Vec::from(writer);
     conn.append_encrypted(
         finished_bytes,         // to_encrypt
         ContentType::Handshake, // content_type
         &encryption_key,        // traffic_secret
         sequence_no,            // sequence_no
+        transcript,
     )?;
 
     Ok(())
+}
+
+fn verify_certificate(ca_raw: &[u8], target_raw: &[u8]) -> Result<(), TLSError> {
+    let ca_cert = x509::Certificate::from_bytes(&ca_raw).map_err(|_| TLSError::InvalidCertificate)?;
+
+    let mut target_reader = BinaryReader::new(&target_raw);
+    let target_item = asn1::reader::read_item(&mut target_reader).map_err(|_| TLSError::InvalidCertificate)?;
+    let elements = target_item.as_exact_sequence(3).map_err(|_| TLSError::InvalidCertificate)?;
+
+    let tbs_certificate = x509::TBSCertificate::from_asn1(&elements[0]).map_err(|_| TLSError::InvalidCertificate)?;
+    let signature_algorithm = x509::AlgorithmIdentifier::from_asn1(&elements[1]).map_err(|_| TLSError::InvalidCertificate)?;
+    let signature_value_bit_string = elements[2].as_bit_string().map_err(|_| TLSError::InvalidCertificate)?;
+    let signature = &signature_value_bit_string.bytes;
+
+    let rsa_parameters: &ring::signature::RsaParameters;
+    if signature_algorithm.algorithm.0 == x509::CRYPTO_SHA_256_WITH_RSA_ENCRYPTION {
+        rsa_parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA256;
+    }
+    else if signature_algorithm.algorithm.0 == x509::CRYPTO_SHA_384_WITH_RSA_ENCRYPTION {
+        rsa_parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA384;
+    }
+    else if signature_algorithm.algorithm.0 == x509::CRYPTO_SHA_512_WITH_RSA_ENCRYPTION {
+        rsa_parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA512;
+    }
+    else {
+        return Err(TLSError::UnsupportedCertificateSignatureAlgorithm);
+    }
+
+    let ca_public_key_info = &ca_cert.tbs_certificate.subject_public_key_info;
+    let ca_public_key = ring::signature::UnparsedPublicKey::new(
+        rsa_parameters,
+        &ca_public_key_info.subject_public_key.bytes);
+    let tbs_data = &target_raw[elements[0].range.clone()];
+    ca_public_key.verify(tbs_data, signature).map_err(|_| TLSError::VerifyCertificateFailed)?;
+
+    Ok(())
+}
+
+fn verify_transcript_opt(
+    certificate_verify: &Option<CertificateVerify>,
+    certificate_verify_thash: &Option<Vec<u8>>,
+    public_key: &x509::SubjectPublicKeyInfo,
+    endpoint: Endpoint,
+) -> Result<(), Box<dyn Error>> {
+    let certificate_verify: &CertificateVerify = match certificate_verify {
+        Some(v) => v,
+        None => {
+            return Err(GeneralError::new("Server did not send CertificateVerify"));
+        }
+    };
+    let certificate_verify_thash: &[u8] = match certificate_verify_thash {
+        Some(v) => v,
+        None => {
+            return Err(GeneralError::new("Server did not send CertificateVerify thash"));
+        }
+    };
+
+    verify_transcript(certificate_verify, certificate_verify_thash, public_key, endpoint)?;
+    Ok(())
+}
+
+fn make_verify_transcript_input(endpoint: Endpoint, thash: &[u8]) -> Vec<u8> {
+    let mut verify_input: Vec<u8> = Vec::new();
+    for _ in 0..64 {
+        verify_input.push(0x20);
+    }
+    let context_string = match endpoint {
+        Endpoint::Client => b"TLS 1.3, client CertificateVerify",
+        Endpoint::Server => b"TLS 1.3, server CertificateVerify",
+    };
+    verify_input.extend_from_slice(context_string);
+    verify_input.push(0);
+    verify_input.extend_from_slice(thash);
+    verify_input
+}
+
+fn verify_transcript(
+    certificate_verify: &CertificateVerify,
+    certificate_verify_thash: &[u8],
+    public_key: &x509::SubjectPublicKeyInfo,
+    endpoint: Endpoint,
+) -> Result<(), TLSError> {
+    let verify_input = make_verify_transcript_input(endpoint, certificate_verify_thash);
+    rsa_verify(
+        certificate_verify.algorithm,
+        &public_key.subject_public_key.bytes,
+        &verify_input,
+        &certificate_verify.signature
+    )
 }
 
 struct PhaseTransition {
@@ -142,6 +316,7 @@ impl PhaseTransition {
 struct PhaseOne {
     transcript: Vec<u8>,
     my_private_key: Option<EphemeralPrivateKey>,
+    config: ClientConfig,
 }
 
 // Handshake once encryption established
@@ -151,11 +326,13 @@ struct PhaseTwo {
     transcript: Vec<u8>,
     handshake_secrets: TrafficSecrets,
     server_sequence_no: u64,
+    config: ClientConfig,
 
     encrypted_extensions: Option<Vec<Extension>>,
     server_certificate: Option<Certificate>,
     certificate_request: Option<CertificateRequest>,
     certificate_verify: Option<CertificateVerify>,
+    certificate_verify_thash: Option<Vec<u8>>,
 }
 
 // Established
@@ -215,10 +392,12 @@ impl PhaseOne {
                     transcript: self.transcript,
                     handshake_secrets: hs,
                     server_sequence_no: 0,
+                    config: self.config,
                     encrypted_extensions: None,
                     server_certificate: None,
                     certificate_request: None,
                     certificate_verify: None,
+                    certificate_verify_thash: None,
                 }))
             }
             _ => {
@@ -236,7 +415,7 @@ impl PhaseOne {
 }
 
 impl PhaseTwo {
-    fn decrypt_next_message(&mut self, plaintext_raw: &[u8]) -> Result<Message, Box<dyn Error>> {
+    fn decrypt_next_message(&mut self, plaintext_raw: &[u8]) -> Result<(Message, Vec<u8>), Box<dyn Error>> {
         // TODO: Cater for alerts
         let (message, inner_body_vec) = decrypt_message(
             self.server_sequence_no,
@@ -244,7 +423,7 @@ impl PhaseTwo {
             plaintext_raw)?;
         self.server_sequence_no += 1;
         self.transcript.extend_from_slice(&inner_body_vec);
-        Ok(message)
+        Ok((message, inner_body_vec))
     }
 
     fn handshake(mut self, handshake: &Handshake, handshake_bytes: &[u8]) -> PhaseTransition {
@@ -254,11 +433,12 @@ impl PhaseTwo {
     fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
 
         let old_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
-        let message = match self.decrypt_next_message(plaintext.raw) {
+        let (message, message_raw) = match self.decrypt_next_message(plaintext.raw) {
             Ok(v) => v,
             Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
         };
         let new_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
+
         match message {
             Message::Handshake(Handshake::EncryptedExtensions(eex)) => {
                 self.encrypted_extensions = Some(eex.extensions);
@@ -278,7 +458,6 @@ impl PhaseTwo {
                     x509::populate_registry(&mut registry);
                     x509::print_certificate(&registry, &entry.certificate);
                 }
-
                 self.server_certificate = Some(certificate);
                 PhaseTransition::ok(Phase::Two(self))
             }
@@ -287,6 +466,7 @@ impl PhaseTwo {
                 // println!("    algorithm = {:?}", certificate_verify.algorithm);
                 // println!("    signature = <{} bytes>", certificate_verify.signature.len());
                 self.certificate_verify = Some(certificate_verify);
+                self.certificate_verify_thash = Some(old_thash.clone());
                 PhaseTransition::ok(Phase::Two(self))
             }
             Message::Handshake(Handshake::Finished(finished)) => {
@@ -321,10 +501,90 @@ impl PhaseTwo {
                     Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
                 };
 
+                let first_cert_entry : &CertificateEntry =
+                match &self.server_certificate {
+                    Some(server_certificate) => {
+                        match server_certificate.certificate_list.get(0) {
+                            Some(v) => v,
+                            None => {
+                                let e = GeneralError::new("Server sent an empty certificate list");
+                                return PhaseTransition::err(Phase::Two(self), e.into());
+                            }
+                        }
+                    }
+                    None => {
+                        let e = GeneralError::new("Server did not send certificate");
+                        return PhaseTransition::err(Phase::Two(self), e.into());
+                    }
+                };
+
+                let server_cert_raw: &[u8] = &first_cert_entry.data;
+                let server_cert: &x509::Certificate = &first_cert_entry.certificate;
+
+                let ca_cert: &[u8] = match &self.config.server_auth {
+                    ServerAuth::CertificateAuthority(v) => v,
+                    ServerAuth::None => {
+                        let e = GeneralError::new("No CA certificate available");
+                        return PhaseTransition::err(Phase::Two(self), e.into());
+                    }
+                };
+
+                match verify_certificate(ca_cert, &server_cert_raw) {
+                    Ok(()) => (),
+                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
+                }
+
+
+                match verify_transcript_opt(
+                    &self.certificate_verify,
+                    &self.certificate_verify_thash,
+                    &server_cert.tbs_certificate.subject_public_key_info,
+                    Endpoint::Server
+                ) {
+                    Ok(()) => (),
+                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
+                };
+
+
+                let mut client_sequence_no: u64 = 0;
+
+                // FIXME: Don't hard-code SignatureScheme
+                match &self.config.client_auth {
+                    ClientAuth::Certificate { cert, key } => {
+                        let client_cert = cert;
+                        let client_key = key;
+
+                        let rng = ring::rand::SystemRandom::new();
+                        match send_client_certificate(
+                            ciphers.hash_alg, // hash_alg: HashAlgorithm,
+                            &secrets.client, // encryption_key: &EncryptionKey,
+                            conn, // conn: &mut ClientConn,
+                            &mut client_sequence_no, // sequence_no: &mut u64,
+                            &mut self.transcript, // transcript: &mut Vec<u8>,
+                            client_cert, // client_cert_data: &[u8],
+                            client_key, // client_key_data: &[u8],
+                            SignatureScheme::RsaPssRsaeSha256, // signature_scheme: SignatureScheme,
+                            &rng,
+                        ) {
+                            Ok(()) => {
+                                println!("Sending client certificate succeeded");
+                            }
+                            Err(e) => {
+                                println!("Sending client certificate failed: {}", e);
+                                return PhaseTransition::err(Phase::Two(self), e.into());
+                            }
+                        }
+
+                    }
+                    ClientAuth::None => {
+                    }
+                }
+
+                let new_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
+
                 // let mut bad_new_thash = new_thash.clone();
                 // bad_new_thash.push(0);
-                let client_sequence_no: u64 = 0;
-                match send_finished(ciphers.hash_alg, &secrets.client, &new_thash, conn, client_sequence_no) {
+                match send_finished(ciphers.hash_alg, &secrets.client, &new_thash, conn, &mut client_sequence_no) {
                     Ok(()) => (),
                     Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
                 };
@@ -414,12 +674,13 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(my_private_key: EphemeralPrivateKey) -> Self {
+    pub fn new(my_private_key: EphemeralPrivateKey, config: ClientConfig) -> Self {
         Client {
             received_alert: None,
             phase: Some(Phase::One(PhaseOne {
                 transcript: Vec::new(),
                 my_private_key: Some(my_private_key),
+                config: config,
             })),
         }
     }
@@ -516,25 +777,9 @@ impl Client {
     pub fn write_client_hello(&mut self, handshake: &Handshake, output: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
         match &mut self.phase {
             Some(Phase::One(phase)) => {
-                let client_hello_plaintext_record: TLSOutputPlaintext = handshake_to_record(&handshake)?;
-
-                let my_private_key: EphemeralPrivateKey = match phase.my_private_key.take() {
-                    Some(v) => v,
-                    None => {
-                        return Err(GeneralError::new("my_private_key is None"));
-                    }
-                };
-
-                let mut transcript: Vec<u8> = phase.transcript.clone();
-                transcript.extend_from_slice(&client_hello_plaintext_record.fragment);
-
-                self.write_plaintext_record(&client_hello_plaintext_record, output)?;
-
-                self.phase = Some(Phase::One(PhaseOne {
-                    my_private_key: Some(my_private_key),
-                    transcript: transcript,
-                }));
-
+                let record = handshake_to_record(&handshake)?;
+                phase.transcript.extend_from_slice(&record.fragment);
+                self.write_plaintext_record(&record, output)?;
                 Ok(())
             }
             _ => {
@@ -571,6 +816,7 @@ impl Client {
                     ContentType::ApplicationData,
                     &phase.application_secrets.client,
                     phase.client_sequence_no,
+                    None,
                 )?;
                 phase.client_sequence_no += 1;
                 println!("write_plaintext: conn.to_send.len() = {}", conn.to_send.len());

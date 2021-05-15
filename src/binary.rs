@@ -271,6 +271,17 @@ impl BinaryWriter {
         }
     }
 
+    pub fn write_len24_bytes(&mut self, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        if data.len() >= 1 << 24 {
+            Err(BinaryError::ValueTooLarge.into())
+        }
+        else {
+            self.write_u24(data.len() as u32);
+            self.data.extend_from_slice(data);
+            Ok(())
+        }
+    }
+
     pub fn write_len8_list<T : ToBinary>(&mut self, items: &[T]) -> Result<(), Box<dyn std::error::Error>> {
         let len_offset = self.data.len();
         self.data.push(0); // Reserve 1 byte for length
@@ -299,7 +310,7 @@ impl BinaryWriter {
                 self.data.truncate(len_offset);
                 Err(e)
             }
-            Ok(len) if len > (u8::MAX as usize) => {
+            Ok(len) if len > (u16::MAX as usize) => {
                 self.data.truncate(len_offset);
                 Err(BinaryError::ValueTooLarge.into())
             }
@@ -307,6 +318,31 @@ impl BinaryWriter {
                 let len_bytes: [u8; 2] = (len as u16).to_be_bytes();
                 self.data[len_offset + 0] = len_bytes[0];
                 self.data[len_offset + 1] = len_bytes[1];
+                Ok(())
+            }
+        }
+    }
+
+    pub fn write_len24_list<T : ToBinary>(&mut self, items: &[T]) -> Result<(), Box<dyn std::error::Error>> {
+        let len_offset = self.data.len();
+        self.data.push(0); // Reserve 3 bytes for length
+        self.data.push(0);
+        self.data.push(0);
+        match self.write_list_inner(items) {
+            Err(e) => {
+                self.data.truncate(len_offset);
+                Err(e)
+            }
+            Ok(len) if len >= (1 << 24) => {
+                self.data.truncate(len_offset);
+                Err(BinaryError::ValueTooLarge.into())
+            }
+            Ok(len) => {
+                // println!("write_len24_list: len = {}", len);
+                let len_bytes: [u8; 4] = (len as u32).to_be_bytes();
+                self.data[len_offset + 0] = len_bytes[1];
+                self.data[len_offset + 1] = len_bytes[2];
+                self.data[len_offset + 2] = len_bytes[3];
                 Ok(())
             }
         }
