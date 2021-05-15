@@ -26,8 +26,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let data: Vec<u8> = std::fs::read(filename)?;
     // println!("data.len() = {}", data.len());
     let mut reader = BinaryReader::new(&data);
-    let value = asn1::reader::read_value(&mut reader)?;
-    // println!("{:#?}", value);
+    let item = asn1::reader::read_item(&mut reader)?;
+    // println!("{:#?}", item);
 
     let mut registry = asn1::printer::ObjectRegistry::new();
     x509::populate_registry(&mut registry);
@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     printer.lines = true;
     printer.registry = Some(&registry);
     // let x = registry.lookup_long_name(&X509_commonName);
-    printer.print(&value);
+    printer.print(&item);
     // let identifier = read_identifier(&mut reader)?;
     // println!("identifier = {:?}", identifier);
     // let length = read_length(&mut reader)?;

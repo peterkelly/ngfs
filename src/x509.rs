@@ -12,7 +12,7 @@ use std::error::Error;
 use super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::binary::BinaryReader;
 use super::result::GeneralError;
-use super::asn1::value::{ObjectIdentifier, BitString, Integer, Value};
+use super::asn1::value::{ObjectIdentifier, BitString, Integer, Value, Item};
 use super::asn1::printer::ObjectRegistry;
 use super::asn1;
 
@@ -48,15 +48,15 @@ pub const CRYPTO_RSA_ENCRYPTION: [u64; 7] = [1, 2, 840, 113549, 1, 1, 1];
 
 pub struct AlgorithmIdentifier {
     algorithm: ObjectIdentifier,
-    parameters: Value,
+    parameters: Item,
 }
 
 impl AlgorithmIdentifier {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let items = value.as_exact_sequence(2)?;
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let elements = item.as_exact_sequence(2)?;
         Ok(AlgorithmIdentifier {
-            algorithm: items[0].as_object_identifier()?.clone(),
-            parameters: items[1].clone(),
+            algorithm: elements[0].as_object_identifier()?.clone(),
+            parameters: elements[1].clone(),
         })
     }
 }
@@ -76,28 +76,21 @@ pub struct Certificate {
 impl Certificate {
     pub fn from_bytes(data: &[u8]) -> Result<Self, Box<dyn Error>> {
         let mut certificate_reader = BinaryReader::new(&data);
-        let value = asn1::reader::read_value(&mut certificate_reader)?;
-        Certificate::from_asn1(&value)
+        let item = asn1::reader::read_item(&mut certificate_reader)?;
+        Certificate::from_asn1(&item)
     }
 
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        // let items = match value {
-        //     Value::Sequence(items) => items,
-        //     _ => return Err(GeneralError::new("Certificate: Expected a sequence")),
-        // };
-        // if items.len() != 3 {
-        //     return Err(GeneralError::new("Certificate: Expected a sequence of 3 items"));
-        // }
-        let items = value.as_exact_sequence(3)?;
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let elements = item.as_exact_sequence(3)?;
 
-        let tbs_certificate = TBSCertificate::from_asn1(&items[0])?;
-        let signature_algorithm = AlgorithmIdentifier::from_asn1(&items[1])?;
-        let signature_value: Vec<u8> = match &items[2] {
+        let tbs_certificate = TBSCertificate::from_asn1(&elements[0])?;
+        let signature_algorithm = AlgorithmIdentifier::from_asn1(&elements[1])?;
+        let signature_value: Vec<u8> = match &elements[2].value {
             Value::BitString(bit_string) => {
                 bit_string.bytes.clone()
             }
             _ => {
-                return Err(GeneralError::new("Certificate: Expected items[2] to be a bit string"));
+                return Err(GeneralError::new("Certificate: Expected elements[2] to be a bit string"));
             }
         };
 
@@ -117,16 +110,17 @@ pub enum Version {
 
 pub struct RelativeDistinguishedName {
     pub id: ObjectIdentifier,
-    pub value: Value,
+    pub value: Item,
 }
 
 impl RelativeDistinguishedName {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let set_items = value.as_exact_set(1)?;
-        let items = set_items[0].as_exact_sequence(2)?;
-        let id = items[0].as_object_identifier()?.clone();
-        let value = items[1].clone();
-        Ok(RelativeDistinguishedName { id, value })
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let set_elements = item.as_exact_set(1)?;
+        let elements = set_elements[0].as_exact_sequence(2)?;
+        Ok(RelativeDistinguishedName {
+            id: elements[0].as_object_identifier()?.clone(),
+            value: elements[1].clone(),
+        })
     }
 }
 
@@ -135,11 +129,11 @@ pub struct Name {
 }
 
 impl Name {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let items = value.as_sequence()?;
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let elements = item.as_sequence()?;
         let mut parts: Vec<RelativeDistinguishedName> = Vec::new();
-        for item in items.iter() {
-            parts.push(RelativeDistinguishedName::from_asn1(item)?);
+        for elem in elements.iter() {
+            parts.push(RelativeDistinguishedName::from_asn1(elem)?);
         }
         Ok(Name { parts })
     }
@@ -159,8 +153,8 @@ pub enum Time {
 }
 
 impl Time {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        match value {
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        match &item.value {
             Value::UTCTime(s) => Ok(Time::UTCTime(UTCTime { data: s.clone() })),
             Value::GeneralizedTime(s) => Ok(Time::GeneralizedTime(GeneralizedTime { data: s.clone() })),
             _ => Err(GeneralError::new("Expected a UTCTime or GeneralizedTime")),
@@ -174,10 +168,10 @@ pub struct Validity {
 }
 
 impl Validity {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let items = value.as_exact_sequence(2)?;
-        let not_before = Time::from_asn1(&items[0])?;
-        let not_after = Time::from_asn1(&items[1])?;
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let elements = item.as_exact_sequence(2)?;
+        let not_before = Time::from_asn1(&elements[0])?;
+        let not_after = Time::from_asn1(&elements[1])?;
         Ok(Validity { not_before, not_after })
     }
 }
@@ -188,10 +182,10 @@ pub struct SubjectPublicKeyInfo {
 }
 
 impl SubjectPublicKeyInfo {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let items = value.as_exact_sequence(2)?;
-        let algorithm = AlgorithmIdentifier::from_asn1(&items[0])?;
-        let subject_public_key = items[1].as_bit_string()?.clone();
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let elements = item.as_exact_sequence(2)?;
+        let algorithm = AlgorithmIdentifier::from_asn1(&elements[0])?;
+        let subject_public_key = elements[1].as_bit_string()?.clone();
         Ok(SubjectPublicKeyInfo {
             algorithm,
             subject_public_key,
@@ -211,30 +205,30 @@ pub struct UniqueIdentifier {
 pub struct Extension {
     pub id: ObjectIdentifier,
     pub critical: bool,
-    pub value: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 impl Extension {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let mut it = value.as_sequence_iter()?;
-        let mut item = it.next().ok_or("Missing item")?;
-        let id = item.as_object_identifier()?.clone();
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let mut it = item.as_sequence_iter()?;
+        let mut element = it.next().ok_or("Missing element")?;
+        let id = element.as_object_identifier()?.clone();
 
-        item = it.next().ok_or("Missing item")?;
+        element = it.next().ok_or("Missing element")?;
         let mut critical = false;
-        if let Value::Boolean(b) = item {
+        if let Value::Boolean(b) = &element.value {
             critical = *b;
-            item = it.next().ok_or("Missing item")?;
+            element = it.next().ok_or("Missing element")?;
         }
 
-        let value = item.as_octet_string()?.clone();
-        Ok(Extension { id, critical, value })
+        let data = element.as_octet_string()?.clone();
+        Ok(Extension { id, critical, data })
     }
 
     pub fn print(&self, reg: &ObjectRegistry, indent: &str) {
         println!("{}id = {}", indent, reg.get_long_name(&self.id));
         println!("{}critical = {}", indent, self.critical);
-        println!("{}value = <{} bytes>", indent, self.value.len());
+        println!("{}value = <{} bytes>", indent, self.data.len());
     }
 }
 
@@ -252,41 +246,41 @@ pub struct TBSCertificate {
 }
 
 impl TBSCertificate {
-    pub fn from_asn1(value: &Value) -> Result<Self, Box<dyn Error>> {
-        let mut it = value.as_sequence_iter()?;
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let mut it = item.as_sequence_iter()?;
 
-        let item = it.next().ok_or("Missing version")?;
+        let elem = it.next().ok_or("Missing version")?;
         let version: Version = Version::V3; // TODO
 
-        let item = it.next().ok_or("Missing serial_number")?;
-        let serial_number = item.as_integer()?.clone();
+        let elem = it.next().ok_or("Missing serial_number")?;
+        let serial_number = elem.as_integer()?.clone();
 
-        let item = it.next().ok_or("Missing signature")?;
-        let signature = AlgorithmIdentifier::from_asn1(&item)?;
+        let elem = it.next().ok_or("Missing signature")?;
+        let signature = AlgorithmIdentifier::from_asn1(&elem)?;
 
-        let item = it.next().ok_or("Missing issuer")?;
-        let issuer = Name::from_asn1(&item)?;
+        let elem = it.next().ok_or("Missing issuer")?;
+        let issuer = Name::from_asn1(&elem)?;
 
-        let item = it.next().ok_or("Missing validity")?;
-        let validity = Validity::from_asn1(&item)?;
+        let elem = it.next().ok_or("Missing validity")?;
+        let validity = Validity::from_asn1(&elem)?;
 
-        let item = it.next().ok_or("Missing subject")?;
-        let subject = Name::from_asn1(&item)?;
+        let elem = it.next().ok_or("Missing subject")?;
+        let subject = Name::from_asn1(&elem)?;
 
-        let item = it.next().ok_or("Missing subject_public_key_info")?;
-        let subject_public_key_info = SubjectPublicKeyInfo::from_asn1(&item)?;
+        let elem = it.next().ok_or("Missing subject_public_key_info")?;
+        let subject_public_key_info = SubjectPublicKeyInfo::from_asn1(&elem)?;
 
-        let item = it.next().ok_or("Missing extensions")?;
+        let elem = it.next().ok_or("Missing extensions")?;
 
         let mut extensions: Vec<Extension> = Vec::new();
 
-        match item {
-            Value::ContextSpecific(3, ext_items) => {
-                match ext_items.get(0) {
-                    Some(ext_items2) => {
-                        let ext_items3 = ext_items2.as_sequence()?;
-                        for ext_item in ext_items3 {
-                            extensions.push(Extension::from_asn1(ext_item)?);
+        match &elem.value {
+            Value::ContextSpecific(3, ext_elements) => {
+                match ext_elements.get(0) {
+                    Some(ext_elements2) => {
+                        let ext_elements3 = ext_elements2.as_sequence()?;
+                        for ext_elem in ext_elements3 {
+                            extensions.push(Extension::from_asn1(ext_elem)?);
                         }
                     }
                     None => {

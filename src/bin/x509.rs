@@ -26,9 +26,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let data: Vec<u8> = std::fs::read(filename)?;
     // println!("data.len() = {}", data.len());
     let mut reader = BinaryReader::new(&data);
-    let value = asn1::reader::read_value(&mut reader)?;
+    let item = asn1::reader::read_item(&mut reader)?;
 
-    let certificate = x509::Certificate::from_asn1(&value)?;
+    let certificate = x509::Certificate::from_asn1(&item)?;
     println!("Got certificate");
 
     let mut registry = asn1::printer::ObjectRegistry::new();

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::super::binary::BinaryReader;
 use super::super::result::GeneralError;
-use super::value::{Value, ObjectIdentifier};
+use super::value::{Value, Item, ObjectIdentifier};
 
 pub struct ObjectDescriptor {
     pub parts: &'static [u64],
@@ -105,26 +105,26 @@ impl Printer<'_> {
         s
     }
 
-    fn print_list(&self, name: &str, values: &[Value], prefix: &str, indent: &str) {
+    fn print_list(&self, name: &str, items: &[Item], prefix: &str, indent: &str) {
         println!("{}", name);
-        for (i, value) in values.iter().enumerate() {
-            if i + 1 < values.len() {
+        for (i, item) in items.iter().enumerate() {
+            if i + 1 < items.len() {
                 let c_prefix = &format!("{}├── ", indent);
                 let c_indent = &format!("{}│   ", indent);
-                self.print_value(value, c_prefix, c_indent);
+                self.print_item(item, c_prefix, c_indent);
             }
             else {
                 let c_prefix = &format!("{}└── ", indent);
                 let c_indent = &format!("{}    ", indent);
-                self.print_value(value, c_prefix, c_indent);
+                self.print_item(item, c_prefix, c_indent);
             }
         }
     }
 
-    fn print_value(&self, value: &Value, prefix: &str, indent: &str) {
+    fn print_item(&self, item: &Item, prefix: &str, indent: &str) {
         print!("{}", prefix);
 
-        match value {
+        match &item.value {
             Value::Boolean(inner) => {
                 println!("BOOLEAN {}", inner);
             }
@@ -189,7 +189,7 @@ impl Printer<'_> {
         }
     }
 
-    pub fn print(&self, value: &Value) {
-        self.print_value(value, "", "");
+    pub fn print(&self, item: &Item) {
+        self.print_item(item, "", "");
     }
 }

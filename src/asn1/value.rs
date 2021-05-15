@@ -80,19 +80,26 @@ pub enum Value {
     UTCTime(String),
     GeneralizedTime(String),
 
-    Sequence(Vec<Value>),
-    Set(Vec<Value>),
+    Sequence(Vec<Item>),
+    Set(Vec<Item>),
 
-    Application(u32, Vec<Value>),
-    ContextSpecific(u32, Vec<Value>),
-    Private(u32, Vec<Value>),
+    Application(u32, Vec<Item>),
+    ContextSpecific(u32, Vec<Item>),
+    Private(u32, Vec<Item>),
 
     Unknown(Identifier, u32),
 }
 
-impl Value {
+#[derive(Clone)]
+pub struct Item {
+    pub offset: usize,
+    pub len: usize,
+    pub value: Value,
+}
+
+impl Item {
     pub fn type_str(&self) -> &'static str {
-        match self {
+        match self.value {
             Value::Boolean(_)            => "Boolean",
             Value::Integer(_)            => "Integer",
             Value::BitString(_)          => "BitString",
@@ -112,21 +119,21 @@ impl Value {
         }
     }
 
-    pub fn as_sequence_iter(&self) -> Result<std::slice::Iter<Value>, Box<dyn Error>> {
-        match self {
+    pub fn as_sequence_iter(&self) -> Result<std::slice::Iter<Item>, Box<dyn Error>> {
+        match &self.value {
             Value::Sequence(items) => Ok(items.iter()),
             _ => Err(GeneralError::new("Expected a sequence")),
         }
     }
 
-    pub fn as_sequence(&self) -> Result<&Vec<Value>, Box<dyn Error>> {
-        match self {
+    pub fn as_sequence(&self) -> Result<&Vec<Item>, Box<dyn Error>> {
+        match &self.value {
             Value::Sequence(items) => Ok(items),
             _ => Err(GeneralError::new("Expected a sequence")),
         }
     }
 
-    pub fn as_exact_sequence(&self, count: usize) -> Result<&Vec<Value>, Box<dyn Error>> {
+    pub fn as_exact_sequence(&self, count: usize) -> Result<&Vec<Item>, Box<dyn Error>> {
         let items = self.as_sequence()?;
         if items.len() != count {
             return Err(GeneralError::new(&format!("Expected a sequence of {} items, got {}", count, items.len())));
@@ -136,14 +143,14 @@ impl Value {
         }
     }
 
-    pub fn as_set(&self) -> Result<&Vec<Value>, Box<dyn Error>> {
-        match self {
+    pub fn as_set(&self) -> Result<&Vec<Item>, Box<dyn Error>> {
+        match &self.value {
             Value::Set(items) => Ok(items),
             _ => Err(GeneralError::new("Expected a set")),
         }
     }
 
-    pub fn as_exact_set(&self, count: usize) -> Result<&Vec<Value>, Box<dyn Error>> {
+    pub fn as_exact_set(&self, count: usize) -> Result<&Vec<Item>, Box<dyn Error>> {
         let items = self.as_set()?;
         if items.len() != count {
             return Err(GeneralError::new(&format!("Expected a set of {} items, got {}", count, items.len())));
@@ -154,35 +161,35 @@ impl Value {
     }
 
     pub fn as_object_identifier(&self) -> Result<&ObjectIdentifier, Box<dyn Error>> {
-        match self {
+        match &self.value {
             Value::ObjectIdentifier(oid) => Ok(oid),
             _ => Err(GeneralError::new("Expected an object identifier")),
         }
     }
 
     pub fn as_bit_string(&self) -> Result<&BitString, Box<dyn Error>> {
-        match self {
+        match &self.value {
             Value::BitString(bit_string) => Ok(bit_string),
             _ => Err(GeneralError::new("Expected a bit string")),
         }
     }
 
     pub fn as_octet_string(&self) -> Result<&Vec<u8>, Box<dyn Error>> {
-        match self {
+        match &self.value {
             Value::OctetString(bytes) => Ok(bytes),
             _ => Err(GeneralError::new("Expected an octet string")),
         }
     }
 
     pub fn as_integer(&self) -> Result<&Integer, Box<dyn Error>> {
-        match self {
+        match &self.value {
             Value::Integer(integer) => Ok(integer),
             _ => Err(GeneralError::new("Expected an integer")),
         }
     }
 
     pub fn as_string(&self) -> Result<&str, Box<dyn Error>> {
-        match self {
+        match &self.value {
             Value::PrintableString(s) => Ok(s),
             Value::UTF8String(s) => Ok(s),
             _ => Err(GeneralError::new("Expected a string")),
@@ -190,7 +197,7 @@ impl Value {
     }
 
     pub fn as_boolean(&self) -> Result<bool, Box<dyn Error>> {
-        match self {
+        match &self.value {
             Value::Boolean(b) => Ok(*b),
             _ => Err(GeneralError::new("Expected a boolean")),
         }

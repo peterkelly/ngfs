@@ -105,19 +105,19 @@ fn read_length<'a>(reader: &'a mut BinaryReader) -> Result<u32, Box<dyn Error>> 
     }
 }
 
-fn read_value_list<'a>(reader: &mut BinaryReader) -> Result<Vec<Value>, Box<dyn Error>> {
-    let mut values: Vec<Value> = Vec::new();
+fn read_item_list<'a>(reader: &mut BinaryReader) -> Result<Vec<Item>, Box<dyn Error>> {
+    let mut items: Vec<Item> = Vec::new();
     while reader.remaining() > 0 {
         // let old_offset = inner.offset;
         // let new_offset = inner.offset;
         let old_remaining = reader.remaining();
-        values.push(read_value(reader)?);
+        items.push(read_item(reader)?);
         let new_remaining = reader.remaining();
         if new_remaining == old_remaining {
             return Err(GeneralError::new("Value consumed 0 bytes"));
         }
     }
-    Ok(values)
+    Ok(items)
 }
 
 fn read_var_u64(reader: &mut BinaryReader) -> Result<u64, Box<dyn Error>> {
@@ -167,7 +167,18 @@ fn read_object_identifier<'a>(reader: &mut BinaryReader) -> Result<ObjectIdentif
     Ok(ObjectIdentifier(parts))
 }
 
-pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>> {
+pub fn read_item<'a>(reader: &mut BinaryReader) -> Result<Item, Box<dyn Error>> {
+    let start_offset = reader.abs_offset();
+    let value = read_value(reader)?;
+    let end_offset = reader.abs_offset();
+    Ok(Item {
+        offset: start_offset,
+        len: end_offset - start_offset,
+        value: value,
+    })
+}
+
+fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>> {
     let identifier = read_identifier(reader)?;
     let length = read_length(reader)?;
     let mut contents = reader.read_nested(length as usize)?;
@@ -248,13 +259,13 @@ pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>
                 16 => {
                     match identifier.form {
                         Form::Primitive => Err(GeneralError::new("Sequence: incorrect form")),
-                        Form::Constructed => Ok(Value::Sequence(read_value_list(&mut contents)?)),
+                        Form::Constructed => Ok(Value::Sequence(read_item_list(&mut contents)?)),
                     }
                 }
                 17 => {
                     match identifier.form {
                         Form::Primitive => Err(GeneralError::new("Set: incorrect form")),
-                        Form::Constructed => Ok(Value::Set(read_value_list(&mut contents)?)),
+                        Form::Constructed => Ok(Value::Set(read_item_list(&mut contents)?)),
                     }
                 }
                 19 => {
@@ -294,21 +305,21 @@ pub fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>
             let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::Application(tag, read_value_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::Application(tag, read_item_list(&mut contents)?)),
             }
         }
         Class::ContextSpecific => {
             let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::ContextSpecific(tag, read_value_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::ContextSpecific(tag, read_item_list(&mut contents)?)),
             }
         }
         Class::Private => {
             let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::Private(tag, read_value_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::Private(tag, read_item_list(&mut contents)?)),
             }
         }
         // Class::ContextSpecific => Err(GeneralError::new("Unsupported value: class is ContextSpecific")),
