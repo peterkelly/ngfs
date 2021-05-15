@@ -102,10 +102,26 @@ impl Certificate {
     }
 }
 
+#[derive(Debug)]
 pub enum Version {
     V1,
     V2,
     V3,
+}
+
+impl Version {
+    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+        let int_value = item.as_integer()?;
+        if int_value.0.len() != 1 {
+            return Err(GeneralError::new("Invalid version"));
+        }
+        match int_value.0[0] {
+            0 => Ok(Version::V1),
+            1 => Ok(Version::V2),
+            2 => Ok(Version::V3),
+            _ => Err(GeneralError::new("Invalid version")),
+        }
+    }
 }
 
 pub struct RelativeDistinguishedName {
@@ -249,10 +265,22 @@ impl TBSCertificate {
     pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
         let mut it = item.as_sequence_iter()?;
 
-        let elem = it.next().ok_or("Missing version")?;
-        let version: Version = Version::V3; // TODO
+        let mut elem = it.next().ok_or("Missing version")?;
+        let mut version = Version::V1;
+        match &elem.value {
+            Value::ContextSpecific(0, children) => {
+                if children.len() != 1 {
+                    return Err(GeneralError::new("Expected one item for version"));
+                }
+                else {
+                    version = Version::from_asn1(&children[0])?;
+                }
+                elem = it.next().ok_or("Missing serial_number")?;
+            }
+            _ => {
+            }
+        }
 
-        let elem = it.next().ok_or("Missing serial_number")?;
         let serial_number = elem.as_integer()?.clone();
 
         let elem = it.next().ok_or("Missing signature")?;
@@ -270,27 +298,31 @@ impl TBSCertificate {
         let elem = it.next().ok_or("Missing subject_public_key_info")?;
         let subject_public_key_info = SubjectPublicKeyInfo::from_asn1(&elem)?;
 
-        let elem = it.next().ok_or("Missing extensions")?;
-
         let mut extensions: Vec<Extension> = Vec::new();
 
-        match &elem.value {
-            Value::ContextSpecific(3, ext_elements) => {
-                match ext_elements.get(0) {
-                    Some(ext_elements2) => {
-                        let ext_elements3 = ext_elements2.as_sequence()?;
-                        for ext_elem in ext_elements3 {
-                            extensions.push(Extension::from_asn1(ext_elem)?);
+        match it.next() {
+            Some(elem) => {
+                match &elem.value {
+                    Value::ContextSpecific(3, ext_elements) => {
+                        match ext_elements.get(0) {
+                            Some(ext_elements2) => {
+                                let ext_elements3 = ext_elements2.as_sequence()?;
+                                for ext_elem in ext_elements3 {
+                                    extensions.push(Extension::from_asn1(ext_elem)?);
+                                }
+                            }
+                            None => {
+                            }
                         }
                     }
-                    None => {
+                    _ => {
+                        return Err(GeneralError::new("Unexpected value for extension"));
                     }
                 }
             }
-            _ => {
-                return Err(GeneralError::new("Unexpected value for extension"));
+            None => {
             }
-        }
+        };
 
         match it.next() {
             Some(_) => return Err(GeneralError::new("Unexpected value")),
@@ -347,7 +379,7 @@ pub fn time_to_str(time: &Time) -> &str {
 
 pub fn print_tbs_certificate(tbs: &TBSCertificate, reg: &ObjectRegistry, indent: &str) {
     let child_indent: &str = &format!("{}    ", indent);
-    // TODO pub version: Version,
+    println!("{}version = {:?}", indent, tbs.version);
     println!("{}serial_number = {}", indent, BinaryData(&tbs.serial_number.0));
     // TODO pub signature: AlgorithmIdentifier,
     println!("{}signature = {}", indent, tbs.signature.to_string(reg));
