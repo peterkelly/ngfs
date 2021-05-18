@@ -65,7 +65,7 @@ use torrent::tls::helpers::{
     verify_finished,
 };
 use torrent::tls::protocol::client::{
-    Client,
+    AConnection,
     ServerAuth,
     ClientAuth,
     ClientConfig,
@@ -143,245 +143,6 @@ fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     }
 }
 
-struct Session {
-    client: Client,
-    incoming_data: Vec<u8>,
-    outgoing_data: Vec<u8>,
-    read_closed: bool,
-    write_closed: bool,
-    error: Option<String>,
-}
-
-impl Session {
-    pub fn new(client: Client) -> Self {
-        Session {
-            client: client,
-            incoming_data: Vec::new(),
-            outgoing_data: Vec::new(),
-            // wants_read: true,
-            // wants_write: true,
-            read_closed: false,
-            write_closed: false,
-            error: None,
-        }
-    }
-
-    pub fn write_client_hello(&mut self, handshake: &Handshake) -> Result<(), Box<dyn Error>> {
-        self.client.write_client_hello(handshake, &mut self.outgoing_data)
-    }
-
-    pub fn write_plaintext(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
-        match &self.error {
-            Some(_) => return Err(GeneralError::new("Session is dead")),
-            None => (),
-        };
-        self.client.write_plaintext(data, &mut self.outgoing_data)
-    }
-
-    pub fn add_incoming_data(&mut self, data: &[u8]) {
-        self.incoming_data.extend_from_slice(data);
-    }
-
-    pub fn remove_outgoing_data(&mut self) -> Vec<u8> {
-        self.outgoing_data.split_off(0)
-    }
-
-    pub fn report_error(&mut self, error: &str) {
-        println!("Session::report_error: {}", error);
-        self.error = Some(String::from(error));
-        self.read_closed = true;
-        self.write_closed = true;
-    }
-
-    pub fn process(&mut self) {
-        loop {
-            match TLSPlaintext::from_raw_data(&self.incoming_data) {
-                Err(TLSPlaintextError::InsufficientData) => {
-                    return;
-                }
-                Err(TLSPlaintextError::InvalidLength) => {
-                    self.report_error("Invalid record length");
-                    return;
-                }
-                Ok(record) => {
-                    let to_remove = record.raw.len();
-                    match self.client.process_record(&mut self.outgoing_data, record) {
-                        Ok(()) => (),
-                        Err(e) => {
-                            self.report_error(&format!("{}", e));
-                            break;
-                        }
-                    }
-                    self.incoming_data = self.incoming_data.split_off(to_remove);
-                }
-            }
-        }
-    }
-
-    fn on_read_end(&mut self) {
-        self.read_closed = true;
-        self.process();
-    }
-
-    fn on_read_data(&mut self, data: &[u8]) {
-        self.add_incoming_data(data);
-        self.process();
-    }
-
-    fn on_read_error(&mut self, e: &std::io::Error) {
-        self.report_error(&format!("read from underlying transport: {}", e));
-        self.process();
-    }
-
-    fn on_write_error(&mut self, e: &std::io::Error) {
-        self.report_error(&format!("read from underlying transport: {}", e));
-        self.process();
-    }
-}
-
-struct Connection {
-    session: Mutex<Session>,
-    read_not: Notify,
-    write_not: Notify,
-    debug: bool,
-    established_not: Notify,
-}
-
-impl Connection {
-    fn new(session: Session) -> Self {
-        Connection {
-            session: Mutex::new(session),
-            read_not: Notify::new(),
-            write_not: Notify::new(),
-            debug: false,
-            established_not: Notify::new(),
-        }
-    }
-
-    async fn write_client_hello(&self, handshake: &Handshake) -> Result<(), Box<dyn Error>> {
-        self.session.lock().unwrap().write_client_hello(handshake)?;
-        self.read_not.notify_one();
-        self.write_not.notify_one();
-        Ok(())
-    }
-
-    async fn wait_till_established(&self) -> Result<(), Box<dyn Error>> {
-        self.established_not.notified().await;
-        match &self.session.lock().unwrap().error {
-            Some(s) => Err(GeneralError::new(s)),
-            None => Ok(())
-        }
-    }
-
-    async fn write_plaintext(&self, data: &[u8]) -> Result<(), Box<dyn Error>> {
-        self.session.lock().unwrap().write_plaintext(data)?;
-        println!("write_plaintext: now outgoing_data.len() = {}",
-            self.session.lock().unwrap().outgoing_data.len());
-        self.read_not.notify_one();
-        self.write_not.notify_one();
-        Ok(())
-    }
-
-    fn check_events(&self) {
-        let established = self.session.lock().unwrap().client.is_established();
-        if established || self.had_error() {
-            // FIXME: Do this only once, not on every call
-            // println!("Notifying that session has been established");
-            self.established_not.notify_one();
-        }
-    }
-
-    fn on_read_end(&self) {
-        self.session.lock().unwrap().on_read_end();
-        self.check_events();
-    }
-
-    fn on_read_data(&self, data: &[u8]) {
-        self.session.lock().unwrap().on_read_data(data);
-        self.check_events();
-    }
-
-    fn on_read_error(&self, e: &std::io::Error) {
-        self.session.lock().unwrap().on_read_error(e);
-        self.check_events();
-    }
-
-    fn on_write_error(&self, e: &std::io::Error) {
-        self.session.lock().unwrap().on_write_error(e);
-        self.check_events();
-    }
-
-    fn had_error(&self) -> bool {
-        match self.session.lock().unwrap().error {
-            Some(_) => true,
-            None => false,
-        }
-    }
-
-    pub fn remove_outgoing_data(&self) -> Vec<u8> {
-        let res = self.session.lock().unwrap().remove_outgoing_data();
-        self.check_events();
-        res
-    }
-}
-
-async fn read_loop(conn: Arc<Connection>, reader: &mut (dyn AsyncRead + Unpin + Send)) {
-    const READ_SIZE: usize = 1024;
-    loop {
-        let wants_read = true;
-        if wants_read {
-            let mut buf: [u8; READ_SIZE] = [0; READ_SIZE];
-            match reader.read(&mut buf).await {
-                Ok(0) => {
-                    if conn.debug { println!("read_loop: end") }
-                    conn.on_read_end();
-                    return;
-                }
-                Ok(r) => {
-                    if conn.debug { println!("read_loop: read {} bytes", r) }
-                    conn.on_read_data(&buf[0..r]);
-                }
-                Err(e) => {
-                    if conn.debug { println!("read_loop: error {}", e) }
-                    conn.on_read_error(&e);
-                    break;
-                }
-            }
-        }
-        if conn.had_error() {
-            break;
-        }
-
-        conn.write_not.notify_one();
-        conn.read_not.notified().await;
-    }
-}
-
-async fn write_loop(conn: Arc<Connection>, writer: &mut (dyn AsyncWrite + Unpin + Send)) {
-    const WRITE_SIZE: usize = 1024;
-    loop {
-        let data = conn.remove_outgoing_data();
-        if data.len() > 0 {
-            match writer.write_all(&data).await {
-                Ok(()) => {
-                    if conn.debug { println!("write_loop: wrote {} bytes", data.len()) }
-                }
-                Err(e) => {
-                    if conn.debug { println!("write_loop: error {}", e) }
-                    conn.on_write_error(&e);
-                    break;
-                }
-            }
-        }
-        if conn.had_error() {
-            break;
-        }
-
-        conn.read_not.notify_one();
-        conn.write_not.notified().await;
-    }
-}
-
 fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let mut argno = 1;
@@ -439,6 +200,55 @@ fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
     })
 }
 
+async fn test_echo(aconn: &mut AConnection) -> Result<(), Box<dyn Error>> {
+    let parts: &[&[u8]] = &[
+        b"The primary goal of TLS is to provide a secure channel between two \
+         communicating peers; the only requirement from the underlying \
+         transport is a reliable, in-order data stream.  Specifically, the \
+         secure channel should provide the following properties:",
+
+        b"-  Authentication: The server side of the channel is always \
+         authenticated; the client side is optionally authenticated. \
+         Authentication can happen via asymmetric cryptography (e.g., RSA \
+         [RSA], the Elliptic Curve Digital Signature Algorithm (ECDSA) \
+         [ECDSA], or the Edwards-Curve Digital Signature Algorithm (EdDSA) \
+         [RFC8032]) or a symmetric pre-shared key (PSK).",
+
+        b"-  Confidentiality: Data sent over the channel after establishment is \
+         only visible to the endpoints.  TLS does not hide the length of \
+         the data it transmits, though endpoints are able to pad TLS \
+         records in order to obscure lengths and improve protection against \
+         traffic analysis techniques.",
+
+        b"-  Integrity: Data sent over the channel after establishment cannot \
+         be modified by attackers without detection.",
+
+        b"These properties should be true even in the face of an attacker who \
+         has complete control of the network, as described in [RFC3552].  See \
+         Appendix E for a more complete statement of the relevant security \
+         properties.",
+    ];
+
+    for part in parts.iter() {
+        sleep(Duration::from_millis(1000)).await;
+        aconn.write_normal(part).await?;
+        let data = aconn.read_normal().await?;
+        println!("receive application data =");
+        println!("{:#?}", Indent(&DebugHexDump(&data)));
+    }
+
+    Ok(())
+}
+
+async fn test_http(aconn: &mut AConnection) -> Result<(), Box<dyn Error>> {
+    aconn.write_normal(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
+    loop {
+        let data = aconn.read_normal().await?;
+        println!("receive application data =");
+        println!("{:#?}", Indent(&DebugHexDump(&data)));
+    }
+}
+
 async fn test_client() -> Result<(), Box<dyn Error>> {
     let config = parse_args()?;
 
@@ -452,82 +262,20 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let handshake = Handshake::ClientHello(client_hello);
 
     let mut socket = TcpStream::connect("localhost:443").await?;
-    let mut client = Client::new(my_private_key, config);
-
-    let mut conn = Connection::new(Session::new(client));
-    conn.debug = true;
-    let conn = Arc::new(conn);
-
-    let read_conn = conn.clone();
-    let write_conn = conn.clone();
-
 
     let (mut read_half, mut write_half) = socket.into_split();
-    let read_handle = tokio::spawn(async move {
-        read_loop(read_conn, &mut read_half).await
-    });
+    let mut aconn = AConnection::new(
+        Box::new(read_half), // reader
+        Box::new(write_half), // writer
+        my_private_key, // my_private_key
+        config, // config
+    );
+    let p1 = aconn.do_phase_one(&handshake).await?;
+    let p2 = aconn.do_phase_two(p1).await?;
 
-    let write_handle = tokio::spawn(async move {
-        write_loop(write_conn, &mut write_half).await
-    });
+    test_http(&mut aconn).await?;
+    // test_echo(&mut aconn).await?;
 
-    conn.write_client_hello(&handshake).await?;
-
-    conn.wait_till_established().await?;
-    if conn.debug {
-        println!("Connection established");
-    }
-
-    conn.write_plaintext(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
-
-
-    // sleep(Duration::from_millis(1000)).await;
-    // conn.write_plaintext(
-    //     b"The primary goal of TLS is to provide a secure channel between two \
-    //      communicating peers; the only requirement from the underlying \
-    //      transport is a reliable, in-order data stream.  Specifically, the \
-    //      secure channel should provide the following properties:").await?;
-
-    // sleep(Duration::from_millis(1000)).await;
-    // conn.write_plaintext(
-    //     b"-  Authentication: The server side of the channel is always \
-    //      authenticated; the client side is optionally authenticated. \
-    //      Authentication can happen via asymmetric cryptography (e.g., RSA \
-    //      [RSA], the Elliptic Curve Digital Signature Algorithm (ECDSA) \
-    //      [ECDSA], or the Edwards-Curve Digital Signature Algorithm (EdDSA) \
-    //      [RFC8032]) or a symmetric pre-shared key (PSK).").await?;
-
-    // sleep(Duration::from_millis(1000)).await;
-    // conn.write_plaintext(
-    //     b"-  Confidentiality: Data sent over the channel after establishment is \
-    //      only visible to the endpoints.  TLS does not hide the length of \
-    //      the data it transmits, though endpoints are able to pad TLS \
-    //      records in order to obscure lengths and improve protection against \
-    //      traffic analysis techniques.").await?;
-
-    // sleep(Duration::from_millis(1000)).await;
-    // conn.write_plaintext(
-    //     b"-  Integrity: Data sent over the channel after establishment cannot \
-    //      be modified by attackers without detection.").await?;
-
-    // sleep(Duration::from_millis(1000)).await;
-    // conn.write_plaintext(
-    //     b"These properties should be true even in the face of an attacker who \
-    //      has complete control of the network, as described in [RFC3552].  See \
-    //      Appendix E for a more complete statement of the relevant security \
-    //      properties.").await?;
-
-    // println!();
-    // for i in 1..=5 {
-    //     sleep(Duration::from_millis(1000)).await;
-    //     let message = format!("Message from client {}\n", i);
-    //     conn.write_plaintext(&message.as_bytes()).await?;
-    //     print!("Wrote: {}", message);
-    // }
-
-
-    read_handle.await.unwrap();
-    write_handle.await.unwrap();
     Ok(())
 }
 

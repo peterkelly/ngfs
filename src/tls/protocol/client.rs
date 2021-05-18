@@ -6,6 +6,7 @@
 #![allow(unused_macros)]
 
 use std::error::Error;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use ring::agreement::EphemeralPrivateKey;
 use super::super::helpers::{
     EncryptionKey,
@@ -23,6 +24,8 @@ use super::super::helpers::{
 };
 use super::super::types::handshake::{
     Handshake,
+    ServerHello,
+    EncryptedExtensions,
     Certificate,
     CertificateEntry,
     CertificateRequest,
@@ -36,8 +39,11 @@ use super::super::types::extension::{
 use super::super::types::record::{
     Message,
     ContentType,
+    TLSOwnedPlaintext,
     TLSPlaintext,
     TLSOutputPlaintext,
+    TLSPlaintextError,
+    TLS_RECORD_SIZE,
 };
 use super::super::types::alert::{
     Alert,
@@ -291,555 +297,390 @@ fn verify_transcript(
     )
 }
 
-struct PhaseTransition {
-    phase: Phase,
-    error: Option<Box<dyn Error>>,
+pub struct AEncryption {
+    traffic_secrets: TrafficSecrets,
+    ciphers: Ciphers,
 }
 
-impl PhaseTransition {
-    fn ok(phase: Phase) -> Self {
-        PhaseTransition {
-            phase: phase,
-            error: None,
-        }
-    }
-
-    fn err(phase: Phase, error: Box<dyn Error>) -> Self {
-        PhaseTransition {
-            phase: phase,
-            error: Some(error),
-        }
-    }
-}
-
-// Unencrypted data at start of handshake (ClientHello and ServerHello)
-struct PhaseOne {
+pub struct AConnection {
+    reader: Box<dyn AsyncRead + Unpin>,
+    writer: Box<dyn AsyncWrite + Unpin>,
     transcript: Vec<u8>,
     my_private_key: Option<EphemeralPrivateKey>,
     config: ClientConfig,
-}
-
-// Handshake once encryption established
-struct PhaseTwo {
-    ciphers: Ciphers,
-    prk: Vec<u8>,
-    transcript: Vec<u8>,
-    handshake_secrets: TrafficSecrets,
-    server_sequence_no: u64,
-    config: ClientConfig,
-
-    encrypted_extensions: Option<Vec<Extension>>,
-    server_certificate: Option<Certificate>,
-    certificate_request: Option<CertificateRequest>,
-    certificate_verify: Option<CertificateVerify>,
-    certificate_verify_thash: Option<Vec<u8>>,
-}
-
-// Established
-struct PhaseThree {
-    ciphers: Ciphers,
-    prk: Vec<u8>,
-    application_secrets: TrafficSecrets,
     client_sequence_no: u64,
     server_sequence_no: u64,
+    encryption: Option<AEncryption>,
+    old_thash: Vec<u8>,
+    new_thash: Vec<u8>,
 }
 
-enum Phase {
-    One(PhaseOne),
-    Two(PhaseTwo),
-    Three(PhaseThree),
-}
+impl AConnection {
+    pub fn new(
+        reader: Box<dyn AsyncRead + Unpin>,
+        writer: Box<dyn AsyncWrite + Unpin>,
+        my_private_key: EphemeralPrivateKey,
+        config: ClientConfig,
+    ) -> Self {
+        AConnection {
+            reader: reader,
+            writer: writer,
+            transcript: Vec::new(),
+            my_private_key: Some(my_private_key),
+            config: config,
+            client_sequence_no: 0,
+            server_sequence_no: 0,
+            encryption: None,
+            old_thash: Vec::new(),
+            new_thash: Vec::new(),
+        }
+    }
 
-impl PhaseOne {
-    fn handshake(mut self, handshake: &Handshake, handshake_bytes: &[u8]) -> PhaseTransition {
-        self.transcript.extend_from_slice(handshake_bytes);
+    async fn receive_record(&mut self) -> Result<TLSOwnedPlaintext, Box<dyn Error>> {
+        let mut header: [u8; 5] = Default::default();
+        self.reader.read_exact(&mut header).await?;
 
+        let content_type = ContentType::from_raw(header[0]);
+
+        let mut legacy_record_version_bytes: [u8; 2] = Default::default();
+        legacy_record_version_bytes.copy_from_slice(&header[1..3]);
+        let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
+
+
+        let mut length_bytes: [u8; 2] = Default::default();
+        length_bytes.copy_from_slice(&header[3..5]);
+        let length = u16::from_be_bytes(length_bytes) as usize;
+
+        if length > TLS_RECORD_SIZE {
+            return Err(TLSPlaintextError::InvalidLength.into());
+        }
+
+        let mut fragment = vec_with_len(length);
+        self.reader.read_exact(&mut fragment).await?;
+
+        let mut raw: Vec<u8> = Vec::new();
+        raw.extend_from_slice(&header);
+        raw.extend_from_slice(&fragment);
+
+        let record = TLSOwnedPlaintext {
+            content_type,
+            legacy_record_version,
+            header: header,
+            fragment: fragment,
+            raw: raw,
+        };
+        Ok(record)
+    }
+
+    async fn receive_record_ignore_cc(&mut self) -> Result<TLSOwnedPlaintext, Box<dyn Error>> {
+        loop {
+            let record = self.receive_record().await?;
+            if record.content_type != ContentType::ChangeCipherSpec {
+                return Ok(record)
+            }
+        }
+    }
+
+    async fn receive_message(&mut self) -> Result<Message, Box<dyn Error>> {
+        let plaintext = self.receive_record_ignore_cc().await?;
+        match &self.encryption {
+            Some(encryption) => {
+                self.old_thash = encryption.ciphers.hash_alg.hash(&self.transcript);
+
+                // TODO: Cater for alerts
+                let (message, message_raw) = decrypt_message(
+                    self.server_sequence_no,
+                    &encryption.traffic_secrets.server,
+                    &plaintext.raw)?;
+                self.server_sequence_no += 1;
+                self.transcript.extend_from_slice(&message_raw);
+                // Ok((message, message_raw))
+
+                self.new_thash = encryption.ciphers.hash_alg.hash(&self.transcript);
+                Ok(message)
+            }
+            None => {
+                // TODO: Support records containing multiple handshake messages
+                self.transcript.extend_from_slice(&plaintext.fragment);
+                let message = Message::from_raw(&plaintext.fragment, plaintext.content_type)?;
+                Ok(message)
+            }
+        }
+    }
+
+    async fn receive_handshake(&mut self) -> Result<Handshake, Box<dyn Error>> {
+        let message = self.receive_message().await?;
+        match message {
+            Message::Handshake(hs) => {
+                Ok(hs)
+            }
+            _ => {
+                Err(GeneralError::new(format!("Expected a handshake, got {:?}", message.content_type())))
+            }
+        }
+    }
+
+    async fn write_plaintext_handshake(&mut self, handshake: &Handshake) -> Result<(), Box<dyn Error>> {
+        let record = handshake_to_record(handshake)?;
+        self.transcript.extend_from_slice(&record.fragment);
+        self.writer.write_all(&record.to_vec()).await?;
+        Ok(())
+    }
+
+    async fn receive_server_hello(&mut self) -> Result<ServerHello, Box<dyn Error>> {
+        let handshake = self.receive_handshake().await?;
         match handshake {
-            Handshake::ServerHello(server_hello) => {
-                println!("PhaseOne: Received ServerHello");
-                println!("{:#?}", &Indent(&server_hello));
-                let ciphers = match Ciphers::from_server_hello(server_hello) {
-                    Ok(v) => v,
-                    Err(e) => return PhaseTransition::err(Phase::One(self), e.into()),
-                };
-
-                let my_private_key2 = self.my_private_key.take().unwrap();
-                let secret: &[u8] = &match get_server_hello_x25519_shared_secret(my_private_key2, &server_hello) {
-                    Some(r) => r,
-                    None => {
-                        return PhaseTransition::err(Phase::One(self), GeneralError::new("Cannot get shared secret"));
-                    }
-                };
-                println!("Shared secret = {}", BinaryData(&secret));
-
-                let prk = match get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), secret) {
-                    Ok(v) => v,
-                    Err(e) => return PhaseTransition::err(Phase::One(self), e.into()),
-                };
-
-                println!("Got expected server hello");
-
-                let hs = match TrafficSecrets::derive_from(&ciphers, &self.transcript, &prk, "hs") {
-                    Ok(v) => v,
-                    Err(e) => return PhaseTransition::err(Phase::One(self), e.into()),
-                };
-                println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET: {}", BinaryData(&hs.client.raw));
-                println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&hs.server.raw));
-
-                PhaseTransition::ok(Phase::Two(PhaseTwo {
-                    ciphers,
-                    prk,
-                    transcript: self.transcript,
-                    handshake_secrets: hs,
-                    server_sequence_no: 0,
-                    config: self.config,
-                    encrypted_extensions: None,
-                    server_certificate: None,
-                    certificate_request: None,
-                    certificate_verify: None,
-                    certificate_verify_thash: None,
-                }))
-            }
-            _ => {
-                let msg = format!("PhaseOne: Received unexpected {}", handshake.name());
-                PhaseTransition::err(Phase::One(self), GeneralError::new(msg))
-            }
+            Handshake::ServerHello(v) => Ok(v),
+            _ => Err(GeneralError::new(format!("Expected ServerHello, got {}", handshake.name())))
         }
-
-
     }
 
-    fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
-        PhaseTransition::err(Phase::One(self), GeneralError::new("Received ApplicationData in PhaseOne"))
-   }
-}
-
-impl PhaseTwo {
-    fn decrypt_next_message(&mut self, plaintext_raw: &[u8]) -> Result<(Message, Vec<u8>), Box<dyn Error>> {
-        // TODO: Cater for alerts
-        let (message, inner_body_vec) = decrypt_message(
-            self.server_sequence_no,
-            &self.handshake_secrets.server,
-            plaintext_raw)?;
-        self.server_sequence_no += 1;
-        self.transcript.extend_from_slice(&inner_body_vec);
-        Ok((message, inner_body_vec))
+    async fn receive_encrypted_extensions(&mut self) -> Result<EncryptedExtensions, Box<dyn Error>> {
+        let handshake = self.receive_handshake().await?;
+        match handshake {
+            Handshake::EncryptedExtensions(v) => Ok(v),
+            _ => Err(GeneralError::new(format!("Expected EncryptedExtensions, got {}", handshake.name())))
+        }
     }
 
-    fn handshake(mut self, handshake: &Handshake, handshake_bytes: &[u8]) -> PhaseTransition {
-        PhaseTransition::err(Phase::Two(self), GeneralError::new("Received Handshake in PhaseTwo"))
+    async fn receive_certificate_request(&mut self) -> Result<CertificateRequest, Box<dyn Error>> {
+        let handshake = self.receive_handshake().await?;
+        match handshake {
+            Handshake::CertificateRequest(v) => Ok(v),
+            _ => Err(GeneralError::new(format!("Expected CertificateRequest, got {}", handshake.name())))
+        }
     }
 
-    fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
+    async fn receive_certificate(&mut self) -> Result<Certificate, Box<dyn Error>> {
+        let handshake = self.receive_handshake().await?;
+        match handshake {
+            Handshake::Certificate(v) => Ok(v),
+            _ => Err(GeneralError::new(format!("Expected Certificate, got {}", handshake.name())))
+        }
+    }
 
-        let old_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
-        let (message, message_raw) = match self.decrypt_next_message(plaintext.raw) {
-            Ok(v) => v,
-            Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
+    async fn receive_certificate_verify(&mut self) -> Result<CertificateVerify, Box<dyn Error>> {
+        let handshake = self.receive_handshake().await?;
+        match handshake {
+            Handshake::CertificateVerify(v) => Ok(v),
+            _ => Err(GeneralError::new(format!("Expected CertificateVerify, got {}", handshake.name())))
+        }
+    }
+
+    async fn receive_finished(&mut self) -> Result<Finished, Box<dyn Error>> {
+        let handshake = self.receive_handshake().await?;
+        match handshake {
+            Handshake::Finished(v) => Ok(v),
+            _ => Err(GeneralError::new(format!("Expected Finished, got {}", handshake.name())))
+        }
+    }
+
+    pub async fn do_phase_one(&mut self, client_hello: &Handshake) -> Result<PhaseOneResult, Box<dyn Error>> {
+        self.write_plaintext_handshake(client_hello).await?;
+        let server_hello = self.receive_server_hello().await?;
+
+        println!("PhaseOne: Received ServerHello");
+        println!("{:#?}", &Indent(&server_hello));
+        let ciphers = Ciphers::from_server_hello(&server_hello)?;
+
+        let my_private_key = self.my_private_key.take().unwrap();
+        let secret = get_server_hello_x25519_shared_secret(my_private_key, &server_hello)
+            .ok_or_else(|| GeneralError::new("Cannot get shared secret"))?;
+        println!("Shared secret = {}", BinaryData(&secret));
+
+        let prk = get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), &secret)?;
+
+        let handshake_secrets = TrafficSecrets::derive_from(&ciphers, &self.transcript, &prk, "hs")?;
+        println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&handshake_secrets.client.raw));
+        println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&handshake_secrets.server.raw));
+        self.encryption = Some(AEncryption {
+            traffic_secrets: handshake_secrets,
+            ciphers: ciphers,
+        });
+
+        Ok(PhaseOneResult {
+            prk,
+        })
+    }
+
+    pub async fn do_phase_two(&mut self, p1: PhaseOneResult) -> Result<(), Box<dyn Error>> {
+        let prk = p1.prk;
+
+        // TODO: Allow some of these to be absent depending on the config
+        let encrypted_extensions = self.receive_encrypted_extensions().await?;
+        println!("Phase two: Got encrypted_extensions");
+        let certificate_request = self.receive_certificate_request().await?;
+        println!("Phase two: Got certificate_request");
+        let certificate = self.receive_certificate().await?;
+        println!("Phase two: Got certificate");
+        let certificate_verify = self.receive_certificate_verify().await?;
+        let certificate_verify_thash = self.old_thash.clone();
+        println!("Phase two: Got certificate_verify");
+        let finished = self.receive_finished().await?;
+        println!("Phase two: Got finished");
+
+        let encryption_copy = match &self.encryption {
+            Some(encryption) => {
+                AEncryption {
+                    traffic_secrets: TrafficSecrets {
+                        client: encryption.traffic_secrets.client.clone(),
+                        server: encryption.traffic_secrets.server.clone(),
+                    },
+                    ciphers: Ciphers {
+                        hash_alg: encryption.ciphers.hash_alg.clone(),
+                        aead_alg: encryption.ciphers.aead_alg.clone(),
+                    }
+                }
+            }
+            None => {
+                return Err(GeneralError::new("No encryption parameters available"));
+            }
         };
-        let new_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
+        let ciphers = &encryption_copy.ciphers;
+        let secrets = &encryption_copy.traffic_secrets;
 
-        match message {
-            Message::Handshake(Handshake::EncryptedExtensions(eex)) => {
-                self.encrypted_extensions = Some(eex.extensions);
-                PhaseTransition::ok(Phase::Two(self))
+        let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
+        let new_prk = get_derived_prk(ciphers.hash_alg, &prk, input_psk)?;
+
+        let application_secrets = TrafficSecrets::derive_from(&ciphers, &self.transcript, &new_prk, "ap")?;
+        println!("KEY CLIENT_TRAFFIC_SECRET_0 = {}", BinaryData(&application_secrets.client.raw));
+        println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&application_secrets.server.raw));
+
+
+        // let mut bad_finished = Finished { verify_data: finished.verify_data.clone() };
+        // bad_finished.verify_data.push(0);
+        println!("Before verify_finished()");
+        verify_finished(ciphers.hash_alg, &secrets.server, &self.old_thash, &finished)?;
+        println!("After  verify_finished()");
+
+        let first_cert_entry : &CertificateEntry = match certificate.certificate_list.get(0) {
+            Some(v) => v,
+            None => {
+                return Err(GeneralError::new("Server sent an empty certificate list"));
             }
-            Message::Handshake(Handshake::CertificateRequest(creq)) => {
-                // println!("PhaseTwo: Received CertificateRequest");
-                println!("{:#?}", &Indent(&creq));
-                self.certificate_request = Some(creq);
-                PhaseTransition::ok(Phase::Two(self))
-            }
-            Message::Handshake(Handshake::Certificate(certificate)) => {
-                // println!("PhaseTwo: Received Certificate");
-                println!("{:#?}", &Indent(&certificate));
-                for entry in certificate.certificate_list.iter() {
-                    let mut registry = asn1::printer::ObjectRegistry::new();
-                    x509::populate_registry(&mut registry);
-                    x509::print_certificate(&registry, &entry.certificate);
-                }
-                self.server_certificate = Some(certificate);
-                PhaseTransition::ok(Phase::Two(self))
-            }
-            Message::Handshake(Handshake::CertificateVerify(certificate_verify)) => {
-                // println!("PhaseTwo: Received CertificateVerify");
-                // println!("    algorithm = {:?}", certificate_verify.algorithm);
-                // println!("    signature = <{} bytes>", certificate_verify.signature.len());
-                self.certificate_verify = Some(certificate_verify);
-                self.certificate_verify_thash = Some(old_thash.clone());
-                PhaseTransition::ok(Phase::Two(self))
-            }
-            Message::Handshake(Handshake::Finished(finished)) => {
-                let ciphers = &self.ciphers;
-                let secrets = &self.handshake_secrets;
-
-                println!("PhaseTwo: Received Handshake::Finished with {} bytes", finished.verify_data.len());
-                println!("    encrypted_extensions   {}", self.encrypted_extensions.is_some());
-                println!("    server_certificate     {}", self.server_certificate.is_some());
-                println!("    certificate_request    {}", self.certificate_request.is_some());
-                println!("    certificate_verify     {}", self.certificate_verify.is_some());
-
-
-                let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
-                let new_prk = match get_derived_prk(ciphers.hash_alg, &self.prk, input_psk) {
-                    Ok(v) => v,
-                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
-                };
-
-                let ap = match TrafficSecrets::derive_from(&ciphers, &self.transcript, &new_prk, "ap") {
-                    Ok(v) => v,
-                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
-                };
-                println!("        KEY CLIENT_TRAFFIC_SECRET_0: {}", BinaryData(&ap.client.raw));
-                println!("        KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&ap.server.raw));
-
-
-                // let mut bad_finished = Finished { verify_data: finished.verify_data.clone() };
-                // bad_finished.verify_data.push(0);
-                match verify_finished(ciphers.hash_alg, &secrets.server, &old_thash, &finished) {
-                    Ok(()) => (),
-                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
-                };
-
-                let first_cert_entry : &CertificateEntry =
-                match &self.server_certificate {
-                    Some(server_certificate) => {
-                        match server_certificate.certificate_list.get(0) {
-                            Some(v) => v,
-                            None => {
-                                let e = GeneralError::new("Server sent an empty certificate list");
-                                return PhaseTransition::err(Phase::Two(self), e.into());
-                            }
-                        }
-                    }
-                    None => {
-                        let e = GeneralError::new("Server did not send certificate");
-                        return PhaseTransition::err(Phase::Two(self), e.into());
-                    }
-                };
-
-                let server_cert_raw: &[u8] = &first_cert_entry.data;
-                let server_cert: &x509::Certificate = &first_cert_entry.certificate;
-
-                let ca_cert: &[u8] = match &self.config.server_auth {
-                    ServerAuth::CertificateAuthority(v) => v,
-                    ServerAuth::None => {
-                        let e = GeneralError::new("No CA certificate available");
-                        return PhaseTransition::err(Phase::Two(self), e.into());
-                    }
-                };
-
-                match verify_certificate(ca_cert, &server_cert_raw) {
-                    Ok(()) => (),
-                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
-                }
-
-
-                match verify_transcript_opt(
-                    &self.certificate_verify,
-                    &self.certificate_verify_thash,
-                    &server_cert.tbs_certificate.subject_public_key_info,
-                    Endpoint::Server
-                ) {
-                    Ok(()) => (),
-                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
-                };
-
-
-                let mut client_sequence_no: u64 = 0;
-
-                // FIXME: Don't hard-code SignatureScheme
-                match &self.config.client_auth {
-                    ClientAuth::Certificate { cert, key } => {
-                        let client_cert = cert;
-                        let client_key = key;
-
-                        let rng = ring::rand::SystemRandom::new();
-                        match send_client_certificate(
-                            ciphers.hash_alg, // hash_alg: HashAlgorithm,
-                            &secrets.client, // encryption_key: &EncryptionKey,
-                            conn, // conn: &mut ClientConn,
-                            &mut client_sequence_no, // sequence_no: &mut u64,
-                            &mut self.transcript, // transcript: &mut Vec<u8>,
-                            client_cert, // client_cert_data: &[u8],
-                            client_key, // client_key_data: &[u8],
-                            SignatureScheme::RsaPssRsaeSha256, // signature_scheme: SignatureScheme,
-                            &rng,
-                        ) {
-                            Ok(()) => {
-                                println!("Sending client certificate succeeded");
-                            }
-                            Err(e) => {
-                                println!("Sending client certificate failed: {}", e);
-                                return PhaseTransition::err(Phase::Two(self), e.into());
-                            }
-                        }
-
-                    }
-                    ClientAuth::None => {
-                    }
-                }
-
-                let new_thash: Vec<u8> = self.ciphers.hash_alg.hash(&self.transcript);
-
-                // let mut bad_new_thash = new_thash.clone();
-                // bad_new_thash.push(0);
-                match send_finished(ciphers.hash_alg, &secrets.client, &new_thash, conn, &mut client_sequence_no) {
-                    Ok(()) => (),
-                    Err(e) => return PhaseTransition::err(Phase::Two(self), e.into()),
-                };
-
-
-                PhaseTransition::ok(Phase::Three(PhaseThree {
-                    ciphers: self.ciphers,
-                    prk: new_prk,
-                    application_secrets: ap,
-                    client_sequence_no: 0,
-                    server_sequence_no: 0,
-                }))
-            }
-            _ => {
-                println!("PhaseTwo:  Ignore {}", message.name());
-                PhaseTransition::ok(Phase::Two(self))
-
-                // let msg = format!("PhaseTwo: Received unexpected {}", message.name());
-                // PhaseTransition::err(Phase::Two(self), GeneralError::new(msg))
-            }
-        }
-    }
-}
-
-impl PhaseThree {
-    fn handshake(mut self, handshake: &Handshake, handshake_bytes: &[u8]) -> PhaseTransition {
-        PhaseTransition::err(Phase::Three(self), GeneralError::new("Received Handshake in PhaseThree"))
-    }
-
-    fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
-        println!("Established.application_data: server_sequence_no = {}", self.server_sequence_no);
-        let decryption_key = &self.application_secrets.server;
-
-        let (message, _) = match decrypt_message(
-            self.server_sequence_no,
-            &decryption_key,
-            plaintext.raw) {
-            Ok(v) => v,
-            Err(e) => return PhaseTransition::err(Phase::Three(self), e.into()),
         };
-        println!("Received message in Established state: {}", message.name());
-        self.server_sequence_no += 1;
 
-        match message {
-            Message::Handshake(Handshake::NewSessionTicket(ticket)) => {
-                println!("ticket = {:#?}", ticket);
-                PhaseTransition::ok(Phase::Three(self))
-            }
-            Message::ApplicationData(data) => {
-                println!("data =");
-                println!("{:#?}", Indent(&DebugHexDump(&data)));
-                PhaseTransition::ok(Phase::Three(self))
-            }
-            Message::Alert(alert) => {
-                let msg = format!("PhaseThree: Received alert {:?}", alert);
-                PhaseTransition::err(Phase::Three(self), GeneralError::new(msg))
-            }
-            _ => {
-                let msg = format!("PhaseThree: Received unexpected {}", message.name());
-                PhaseTransition::err(Phase::Three(self), GeneralError::new(msg))
-            }
-        }
-    }
-}
+        let server_cert_raw: &[u8] = &first_cert_entry.data;
+        let server_cert: &x509::Certificate = &first_cert_entry.certificate;
 
-impl Phase {
-    fn handshake(mut self, handshake: &Handshake, handshake_bytes: &[u8]) -> PhaseTransition {
-        match self {
-            Phase::One(p) => p.handshake(handshake, handshake_bytes),
-            Phase::Two(p) => p.handshake(handshake, handshake_bytes),
-            Phase::Three(p) => p.handshake(handshake, handshake_bytes),
-        }
-    }
+        let ca_cert: &[u8] = match &self.config.server_auth {
+            ServerAuth::CertificateAuthority(v) => v,
+            ServerAuth::None => {
+                return Err(GeneralError::new("No CA certificate available"));
+            }
+        };
 
-    fn application_data(mut self, conn: &mut ClientConn, plaintext: TLSPlaintext) -> PhaseTransition {
-        match self {
-            Phase::One(p) => p.application_data(conn, plaintext),
-            Phase::Two(p) => p.application_data(conn, plaintext),
-            Phase::Three(p) => p.application_data(conn, plaintext),
-        }
-    }
-}
+        println!("Before verify_certificate()");
+        verify_certificate(ca_cert, &server_cert_raw)?;
+        println!("After  verify_certificate()");
 
-pub struct Client {
-    received_alert: Option<Alert>,
-    phase: Option<Phase>,
-}
 
-impl Client {
-    pub fn new(my_private_key: EphemeralPrivateKey, config: ClientConfig) -> Self {
-        Client {
-            received_alert: None,
-            phase: Some(Phase::One(PhaseOne {
-                transcript: Vec::new(),
-                my_private_key: Some(my_private_key),
-                config: config,
-            })),
-        }
-    }
+        println!("Before verify_transcript_opt()");
+        verify_transcript_opt(
+            &Some(certificate_verify),
+            &Some(certificate_verify_thash),
+            &server_cert.tbs_certificate.subject_public_key_info,
+            Endpoint::Server
+        )?;
+        println!("After  verify_transcript_opt()");
 
-    fn handshake(&mut self,
-                 conn: &mut ClientConn,
-                 plaintext: TLSPlaintext) -> Result<(), Box<dyn Error>> {
-        // println!("Handshake record");
-        let mut reader = BinaryReader::new(plaintext.fragment);
-        while reader.remaining() > 0 {
-            let old_offset = reader.abs_offset();
-            let server_handshake = reader.read_item::<Handshake>()?;
-            let new_offset = reader.abs_offset();
-            let handshake_bytes: &[u8] = &plaintext.fragment[old_offset..new_offset];
-            self.handshake_one(conn, &server_handshake, handshake_bytes)?;
-        }
-        Ok(())
-    }
+        // FIXME: Don't hard-code SignatureScheme
+        match &self.config.client_auth {
+            ClientAuth::Certificate { cert, key } => {
+                let client_cert = cert;
+                let client_key = key;
 
-    fn handshake_one(
-        &mut self,
-        conn: &mut ClientConn,
-        handshake: &Handshake,
-        handshake_bytes: &[u8],
-    ) -> Result<(), Box<dyn Error>> {
-        let phase = self.phase.take();
-        match phase {
-            Some(phase) => {
-                let transition = phase.handshake(handshake, handshake_bytes);
-                self.phase = Some(transition.phase);
-                match transition.error {
-                    Some(e) => Err(e),
-                    None => Ok(())
-                }
-            }
-            None => {
-                Err(GeneralError::new("phase is None"))
-            }
-        }
-    }
-
-    fn application_data(
-        &mut self,
-        conn: &mut ClientConn,
-        plaintext: TLSPlaintext,
-    ) -> Result<(), Box<dyn Error>> {
-        let phase = self.phase.take();
-        match phase {
-            Some(phase) => {
-                let transition = phase.application_data(conn, plaintext);
-                self.phase = Some(transition.phase);
-                match transition.error {
-                    Some(e) => Err(e),
-                    None => Ok(())
-                }
-            }
-            None => {
-                Err(GeneralError::new("phase is None"))
-            }
-        }
-    }
-
-    pub fn process_record(
-        &mut self,
-        outgoing_data: &mut Vec<u8>,
-        plaintext: TLSPlaintext,
-    ) -> Result<(), Box<dyn Error>> {
-        let mut conn = ClientConn::new();
-        match plaintext.content_type {
-            ContentType::Handshake => self.handshake(&mut conn, plaintext)?,
-            ContentType::ApplicationData => self.application_data(&mut conn, plaintext)?,
-            ContentType::Invalid => {
-                println!("Unsupported record type: Invalid");
-            }
-            ContentType::ChangeCipherSpec => {
-                println!("ChangeCipherSpec record: Ignoring");
-            }
-            ContentType::Alert => {
-                // TODO: Have this function passed a *complete* plaintext data, even if the alert data
-                // is spread over multiple plaintext records
-                let mut reader = BinaryReader::new(plaintext.fragment);
-                let alert = reader.read_item::<Alert>()?;
-                println!("Received alert: {:?}", alert);
-                self.received_alert = Some(alert);
-            }
-            ContentType::Unknown(code) => {
-                println!("Unsupported record type: {}", code);
-            }
-        }
-        outgoing_data.extend_from_slice(&conn.to_send);
-        Ok(())
-    }
-
-    pub fn write_client_hello(&mut self, handshake: &Handshake, output: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
-        match &mut self.phase {
-            Some(Phase::One(phase)) => {
-                let record = handshake_to_record(&handshake)?;
-                phase.transcript.extend_from_slice(&record.fragment);
-                self.write_plaintext_record(&record, output)?;
-                Ok(())
-            }
-            _ => {
-                Err(GeneralError::new("Attempt to write ClientHello when not in Phase::One"))
-            }
-        }
-    }
-
-    pub fn write_plaintext_record(&mut self, record: &TLSOutputPlaintext,
-                                  output: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
-        match &mut self.phase {
-            Some(Phase::One(_)) => {
-                output.extend_from_slice(&record.to_vec());
-                Ok(())
-            }
-            None => {
-                println!("write_plaintext: phase = None");
-                Err(GeneralError::new("client.phase is None"))
-            }
-            _ => {
-                println!("write_plaintext: phase = Other");
-                Err(GeneralError::new("Session is not yet established"))
-            }
-        }
-    }
-
-    pub fn write_plaintext(&mut self, data: &[u8], outgoing_data: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
-        match &mut self.phase {
-            Some(Phase::Three(phase)) => {
-                println!("write_plaintext: phase = Three (Established)");
+                let rng = ring::rand::SystemRandom::new();
                 let mut conn = ClientConn::new();
+                println!("Before send_client_certificate()");
+                send_client_certificate(
+                    ciphers.hash_alg, // hash_alg: HashAlgorithm,
+                    &secrets.client, // encryption_key: &EncryptionKey,
+                    &mut conn, // conn: &mut ClientConn,
+                    &mut self.client_sequence_no, // sequence_no: &mut u64,
+                    &mut self.transcript, // transcript: &mut Vec<u8>,
+                    client_cert, // client_cert_data: &[u8],
+                    client_key, // client_key_data: &[u8],
+                    SignatureScheme::RsaPssRsaeSha256, // signature_scheme: SignatureScheme,
+                    &rng,
+                )?;
+
+                self.writer.write_all(&conn.to_send).await?;
+
+                println!("After  send_client_certificate()");
+            }
+            ClientAuth::None => {
+            }
+        }
+
+        let new_thash: Vec<u8> = ciphers.hash_alg.hash(&self.transcript); // TODO: use self.new_thash?
+
+        // let mut bad_new_thash = new_thash.clone();
+        // bad_new_thash.push(0);
+        println!("Before send_finished()");
+        let mut conn = ClientConn::new();
+        send_finished(ciphers.hash_alg, &secrets.client, &new_thash, &mut conn, &mut self.client_sequence_no)?;
+        self.writer.write_all(&conn.to_send).await?;
+        println!("After  send_finished()");
+
+        self.client_sequence_no = 0;
+        self.server_sequence_no = 0;
+        self.encryption = Some(AEncryption {
+            traffic_secrets: application_secrets,
+            ciphers: encryption_copy.ciphers,
+        });
+
+        Ok(())
+    }
+
+    pub async fn write_normal(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
+        let mut conn = ClientConn::new();
+        match &self.encryption {
+            Some(encryption) => {
                 conn.append_encrypted(
                     data.to_vec(),
                     ContentType::ApplicationData,
-                    &phase.application_secrets.client,
-                    phase.client_sequence_no,
+                    &encryption.traffic_secrets.client,
+                    self.client_sequence_no,
                     None,
                 )?;
-                phase.client_sequence_no += 1;
-                println!("write_plaintext: conn.to_send.len() = {}", conn.to_send.len());
-                outgoing_data.extend_from_slice(&conn.to_send);
-                Ok(())
             }
             None => {
-                println!("write_plaintext: phase = None");
-                Err(GeneralError::new("client.phase is None"))
-            }
-            _ => {
-                println!("write_plaintext: phase = Other");
-                Err(GeneralError::new("Session is not yet established"))
+                return Err(GeneralError::new("No encryption keys"));
             }
         }
+        self.client_sequence_no += 1;
+        self.writer.write_all(&conn.to_send).await?;
+        Ok(())
     }
 
-    pub fn is_established(&self) -> bool {
-        match &self.phase {
-            Some(Phase::Three(_)) => true,
-            _ => false,
+    pub async fn read_normal(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
+        loop {
+            let message = self.receive_message().await?;
+
+            match message {
+                Message::Handshake(Handshake::NewSessionTicket(ticket)) => {
+                    println!("read_normal: got ticket (ignoring)");
+                    // println!("ticket = {:#?}", ticket);
+                }
+                Message::ApplicationData(data) => {
+                    return Ok(data);
+                }
+                Message::Alert(alert) => {
+                    return Err(GeneralError::new(
+                        format!("PhaseThree: Received alert {:?}", alert)));
+                }
+                _ => {
+                    return Err(GeneralError::new(
+                        format!("PhaseThree: Received unexpected {}", message.name())));
+                }
+            }
         }
     }
+}
+
+pub struct PhaseOneResult {
+    prk: Vec<u8>,
 }
 
 fn handshake_to_record(handshake: &Handshake) -> Result<TLSOutputPlaintext, Box<dyn Error>> {

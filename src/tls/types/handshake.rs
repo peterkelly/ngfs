@@ -275,7 +275,6 @@ impl FromBinary for ServerHello {
     type Output = ServerHello;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        // println!("ServerHello start: offset = 0x{:x}", reader.abs_offset());
         let legacy_version = reader.read_u16()?;
         let random_slice = reader.read_fixed(32)?;
         let mut random: [u8; 32] = Default::default();
@@ -416,11 +415,8 @@ impl FromBinary for Certificate {
 
 impl ToBinary for Certificate {
     fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Certificate::to_binary() 1");
         writer.write_len8_bytes(&self.certificate_request_context)?;
-        println!("Certificate::to_binary() 2");
         writer.write_len24_list(&self.certificate_list)?;
-        println!("Certificate::to_binary() 3");
         Ok(())
     }
 }

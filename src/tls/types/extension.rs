@@ -507,7 +507,6 @@ impl fmt::Debug for DistinguishedName {
 impl FromBinary for DistinguishedName {
     type Output = DistinguishedName;
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        println!("read distinguished name");
         let data = reader.read_len16_bytes()?.to_vec();
         Ok(DistinguishedName { data })
     }
