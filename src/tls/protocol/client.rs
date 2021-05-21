@@ -505,14 +505,16 @@ impl PendingConnection {
     }
 }
 
-pub async fn establish_connection(
+pub async fn establish_connection<T>(
     mut conn: PendingConnection,
-    stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    mut stream: T,
     client_hello: &Handshake,
     private_key: EphemeralPrivateKey,
-) -> Result<EstablishedConnection, Box<dyn Error>> {
-    conn.write_plaintext_handshake(stream, client_hello).await?;
-    let server_hello = conn.receive_server_hello(stream).await?;
+) -> Result<EstablishedConnection<T>, Box<dyn Error>>
+    where T : AsyncRead + AsyncWrite + Unpin
+{
+    conn.write_plaintext_handshake(&mut stream, client_hello).await?;
+    let server_hello = conn.receive_server_hello(&mut stream).await?;
 
 
     let henc = get_handshake_encryption(&conn.transcript, &server_hello, private_key)?;
@@ -523,7 +525,7 @@ pub async fn establish_connection(
         ciphers: henc.ciphers,
     };
 
-    let sm = receive_server_messages(&mut conn, stream, &encryption).await?;
+    let sm = receive_server_messages(&mut conn, &mut stream, &encryption).await?;
     let mut output = ClientConn::new();
     let p2 = do_phase_two(&mut conn, &prk, &sm, &mut output, &encryption)?;
 
@@ -537,6 +539,7 @@ pub async fn establish_connection(
     Ok(EstablishedConnection {
         inner: conn,
         encryption: p2,
+        stream: stream,
     })
 }
 
@@ -742,13 +745,14 @@ fn do_phase_two(
     })
 }
 
-pub struct EstablishedConnection {
+pub struct EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
     inner: PendingConnection,
     encryption: AEncryption,
+    stream: T,
 }
 
-impl EstablishedConnection {
-    pub async fn write_normal(&mut self, writer: &mut (impl AsyncWrite + Unpin), data: &[u8]) -> Result<(), Box<dyn Error>> {
+impl<T> EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
+    pub async fn write_normal(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
         let mut conn = ClientConn::new();
         conn.append_encrypted(
             data.to_vec(),
@@ -758,13 +762,13 @@ impl EstablishedConnection {
             None,
         )?;
         self.inner.client_sequence_no += 1;
-        writer.write_all(&conn.to_send).await?;
+        self.stream.write_all(&conn.to_send).await?;
         Ok(())
     }
 
-    pub async fn read_normal(&mut self, reader: &mut (impl AsyncRead + Unpin)) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub async fn read_normal(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
         loop {
-            let message = self.inner.receive_message(reader, &self.encryption).await?;
+            let message = self.inner.receive_message(&mut self.stream, &self.encryption).await?;
 
             match message {
                 Message::Handshake(Handshake::NewSessionTicket(ticket)) => {

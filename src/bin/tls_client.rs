@@ -202,10 +202,11 @@ fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
     })
 }
 
-async fn test_echo(
-    aconn: &mut EstablishedConnection,
-    stream: &mut (impl AsyncRead + AsyncWrite + Unpin)
-) -> Result<(), Box<dyn Error>> {
+async fn test_echo<T>(
+    aconn: &mut EstablishedConnection<T>,
+) -> Result<(), Box<dyn Error>>
+    where T : AsyncRead + AsyncWrite + Unpin
+{
     let parts: &[&[u8]] = &[
         b"The primary goal of TLS is to provide a secure channel between two \
          communicating peers; the only requirement from the underlying \
@@ -236,8 +237,8 @@ async fn test_echo(
 
     for part in parts.iter() {
         sleep(Duration::from_millis(1000)).await;
-        aconn.write_normal(stream, part).await?;
-        let data = aconn.read_normal(stream).await?;
+        aconn.write_normal(part).await?;
+        let data = aconn.read_normal().await?;
         println!("receive application data =");
         println!("{:#?}", Indent(&DebugHexDump(&data)));
     }
@@ -245,13 +246,14 @@ async fn test_echo(
     Ok(())
 }
 
-async fn test_http(
-    aconn: &mut EstablishedConnection,
-    stream: &mut (impl AsyncRead + AsyncWrite + Unpin)
-) -> Result<(), Box<dyn Error>> {
-    aconn.write_normal(stream, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
+async fn test_http<T>(
+    aconn: &mut EstablishedConnection<T>,
+) -> Result<(), Box<dyn Error>>
+    where T : AsyncRead + AsyncWrite + Unpin
+{
+    aconn.write_normal(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
     loop {
-        let data = aconn.read_normal(stream).await?;
+        let data = aconn.read_normal().await?;
         println!("receive application data =");
         println!("{:#?}", Indent(&DebugHexDump(&data)));
     }
@@ -271,10 +273,10 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let mut socket = TcpStream::connect("localhost:443").await?;
 
     let mut conn = PendingConnection::new(config);
-    let mut conn = establish_connection(conn, &mut socket, &handshake, private_key).await?;
+    let mut conn = establish_connection(conn, socket, &handshake, private_key).await?;
 
-    test_http(&mut conn, &mut socket).await?;
-    // test_echo(&mut conn, &mut socket).await?;
+    test_http(&mut conn).await?;
+    // test_echo(&mut conn).await?;
 
     Ok(())
 }
