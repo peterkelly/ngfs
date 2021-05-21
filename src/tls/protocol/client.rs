@@ -6,7 +6,10 @@
 #![allow(unused_macros)]
 
 use std::error::Error;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use ring::agreement::EphemeralPrivateKey;
 use super::super::helpers::{
     EncryptionKey,
@@ -274,6 +277,107 @@ fn verify_transcript(
     )
 }
 
+pub struct ReceiveRecord<'a, T : AsyncRead + Unpin> {
+    conn: &'a mut PendingConnection,
+    reader: &'a mut T,
+    incoming_data: Vec<u8>,
+}
+
+impl<'a, T : AsyncRead + Unpin> ReceiveRecord<'a, T> {
+    fn new(conn: &'a mut PendingConnection, reader: &'a mut T) -> ReceiveRecord<'a, T> {
+        ReceiveRecord {
+            conn: conn,
+            reader: reader,
+            incoming_data: Vec::new(),
+        }
+    }
+}
+
+impl<'a, T : AsyncRead + Unpin> Future for ReceiveRecord<'a, T> {
+    type Output = Result<TLSOwnedPlaintext, Box<dyn Error>>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut want: usize = 5;
+        if self.incoming_data.len() >= 5 {
+            let content_type = ContentType::from_raw(self.incoming_data[0]);
+
+            let mut legacy_record_version_bytes: [u8; 2] = Default::default();
+            legacy_record_version_bytes.copy_from_slice(&self.incoming_data[1..3]);
+            let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
+
+
+            let mut length_bytes: [u8; 2] = Default::default();
+            length_bytes.copy_from_slice(&self.incoming_data[3..5]);
+            let length = u16::from_be_bytes(length_bytes) as usize;
+
+            if length > TLS_RECORD_SIZE {
+                return Poll::Ready(Err(TLSPlaintextError::InvalidLength.into()));
+            }
+
+            println!("Reading fragment of len {}", length);
+
+            if self.incoming_data.len() >= 5 + length {
+                let mut header: [u8; 5] = [
+                    self.incoming_data[0],
+                    self.incoming_data[1],
+                    self.incoming_data[2],
+                    self.incoming_data[3],
+                    self.incoming_data[4],
+                ];
+
+                let mut fragment: Vec<u8> = Vec::new();
+                fragment.extend_from_slice(&self.incoming_data[5..]);
+
+                let mut raw: Vec<u8> = Vec::new();
+                raw.extend_from_slice(&self.incoming_data);
+
+                let record = TLSOwnedPlaintext {
+                    content_type,
+                    legacy_record_version,
+                    header: header,
+                    fragment: fragment,
+                    raw: raw,
+                };
+                return Poll::Ready(Ok(record));
+            }
+            want = 5 + length;
+        }
+
+        let amt = want - self.incoming_data.len();
+        let mut recv_data = vec_with_len(amt);
+        let mut recv_buf = ReadBuf::new(&mut recv_data);
+        let old_filled = recv_buf.filled().len();
+
+        match AsyncRead::poll_read(Pin::new(&mut self.reader), cx, &mut recv_buf) {
+            Poll::Ready(Err(e)) => {
+                println!("ReceiveRecord::poll(): inner returned error");
+                Poll::Ready(Err(e.into()))
+            }
+            Poll::Ready(Ok(())) => {
+                println!("ReceiveRecord::poll(): inner is ready");
+                let new_filled = recv_buf.filled().len();
+                println!("data = {}", &BinaryData(recv_buf.filled()));
+                let extra = new_filled - old_filled;
+                // TODO: if extra is 0, either we have unexpected end of data or the connection
+                // has been closed. RecordReceiver should actually return Option<Record> so that
+                // it can use None to indicate there are no more records.
+                println!("# of bytes read = {}", extra);
+                // self.ok_done()
+                self.incoming_data.extend_from_slice(recv_buf.filled());
+
+                println!("want = {}, have = {}", want, self.incoming_data.len());
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+            Poll::Pending => {
+                println!("ReceiveRecord::poll(): inner is not ready");
+                Poll::Pending
+            }
+        }
+        // let x: () = self.reader.read(&mut self.buf);
+        // unimplemented!()
+    }
+}
+
 pub struct AEncryption {
     traffic_secrets: TrafficSecrets,
     ciphers: Ciphers,
@@ -298,43 +402,11 @@ impl PendingConnection {
         }
     }
 
-    async fn receive_record(
-        &mut self,
-        reader: &mut (impl AsyncRead + Unpin),
-    ) -> Result<TLSOwnedPlaintext, Box<dyn Error>> {
-        let mut header: [u8; 5] = Default::default();
-        reader.read_exact(&mut header).await?;
-
-        let content_type = ContentType::from_raw(header[0]);
-
-        let mut legacy_record_version_bytes: [u8; 2] = Default::default();
-        legacy_record_version_bytes.copy_from_slice(&header[1..3]);
-        let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
-
-
-        let mut length_bytes: [u8; 2] = Default::default();
-        length_bytes.copy_from_slice(&header[3..5]);
-        let length = u16::from_be_bytes(length_bytes) as usize;
-
-        if length > TLS_RECORD_SIZE {
-            return Err(TLSPlaintextError::InvalidLength.into());
-        }
-
-        let mut fragment = vec_with_len(length);
-        reader.read_exact(&mut fragment).await?;
-
-        let mut raw: Vec<u8> = Vec::new();
-        raw.extend_from_slice(&header);
-        raw.extend_from_slice(&fragment);
-
-        let record = TLSOwnedPlaintext {
-            content_type,
-            legacy_record_version,
-            header: header,
-            fragment: fragment,
-            raw: raw,
-        };
-        Ok(record)
+    fn receive_record<'a, T : AsyncRead + Unpin>(
+        &'a mut self,
+        reader: &'a mut T,
+    ) -> ReceiveRecord<'a, T> {
+        ReceiveRecord::new(self, reader)
     }
 
     async fn receive_record_ignore_cc(
