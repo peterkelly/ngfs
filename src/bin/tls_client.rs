@@ -65,10 +65,12 @@ use torrent::tls::helpers::{
     verify_finished,
 };
 use torrent::tls::protocol::client::{
-    AConnection,
+    PendingConnection,
+    EstablishedConnection,
     ServerAuth,
     ClientAuth,
     ClientConfig,
+    establish_connection,
 };
 use torrent::x509;
 
@@ -200,7 +202,10 @@ fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
     })
 }
 
-async fn test_echo(aconn: &mut AConnection) -> Result<(), Box<dyn Error>> {
+async fn test_echo(
+    aconn: &mut EstablishedConnection,
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin)
+) -> Result<(), Box<dyn Error>> {
     let parts: &[&[u8]] = &[
         b"The primary goal of TLS is to provide a secure channel between two \
          communicating peers; the only requirement from the underlying \
@@ -231,8 +236,8 @@ async fn test_echo(aconn: &mut AConnection) -> Result<(), Box<dyn Error>> {
 
     for part in parts.iter() {
         sleep(Duration::from_millis(1000)).await;
-        aconn.write_normal(part).await?;
-        let data = aconn.read_normal().await?;
+        aconn.write_normal(stream, part).await?;
+        let data = aconn.read_normal(stream).await?;
         println!("receive application data =");
         println!("{:#?}", Indent(&DebugHexDump(&data)));
     }
@@ -240,10 +245,13 @@ async fn test_echo(aconn: &mut AConnection) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn test_http(aconn: &mut AConnection) -> Result<(), Box<dyn Error>> {
-    aconn.write_normal(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
+async fn test_http(
+    aconn: &mut EstablishedConnection,
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin)
+) -> Result<(), Box<dyn Error>> {
+    aconn.write_normal(stream, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
     loop {
-        let data = aconn.read_normal().await?;
+        let data = aconn.read_normal(stream).await?;
         println!("receive application data =");
         println!("{:#?}", Indent(&DebugHexDump(&data)));
     }
@@ -253,28 +261,20 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let config = parse_args()?;
 
     let rng = SystemRandom::new();
-    let my_private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
-    let my_public_key = my_private_key.compute_public_key()?;
-    let my_public_key_bytes: &[u8] = my_public_key.as_ref();
-    println!("my_public_key_bytes    = {}", BinaryData(my_public_key_bytes));
+    let private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
+    let public_key = private_key.compute_public_key()?;
+    println!("public_key_bytes    = {}", BinaryData(public_key.as_ref()));
 
-    let client_hello = make_client_hello(my_public_key_bytes);
+    let client_hello = make_client_hello(public_key.as_ref());
     let handshake = Handshake::ClientHello(client_hello);
 
     let mut socket = TcpStream::connect("localhost:443").await?;
 
-    let (mut read_half, mut write_half) = socket.into_split();
-    let mut aconn = AConnection::new(
-        Box::new(read_half), // reader
-        Box::new(write_half), // writer
-        my_private_key, // my_private_key
-        config, // config
-    );
-    let p1 = aconn.do_phase_one(&handshake).await?;
-    let p2 = aconn.do_phase_two(p1).await?;
+    let mut conn = PendingConnection::new(config);
+    let mut conn = establish_connection(conn, &mut socket, &handshake, private_key).await?;
 
-    test_http(&mut aconn).await?;
-    // test_echo(&mut aconn).await?;
+    test_http(&mut conn, &mut socket).await?;
+    // test_echo(&mut conn, &mut socket).await?;
 
     Ok(())
 }

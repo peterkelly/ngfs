@@ -46,6 +46,7 @@ impl EncryptionKey {
     }
 }
 
+#[derive(Clone)]
 pub struct Ciphers {
     pub hash_alg: HashAlgorithm,
     pub aead_alg: AeadAlgorithm,
