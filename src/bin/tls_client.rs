@@ -272,8 +272,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
     let mut socket = TcpStream::connect("localhost:443").await?;
 
-    let mut conn = PendingConnection::new(config);
-    let mut conn = establish_connection(conn, socket, &handshake, private_key).await?;
+    let mut conn = establish_connection(config, socket, &handshake, private_key).await?;
 
     test_http(&mut conn).await?;
     // test_echo(&mut conn).await?;
