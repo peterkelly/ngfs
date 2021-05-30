@@ -48,22 +48,43 @@ pub const CRYPTO_RSA_ENCRYPTION: [u64; 7] = [1, 2, 840, 113549, 1, 1, 1];
 
 pub struct AlgorithmIdentifier {
     pub algorithm: ObjectIdentifier,
-    pub parameters: Item,
+    pub parameters: Option<Item>,
 }
 
 impl AlgorithmIdentifier {
     pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
-        let elements = item.as_exact_sequence(2)?;
+        let mut it = item.as_sequence_iter()?;
+
+        let mut elem = it.next().ok_or("Missing algorithm")?;
+        let algorithm = elem.as_object_identifier()?.clone();
+
+        let parameters = match it.next() {
+            Some(elem) => Some(elem.clone()),
+            None => None,
+        };
+
+        match it.next() {
+            Some(_) => return Err(GeneralError::new("Unexpected value")),
+            None => {},
+        };
+
         Ok(AlgorithmIdentifier {
-            algorithm: elements[0].as_object_identifier()?.clone(),
-            parameters: elements[1].clone(),
+            algorithm,
+            parameters,
         })
     }
 }
 
 impl AlgorithmIdentifier {
     pub fn to_string(&self, reg: &ObjectRegistry) -> String {
-        format!("{} {}", reg.get_long_name(&self.algorithm), self.parameters.type_str())
+        match &self.parameters {
+            Some(parameters) => {
+                format!("{} {}", reg.get_long_name(&self.algorithm), parameters.type_str())
+            }
+            None => {
+                format!("{} None", reg.get_long_name(&self.algorithm))
+            }
+        }
     }
 }
 
