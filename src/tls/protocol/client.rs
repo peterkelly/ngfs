@@ -10,6 +10,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
+use tokio_util::codec::Decoder;
+use bytes::BytesMut;
 use ring::agreement::EphemeralPrivateKey;
 use super::super::helpers::{
     EncryptionKey,
@@ -275,6 +277,70 @@ fn verify_transcript(
         &verify_input,
         &certificate_verify.signature
     )
+}
+
+struct RecordDecoder {
+}
+
+impl RecordDecoder {
+    fn new() -> Self {
+        RecordDecoder { }
+    }
+}
+
+impl Decoder for RecordDecoder {
+    type Item = TLSOwnedPlaintext;
+    type Error = Box<dyn Error>;
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<TLSOwnedPlaintext>, Box<dyn Error>> {
+        if src.len() < 5 {
+            return Ok(None);
+        }
+
+        let content_type = ContentType::from_raw(src[0]);
+
+        let mut legacy_record_version_bytes: [u8; 2] = Default::default();
+        legacy_record_version_bytes.copy_from_slice(&src[1..3]);
+        let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
+
+        let mut length_bytes: [u8; 2] = Default::default();
+        length_bytes.copy_from_slice(&src[3..5]);
+        let length = u16::from_be_bytes(length_bytes) as usize;
+
+        if length > TLS_RECORD_SIZE {
+            return Err(TLSPlaintextError::InvalidLength.into());
+        }
+        println!("Attempting to decode fragment of len {}", length);
+
+        let total_length = 5 + length;
+        if src.len() >= total_length {
+            let mut header: [u8; 5] = [
+                src[0],
+                src[1],
+                src[2],
+                src[3],
+                src[4],
+            ];
+
+            let mut fragment: Vec<u8> = Vec::new();
+            fragment.extend_from_slice(&src[5..]);
+
+            let mut raw: Vec<u8> = Vec::new();
+            raw.extend_from_slice(&src);
+
+            let record = TLSOwnedPlaintext {
+                content_type,
+                legacy_record_version,
+                header: header,
+                fragment: fragment,
+                raw: raw,
+            };
+            return Ok(Some(record));
+        }
+
+        src.reserve(total_length - src.len());
+
+        return Ok(None)
+    }
 }
 
 pub struct ReceiveRecord<'a, T : AsyncRead + Unpin> {
