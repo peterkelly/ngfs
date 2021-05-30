@@ -10,8 +10,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
-use tokio_util::codec::Decoder;
-use bytes::BytesMut;
+use tokio_util::codec::{Encoder, Decoder, Framed};
+use futures::stream::StreamExt;
+use futures::sink::SinkExt;
+use bytes::{BytesMut, Buf};
 use ring::agreement::EphemeralPrivateKey;
 use super::super::helpers::{
     EncryptionKey,
@@ -214,15 +216,21 @@ fn send_handshake(
 }
 
 fn verify_certificate(ca_raw: &[u8], target_raw: &[u8]) -> Result<(), TLSError> {
-    let ca_cert = x509::Certificate::from_bytes(&ca_raw).map_err(|_| TLSError::InvalidCertificate)?;
+    let ca_cert = x509::Certificate::from_bytes(&ca_raw)
+        .map_err(|_| TLSError::InvalidCertificate)?;
 
     let mut target_reader = BinaryReader::new(&target_raw);
-    let target_item = asn1::reader::read_item(&mut target_reader).map_err(|_| TLSError::InvalidCertificate)?;
-    let elements = target_item.as_exact_sequence(3).map_err(|_| TLSError::InvalidCertificate)?;
+    let target_item = asn1::reader::read_item(&mut target_reader)
+        .map_err(|_| TLSError::InvalidCertificate)?;
+    let elements = target_item.as_exact_sequence(3)
+        .map_err(|_| TLSError::InvalidCertificate)?;
 
-    let tbs_certificate = x509::TBSCertificate::from_asn1(&elements[0]).map_err(|_| TLSError::InvalidCertificate)?;
-    let signature_algorithm = x509::AlgorithmIdentifier::from_asn1(&elements[1]).map_err(|_| TLSError::InvalidCertificate)?;
-    let signature_value_bit_string = elements[2].as_bit_string().map_err(|_| TLSError::InvalidCertificate)?;
+    let tbs_certificate = x509::TBSCertificate::from_asn1(&elements[0])
+        .map_err(|_| TLSError::InvalidCertificate)?;
+    let signature_algorithm = x509::AlgorithmIdentifier::from_asn1(&elements[1])
+        .map_err(|_| TLSError::InvalidCertificate)?;
+    let signature_value_bit_string = elements[2].as_bit_string()
+        .map_err(|_| TLSError::InvalidCertificate)?;
     let signature = &signature_value_bit_string.bytes;
 
     let rsa_parameters: &ring::signature::RsaParameters;
@@ -288,6 +296,15 @@ impl RecordDecoder {
     }
 }
 
+impl Encoder<&[u8]> for RecordDecoder {
+    type Error = Box<dyn Error>;
+
+    fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Box<dyn Error>> {
+        dst.extend_from_slice(item);
+        Ok(())
+    }
+}
+
 impl Decoder for RecordDecoder {
     type Item = TLSOwnedPlaintext;
     type Error = Box<dyn Error>;
@@ -309,10 +326,15 @@ impl Decoder for RecordDecoder {
         if length > TLS_RECORD_SIZE {
             return Err(TLSPlaintextError::InvalidLength.into());
         }
-        println!("Attempting to decode fragment of len {}", length);
+        // println!("Attempting to decode fragment of len {}", length);
 
         let total_length = 5 + length;
         if src.len() >= total_length {
+            // println!("src.len() >= total_length");
+            println!("RecordDecoder: Parsing fragment of len {}; content_type = {:?}",
+                     length, content_type);
+
+
             let mut header: [u8; 5] = [
                 src[0],
                 src[1],
@@ -322,10 +344,11 @@ impl Decoder for RecordDecoder {
             ];
 
             let mut fragment: Vec<u8> = Vec::new();
-            fragment.extend_from_slice(&src[5..]);
+            fragment.extend_from_slice(&src[5..total_length]);
 
             let mut raw: Vec<u8> = Vec::new();
-            raw.extend_from_slice(&src);
+            raw.extend_from_slice(&src[0..total_length]);
+            src.advance(total_length);
 
             let record = TLSOwnedPlaintext {
                 content_type,
@@ -335,6 +358,9 @@ impl Decoder for RecordDecoder {
                 raw: raw,
             };
             return Ok(Some(record));
+        }
+        else {
+            println!("src.len() < total_length");
         }
 
         src.reserve(total_length - src.len());
@@ -379,9 +405,10 @@ impl<'a, T : AsyncRead + Unpin> Future for ReceiveRecord<'a, T> {
                 return Poll::Ready(Err(TLSPlaintextError::InvalidLength.into()));
             }
 
-            println!("Reading fragment of len {}", length);
 
             if self.incoming_data.len() >= 5 + length {
+                println!("ReceiveRecord: Parsing fragment of len {}; content_type = {:?}",
+                         length, content_type);
                 let mut header: [u8; 5] = [
                     self.incoming_data[0],
                     self.incoming_data[1],
@@ -396,6 +423,7 @@ impl<'a, T : AsyncRead + Unpin> Future for ReceiveRecord<'a, T> {
                 let mut raw: Vec<u8> = Vec::new();
                 raw.extend_from_slice(&self.incoming_data);
 
+                println!("ReceiveRecord: raw.len() = {}", raw.len());
                 let record = TLSOwnedPlaintext {
                     content_type,
                     legacy_record_version,
@@ -415,22 +443,22 @@ impl<'a, T : AsyncRead + Unpin> Future for ReceiveRecord<'a, T> {
 
         match AsyncRead::poll_read(Pin::new(&mut self.reader), cx, &mut recv_buf) {
             Poll::Ready(Err(e)) => {
-                println!("ReceiveRecord::poll(): inner returned error");
+                // println!("ReceiveRecord::poll(): inner returned error");
                 Poll::Ready(Err(e.into()))
             }
             Poll::Ready(Ok(())) => {
-                println!("ReceiveRecord::poll(): inner is ready");
+                // println!("ReceiveRecord::poll(): inner is ready");
                 let new_filled = recv_buf.filled().len();
-                println!("data = {}", &BinaryData(recv_buf.filled()));
+                // println!("data = {}", &BinaryData(recv_buf.filled()));
                 let extra = new_filled - old_filled;
                 // TODO: if extra is 0, either we have unexpected end of data or the connection
                 // has been closed. RecordReceiver should actually return Option<Record> so that
                 // it can use None to indicate there are no more records.
-                println!("# of bytes read = {}", extra);
+                // println!("# of bytes read = {}", extra);
                 // self.ok_done()
                 self.incoming_data.extend_from_slice(recv_buf.filled());
 
-                println!("want = {}, have = {}", want, self.incoming_data.len());
+                // println!("want = {}, have = {}", want, self.incoming_data.len());
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
@@ -475,6 +503,16 @@ impl PendingConnection {
         ReceiveRecord::new(self, reader)
     }
 
+    async fn receive_record_framed(
+        &mut self,
+        framed_reader: &mut Framed<impl AsyncRead + Unpin, RecordDecoder>,
+    ) -> Result<TLSOwnedPlaintext, Box<dyn Error>> {
+        match framed_reader.next().await {
+            Some(r) => r,
+            None => Err(GeneralError::new("No more records"))
+        }
+    }
+
     async fn receive_record_ignore_cc(
         &mut self,
         reader: &mut (impl AsyncRead + Unpin),
@@ -487,18 +525,58 @@ impl PendingConnection {
         }
     }
 
-    async fn receive_message(
+    // TODO: Make this return Option
+    async fn receive_record_framed_ignore_cc(
         &mut self,
-        reader: &mut (impl AsyncRead + Unpin),
+        framed_reader: &mut Framed<impl AsyncRead + Unpin, RecordDecoder>,
+    ) -> Result<TLSOwnedPlaintext, Box<dyn Error>> {
+        loop {
+            let record = self.receive_record_framed(framed_reader).await?;
+            if record.content_type != ContentType::ChangeCipherSpec {
+                return Ok(record)
+            }
+        }
+    }
+
+    // framed: Framed<T, RecordDecoder>
+    async fn receive_message_framed(
+        &mut self,
+        // reader: &mut (impl AsyncRead + Unpin),
+        framed_reader: &mut Framed<impl AsyncRead + Unpin, RecordDecoder>,
         encryption: &AEncryption,
     ) -> Result<Message, Box<dyn Error>> {
-        let plaintext = self.receive_record_ignore_cc(reader).await?;
+        let plaintext = self.receive_record_framed_ignore_cc(framed_reader).await?;
+        println!("receive_message_framed: plaintext.raw.len() = {}, server_sequence_no =  {}",
+            plaintext.raw.len(), self.server_sequence_no);
         // TODO: Support records containing multiple handshake messages
         // TODO: Cater for alerts
         let (message, message_raw) = decrypt_message(
             self.server_sequence_no,
             &encryption.traffic_secrets.server,
             &plaintext.raw)?;
+        println!("receive_message_framed: after decryption");
+        self.server_sequence_no += 1;
+        self.transcript.extend_from_slice(&message_raw);
+        // Ok((message, message_raw))
+
+        Ok(message)
+    }
+
+    async fn receive_message(
+        &mut self,
+        reader: &mut (impl AsyncRead + Unpin),
+        encryption: &AEncryption,
+    ) -> Result<Message, Box<dyn Error>> {
+        let plaintext = self.receive_record_ignore_cc(reader).await?;
+        println!("receive_message: plaintext.raw.len() = {}, server_sequence_no = {}",
+            plaintext.raw.len(), self.server_sequence_no);
+        // TODO: Support records containing multiple handshake messages
+        // TODO: Cater for alerts
+        let (message, message_raw) = decrypt_message(
+            self.server_sequence_no,
+            &encryption.traffic_secrets.server,
+            &plaintext.raw)?;
+        println!("receive_message: after decryption");
         self.server_sequence_no += 1;
         self.transcript.extend_from_slice(&message_raw);
         // Ok((message, message_raw))
@@ -528,7 +606,8 @@ impl PendingConnection {
                 Ok(hs)
             }
             _ => {
-                Err(GeneralError::new(format!("Expected a handshake, got {:?}", message.content_type())))
+                Err(GeneralError::new(format!("Expected a handshake, got {:?}",
+                    message.content_type())))
             }
         }
     }
@@ -543,7 +622,8 @@ impl PendingConnection {
                 Ok(hs)
             }
             _ => {
-                Err(GeneralError::new(format!("Expected a handshake, got {:?}", message.content_type())))
+                Err(GeneralError::new(format!("Expected a handshake, got {:?}",
+                    message.content_type())))
             }
         }
     }
@@ -566,7 +646,8 @@ impl PendingConnection {
         let handshake = self.receive_plaintext_handshake(reader).await?;
         match handshake {
             Handshake::ServerHello(v) => Ok(v),
-            _ => Err(GeneralError::new(format!("Expected ServerHello, got {}", handshake.name())))
+            _ => Err(GeneralError::new(format!("Expected ServerHello, got {}",
+                     handshake.name())))
         }
     }
 }
@@ -605,7 +686,7 @@ pub async fn establish_connection<T>(
     Ok(EstablishedConnection {
         inner: conn,
         encryption: p2,
-        stream: stream,
+        framed: Framed::new(stream, RecordDecoder::new()),
     })
 }
 
@@ -653,21 +734,24 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake(reader, encryption).await?;
     let encrypted_extensions = match handshake {
         Handshake::EncryptedExtensions(v) => v,
-        _ => return Err(GeneralError::new(format!("Expected EncryptedExtensions, got {}", handshake.name()))),
+        _ => return Err(GeneralError::new(format!("Expected EncryptedExtensions, got {}",
+                        handshake.name()))),
     };
     println!("Phase two: Got encrypted_extensions");
 
     let handshake = conn.receive_handshake(reader, encryption).await?;
     let certificate_request = match handshake {
         Handshake::CertificateRequest(v) => Some(v),
-        _ => return Err(GeneralError::new(format!("Expected CertificateRequest, got {}", handshake.name()))),
+        _ => return Err(GeneralError::new(format!("Expected CertificateRequest, got {}",
+                        handshake.name()))),
     };
     println!("Phase two: Got certificate_request");
 
     let handshake = conn.receive_handshake(reader, encryption).await?;
     let certificate = match handshake {
         Handshake::Certificate(v) => Some(v),
-        _ => return Err(GeneralError::new(format!("Expected Certificate, got {}", handshake.name()))),
+        _ => return Err(GeneralError::new(format!("Expected Certificate, got {}",
+                        handshake.name()))),
     };
 
     println!("Phase two: Got certificate");
@@ -676,7 +760,8 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake(reader, encryption).await?;
     let certificate_verify = match handshake {
         Handshake::CertificateVerify(v) => Some((v, certificate_verify_thash)),
-        _ => return Err(GeneralError::new(format!("Expected CertificateVerify, got {}", handshake.name()))),
+        _ => return Err(GeneralError::new(format!("Expected CertificateVerify, got {}",
+                        handshake.name()))),
     };
 
     println!("Phase two: Got certificate_verify");
@@ -685,7 +770,8 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake(reader, encryption).await?;
     let finished = match handshake {
         Handshake::Finished(v) => (v, finished_thash),
-        _ => return Err(GeneralError::new(format!("Expected Finished, got {}", handshake.name()))),
+        _ => return Err(GeneralError::new(format!("Expected Finished, got {}",
+                        handshake.name()))),
     };
 
     println!("Phase two: Got finished");
@@ -814,7 +900,7 @@ fn do_phase_two(
 pub struct EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
     inner: PendingConnection,
     encryption: AEncryption,
-    stream: T,
+    framed: Framed<T, RecordDecoder>,
 }
 
 impl<T> EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
@@ -828,13 +914,14 @@ impl<T> EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
             None,
         )?;
         self.inner.client_sequence_no += 1;
-        self.stream.write_all(&conn.to_send).await?;
+        self.framed.feed(&conn.to_send).await?;
+        self.framed.flush().await?;
         Ok(())
     }
 
     pub async fn read_normal(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
         loop {
-            let message = self.inner.receive_message(&mut self.stream, &self.encryption).await?;
+            let message = self.inner.receive_message_framed(&mut self.framed, &self.encryption).await?;
 
             match message {
                 Message::Handshake(Handshake::NewSessionTicket(ticket)) => {
