@@ -46,7 +46,6 @@ use torrent::tls::types::record::{
     ContentType,
     Message,
     TLSPlaintext,
-    TLSOutputPlaintext,
     TLSPlaintextError,
 };
 use torrent::tls::types::alert::{
@@ -65,7 +64,6 @@ use torrent::tls::helpers::{
     verify_finished,
 };
 use torrent::tls::protocol::client::{
-    PendingConnection,
     EstablishedConnection,
     ServerAuth,
     ClientAuth,

@@ -7,6 +7,7 @@
 
 use std::error::Error;
 use std::fmt;
+use bytes::{BytesMut, Buf};
 
 use super::alert::Alert;
 use super::handshake::Handshake;
@@ -218,19 +219,17 @@ impl TLSPlaintext<'_> {
     }
 }
 
-pub struct TLSOutputPlaintext {
+pub struct TLSOutputPlaintext<'a> {
     pub content_type: ContentType,
     pub legacy_record_version: u16,
-    pub fragment: Vec<u8>,
+    pub fragment: &'a [u8],
 }
 
-impl TLSOutputPlaintext {
-    pub fn to_vec(&self) -> Vec<u8> {
-        let mut res: Vec<u8> = Vec::new();
-        res.push(self.content_type.to_raw());
+impl<'a> TLSOutputPlaintext<'a> {
+    pub fn encode(&self, res: &mut BytesMut) {
+        res.extend_from_slice(&[self.content_type.to_raw()]);
         res.extend_from_slice(&self.legacy_record_version.to_be_bytes());
         res.extend_from_slice(&(self.fragment.len() as u16).to_be_bytes());
         res.extend_from_slice(&self.fragment);
-        res
     }
 }
