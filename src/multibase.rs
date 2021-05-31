@@ -210,8 +210,38 @@ fn encode_base58(chars_vec: &mut Vec<char>, data: &[u8], alphabet: &[char; 58]) 
     }
 }
 
-fn decode_base58(_encoded_bytes: &[u8], _inv_alphabet: &[u8; 128]) -> Result<Vec<u8>, DecodeError> {
-    unimplemented!();
+fn decode_base58(encoded: &[u8], inv_alphabet: &[u8; 128]) -> Result<Vec<u8>, DecodeError> {
+    let mut decoded: Vec<u8> = Vec::new();
+    let mut zero_count = 0;
+    while zero_count < encoded.len() && encoded[zero_count] == b'1' {
+        zero_count += 1;
+    }
+
+    for (offset, ch) in encoded.iter().enumerate() {
+        let mut carry: u16 = match inv_alphabet.get(*ch as usize) {
+            None => return Err(DecodeError::InvalidChar(offset, *ch)),
+            Some(0xff) => return Err(DecodeError::InvalidChar(offset, *ch)),
+            Some(b) => *b as u16,
+        };
+
+        for b in decoded.iter_mut() {
+            carry += (*b as u16) * 58;
+            *b = (carry & 0xff) as u8;
+            carry >>= 8;
+        }
+
+        while carry > 0 {
+            decoded.push((carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+
+    for _ in 0..zero_count {
+        decoded.push(0);
+    }
+
+    decoded.reverse();
+    return Ok(decoded);
 }
 
 // https://tools.ietf.org/html/rfc4648
@@ -274,7 +304,7 @@ fn encode_base32(chars_vec: &mut Vec<char>, data: &[u8], case: Case, padding: bo
 }
 
 fn decode_basen(encoded_bytes: &[u8], pow2: u8, inv_alphabet: &[u8; 128], padding: bool) -> Result<Vec<u8>, DecodeError> {
-    println!("decode_basen: encoded_bytes.len() = {}", encoded_bytes.len());
+    // println!("decode_basen: encoded_bytes.len() = {}", encoded_bytes.len());
     let mut output_bytes: Vec<u8> = Vec::new();
     let mut byte: u8 = 0;
     let mut shift: u8 = 0;
