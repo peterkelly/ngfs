@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use super::result::general_error;
+use super::error;
 use super::protobuf::VarInt;
 use super::multibase::decode;
 use std::error::Error;
@@ -73,15 +73,15 @@ impl CID {
         // println!("cid_bytes = (len {}) {}", cid_bytes.len(), BinaryData(&cid_bytes));
         let version = match cid_bytes.get(0) {
             Some(v) => v,
-            None => return general_error(&format!("Missing CID version")),
+            None => return Err(error!("Missing CID version")),
         };
         if *version != 1 {
-            return general_error(&format!("Unsupported CID version: {}", version));
+            return Err(error!("Unsupported CID version: {}", version));
         }
         let mut offset: usize = 1;
         let codec_num = match VarInt::read_from(&cid_bytes, &mut offset) {
             Some(v) => v.to_u64(),
-            None => return general_error("Missing or invalid codec"),
+            None => return Err(error!("Missing or invalid codec")),
         };
         // let x: () = codec;
         // println!("codec_num = 0x{:x} = {}", codec_num, codec_num);
@@ -90,7 +90,7 @@ impl CID {
         // println!("codec = {:?}", codec);
         let hash_num = match VarInt::read_from(&cid_bytes, &mut offset) {
             Some(v) => v.to_u64(),
-            None => return general_error("Missing or invalid hash type"),
+            None => return Err(error!("Missing or invalid hash type")),
         };
         // println!("hash_num = 0x{:x} = {}", hash_num, hash_num);
         let hash_type = MultiHash::from_u64(hash_num);
@@ -98,7 +98,7 @@ impl CID {
 
         let hash_size = match VarInt::read_from(&cid_bytes, &mut offset) {
             Some(v) => v.to_usize(),
-            None => return general_error("Missing or invalid hash size"),
+            None => return Err(error!("Missing or invalid hash size")),
         };
         // println!("hash_size = 0x{:x} = {}", hash_size, hash_size);
         // println!("offset = {}", offset);
@@ -107,12 +107,12 @@ impl CID {
         let hash_start: usize = offset;
         let hash_end: usize = match hash_start.checked_add(hash_size) {
                 Some(v) => v,
-                None => return general_error("Overflow when computing hash end"),
+                None => return Err(error!("Overflow when computing hash end")),
             };
         // println!("hash_start = {}", hash_start);
         // println!("hash_end   = {}", hash_end);
         if hash_end != cid_bytes.len() {
-            return general_error(&format!("Unexpected hash length; expected {}, got {}",
+            return Err(error!("Unexpected hash length; expected {}, got {}",
                 cid_bytes.len() - hash_start, hash_size));
         }
 

@@ -6,7 +6,7 @@
 #![allow(unused_macros)]
 
 use torrent::util::{escape_string, from_hex, BinaryData};
-use torrent::result::general_error;
+use torrent::error;
 use torrent::multibase::{Base, encode, decode};
 use std::iter::FromIterator;
 use std::error::Error;
@@ -81,8 +81,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             }
         }
         else {
-            return general_error(&format!("Line {}: Invalid hex string: {}",
-                                 lineno, escape_string(line)));
+            return Err(error!("Line {}: Invalid hex string: {}", lineno, escape_string(line)));
         }
         lineno += 1;
     }

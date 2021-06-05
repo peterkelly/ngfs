@@ -11,7 +11,7 @@ use std::fmt;
 use std::error::Error;
 use super::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use super::binary::BinaryReader;
-use super::result::GeneralError;
+use super::error;
 use super::asn1::value::{ObjectIdentifier, BitString, Integer, Value, Item};
 use super::asn1::printer::ObjectRegistry;
 use super::asn1;
@@ -64,7 +64,7 @@ impl AlgorithmIdentifier {
         };
 
         match it.next() {
-            Some(_) => return Err(GeneralError::new("Unexpected value")),
+            Some(_) => return Err(error!("Unexpected value")),
             None => {},
         };
 
@@ -111,7 +111,7 @@ impl Certificate {
                 bit_string.bytes.clone()
             }
             _ => {
-                return Err(GeneralError::new("Certificate: Expected elements[2] to be a bit string"));
+                return Err(error!("Certificate: Expected elements[2] to be a bit string"));
             }
         };
 
@@ -134,13 +134,13 @@ impl Version {
     pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
         let int_value = item.as_integer()?;
         if int_value.0.len() != 1 {
-            return Err(GeneralError::new("Invalid version"));
+            return Err(error!("Invalid version"));
         }
         match int_value.0[0] {
             0 => Ok(Version::V1),
             1 => Ok(Version::V2),
             2 => Ok(Version::V3),
-            _ => Err(GeneralError::new("Invalid version")),
+            _ => Err(error!("Invalid version")),
         }
     }
 }
@@ -194,7 +194,7 @@ impl Time {
         match &item.value {
             Value::UTCTime(s) => Ok(Time::UTCTime(UTCTime { data: s.clone() })),
             Value::GeneralizedTime(s) => Ok(Time::GeneralizedTime(GeneralizedTime { data: s.clone() })),
-            _ => Err(GeneralError::new("Expected a UTCTime or GeneralizedTime")),
+            _ => Err(error!("Expected a UTCTime or GeneralizedTime")),
         }
     }
 }
@@ -326,7 +326,7 @@ impl TBSCertificate {
                         }
                     }
                     _ => {
-                        return Err(GeneralError::new("Unexpected value for extension"));
+                        return Err(error!("Unexpected value for extension"));
                     }
                 }
             }
@@ -335,7 +335,7 @@ impl TBSCertificate {
         };
 
         match it.next() {
-            Some(_) => return Err(GeneralError::new("Unexpected value")),
+            Some(_) => return Err(error!("Unexpected value")),
             None => {},
         };
 

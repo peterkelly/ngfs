@@ -24,7 +24,7 @@ use futures::future::join;
 use ring::agreement::{EphemeralPrivateKey, X25519};
 use torrent::util::{from_hex, escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
-use torrent::result::GeneralError;
+use torrent::error;
 use torrent::protobuf::VarInt;
 use torrent::tls::types::handshake::{
     CipherSuite,
@@ -138,7 +138,7 @@ async fn read_multistream_varint(reader: &mut (impl AsyncRead + Unpin)) -> Resul
     loop {
         let r = match reader.read(&mut buf).await {
             Err(e) => return Err(e.into()),
-            Ok(0) => return Err(GeneralError::new("Unexpected end of input")),
+            Ok(0) => return Err(error!("Unexpected end of input")),
             Ok(r) => {
                 let b = buf[0];
                 value = (value << 7) | ((b & 0x7f) as usize);
@@ -161,7 +161,7 @@ async fn read_multistream_data(reader: &mut (impl AsyncRead + Unpin)) -> Result<
         let mut buf: [u8; 1] = [0; 1];
         let r = match reader.read(&mut buf).await {
             Err(e) => return Err(e.into()),
-            Ok(0) => return Err(GeneralError::new("Unexpected end of input")),
+            Ok(0) => return Err(error!("Unexpected end of input")),
             Ok(r) => {
                 incoming_data.push(buf[0]);
                 got_len += 1;

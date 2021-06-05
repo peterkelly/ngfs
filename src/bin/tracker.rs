@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use rand::prelude::Rng;
 
 use torrent::util::BinaryData;
-use torrent::result::{general_error};
+use torrent::error;
 use torrent::torrent::{Torrent};
 
 struct ConnectRequest {
@@ -29,7 +29,7 @@ struct ConnectResponse {
 impl ConnectResponse {
     fn from(buf: &[u8]) -> Result<ConnectResponse, Box<dyn Error>> {
         if buf.len() != 16 {
-            return general_error("Invalid connect response");
+            return Err(error!("Invalid connect response"));
         }
 
         Ok(ConnectResponse {
@@ -107,7 +107,7 @@ struct AnnonuceResponse {      // Offset      Size            Name            Va
 impl AnnonuceResponse {
     fn from(buf: &[u8]) -> Result<AnnonuceResponse, Box<dyn Error>> {
         if buf.len() < 20 {
-            return general_error("Invalid announce response");
+            return Err(error!("Invalid announce response"));
         }
 
         let action = u32::from_be_bytes(buf[0..4].try_into().unwrap());
@@ -117,13 +117,13 @@ impl AnnonuceResponse {
         let seeders = u32::from_be_bytes(buf[16..20].try_into().unwrap());
 
         if action != 1 {
-            return general_error(&format!("action = {}, expected 1", action));
+            return Err(error!("action = {}, expected 1", action));
         }
 
         let peer_count = leechers + seeders;
         let expected_len: usize = (20 + peer_count * 6) as usize;
         if buf.len() != expected_len {
-            return general_error(&format!("Invalid response length: expected {}, got {}", expected_len, buf.len()));
+            return Err(error!("Invalid response length: expected {}, got {}", expected_len, buf.len()));
         }
 
         let mut peers: Vec<PeerEndpoint> = Vec::new();

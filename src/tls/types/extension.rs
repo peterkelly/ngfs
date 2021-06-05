@@ -8,7 +8,7 @@
 use std::error::Error;
 use std::fmt;
 use super::super::super::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
-use super::super::super::result::GeneralError;
+use super::super::super::error;
 use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
 
 pub struct ProtocolName {
@@ -568,7 +568,7 @@ impl Extension {
                     _ => {
                         // Should be empty
                         if extension_len > 0 {
-                            Err(GeneralError::new("Expected empty extension data"))
+                            Err(error!("Expected empty extension data"))
                         }
                         else {
                             Ok(Extension::ServerName(Vec::new()))

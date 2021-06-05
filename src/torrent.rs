@@ -10,7 +10,7 @@ use std::error::Error;
 use sha1::{Sha1, Digest};
 use super::bencoding;
 use super::bencoding::{Value};
-use super::result::{general_error};
+use super::error;
 use super::util::BinaryData;
 
 pub struct InfoHash {
@@ -110,7 +110,7 @@ impl Torrent {
         let piece_length = info.get_required("piece length")?.as_integer()?.value;
         let pieces_data = &info.get_required("pieces")?.as_byte_string()?.data;
         if pieces_data.len() % 20 != 0 {
-            return general_error(&format!("Pieces data is {} bytes, which is not a multiple of 20", pieces_data.len()))
+            return Err(error!("Pieces data is {} bytes, which is not a multiple of 20", pieces_data.len()));
         }
 
         let mut pieces = Vec::<PieceHash>::new();

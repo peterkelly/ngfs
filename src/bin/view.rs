@@ -7,13 +7,13 @@
 
 use std::error::Error;
 use torrent::bencoding;
-use torrent::result::{GeneralError, general_error};
+use torrent::error;
 use torrent::torrent::{Torrent};
 
 fn decode(data: &[u8]) -> Result<bencoding::Value, Box<dyn Error>> {
     match bencoding::parse(data) {
         Ok(v) => Ok(v),
-        Err(e) => Err(GeneralError::new(format!("Corrupt torrent: {}", e))),
+        Err(e) => Err(error!("Corrupt torrent: {}", e)),
     }
 }
 
@@ -45,7 +45,7 @@ fn run(filename: &String) -> Result<(), Box<dyn Error>> {
     let data: Vec<u8> = match std::fs::read(filename) {
         Ok(data) => data,
         Err(err) => {
-            return general_error(format!("Cannot read {}: {}", filename, err));
+            return Err(error!("Cannot read {}: {}", filename, err));
         }
     };
 
@@ -69,13 +69,13 @@ impl Command {
 }
 
 fn filename_arg(args: &[String], index: usize) -> Result<&String, Box<dyn Error>> {
-    Ok(args.get(0).ok_or_else(|| GeneralError::new("No filename specified"))?)
+    Ok(args.get(0).ok_or_else(|| error!("No filename specified"))?)
 }
 
 fn read_file_from_arg(args: &[String], index: usize) -> Result<Vec<u8>, Box<dyn Error>> {
     let filename = filename_arg(args, index)?;
     // Ok(std::fs::read(filename)?)
-    std::fs::read(filename).map_err(|e| GeneralError::new(&format!("{}: {}", filename, e)).into())
+    std::fs::read(filename).map_err(|e| error!("{}: {}", filename, e).into())
 }
 
 fn trackers(args: &[String]) -> Result<(), Box<dyn Error>> {

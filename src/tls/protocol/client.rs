@@ -59,7 +59,7 @@ use super::super::error::{
     TLSError,
 };
 use super::super::super::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
-use super::super::super::result::GeneralError;
+use super::super::super::error;
 use super::super::super::crypt::{HashAlgorithm, AeadAlgorithm};
 use super::super::super::binary::{BinaryReader, BinaryWriter};
 use super::super::super::asn1;
@@ -512,7 +512,7 @@ async fn receive_message_framed(
     let plaintext = match receive_record_framed_ignore_cc(framed).await {
         Some(Ok(v)) => v,
         Some(Err(e)) => return Err(e),
-        None => return Err(GeneralError::new("No more messages")),
+        None => return Err(error!("No more messages")),
     };
     println!("receive_message_framed: plaintext.raw.len() = {}, server_sequence_no =  {}",
         plaintext.raw.len(), framed.codec().server_sequence_no);
@@ -575,8 +575,8 @@ impl EncryptedHandshake {
                 Ok(hs)
             }
             _ => {
-                Err(GeneralError::new(format!("Expected a handshake, got {:?}",
-                    message.content_type())))
+                Err(error!("Expected a handshake, got {:?}",
+                    message.content_type()))
             }
         }
     }
@@ -600,13 +600,8 @@ async fn receive_plaintext_handshake(
 ) -> Result<Handshake, Box<dyn Error>> {
     let message = receive_plaintext_message(reader, transcript).await?;
     match message {
-        Message::Handshake(hs) => {
-            Ok(hs)
-        }
-        _ => {
-            Err(GeneralError::new(format!("Expected a handshake, got {:?}",
-                message.content_type())))
-        }
+        Message::Handshake(hs) => Ok(hs),
+        _ => Err(error!("Expected a handshake, got {:?}", message.content_type())),
     }
 }
 
@@ -617,8 +612,7 @@ async fn receive_server_hello(
     let handshake = receive_plaintext_handshake(reader, transcript).await?;
     match handshake {
         Handshake::ServerHello(v) => Ok(v),
-        _ => Err(GeneralError::new(format!("Expected ServerHello, got {}",
-                 handshake.name())))
+        _ => Err(error!("Expected ServerHello, got {}", handshake.name()))
     }
 }
 
@@ -698,7 +692,7 @@ fn get_handshake_encryption(
     let ciphers = Ciphers::from_server_hello(&server_hello)?;
 
     let secret = get_server_hello_x25519_shared_secret(private_key, &server_hello)
-        .ok_or_else(|| GeneralError::new("Cannot get shared secret"))?;
+        .ok_or_else(|| error!("Cannot get shared secret"))?;
     println!("Shared secret = {}", BinaryData(&secret));
 
     let prk = get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), &secret)?;
@@ -724,24 +718,21 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_framed(framed).await?;
     let encrypted_extensions = match handshake {
         Handshake::EncryptedExtensions(v) => v,
-        _ => return Err(GeneralError::new(format!("Expected EncryptedExtensions, got {}",
-                        handshake.name()))),
+        _ => return Err(error!("Expected EncryptedExtensions, got {}", handshake.name())),
     };
     println!("Phase two: Got encrypted_extensions");
 
     let handshake = conn.receive_handshake_framed(framed).await?;
     let certificate_request = match handshake {
         Handshake::CertificateRequest(v) => Some(v),
-        _ => return Err(GeneralError::new(format!("Expected CertificateRequest, got {}",
-                        handshake.name()))),
+        _ => return Err(error!("Expected CertificateRequest, got {}", handshake.name())),
     };
     println!("Phase two: Got certificate_request");
 
     let handshake = conn.receive_handshake_framed(framed).await?;
     let certificate = match handshake {
         Handshake::Certificate(v) => Some(v),
-        _ => return Err(GeneralError::new(format!("Expected Certificate, got {}",
-                        handshake.name()))),
+        _ => return Err(error!("Expected Certificate, got {}", handshake.name())),
     };
 
     println!("Phase two: Got certificate");
@@ -750,8 +741,7 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_framed(framed).await?;
     let certificate_verify = match handshake {
         Handshake::CertificateVerify(v) => Some((v, certificate_verify_thash)),
-        _ => return Err(GeneralError::new(format!("Expected CertificateVerify, got {}",
-                        handshake.name()))),
+        _ => return Err(error!("Expected CertificateVerify, got {}", handshake.name())),
     };
 
     println!("Phase two: Got certificate_verify");
@@ -760,8 +750,7 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_framed(framed).await?;
     let finished = match handshake {
         Handshake::Finished(v) => (v, finished_thash),
-        _ => return Err(GeneralError::new(format!("Expected Finished, got {}",
-                        handshake.name()))),
+        _ => return Err(error!("Expected Finished, got {}", handshake.name())),
     };
 
     println!("Phase two: Got finished");
@@ -811,12 +800,12 @@ async fn do_phase_two(
             match certificate.certificate_list.get(0) {
                 Some(v) => v,
                 None => {
-                    return Err(GeneralError::new("Server sent an empty certificate list"));
+                    return Err(error!("Server sent an empty certificate list"));
                 }
             }
         }
         None => {
-            return Err(GeneralError::new("Server did not send a Certificate message"));
+            return Err(error!("Server did not send a Certificate message"));
         }
     };
 
@@ -826,7 +815,7 @@ async fn do_phase_two(
     let ca_cert: &[u8] = match &conn.config.server_auth {
         ServerAuth::CertificateAuthority(v) => v,
         ServerAuth::None => {
-            return Err(GeneralError::new("No CA certificate available"));
+            return Err(error!("No CA certificate available"));
         }
     };
 
@@ -847,7 +836,7 @@ async fn do_phase_two(
             )?;
         }
         None => {
-            return Err(GeneralError::new("Server did not send CertificateVerify message"));
+            return Err(error!("Server did not send CertificateVerify message"));
         }
     }
     println!("After  verify_transcript()");
@@ -927,12 +916,10 @@ impl<T> EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
                     return Ok(data);
                 }
                 Message::Alert(alert) => {
-                    return Err(GeneralError::new(
-                        format!("PhaseThree: Received alert {:?}", alert)));
+                    return Err(error!("PhaseThree: Received alert {:?}", alert));
                 }
                 _ => {
-                    return Err(GeneralError::new(
-                        format!("PhaseThree: Received unexpected {}", message.name())));
+                    return Err(error!("PhaseThree: Received unexpected {}", message.name()));
                 }
             }
         }

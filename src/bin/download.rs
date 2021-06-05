@@ -28,7 +28,7 @@ use tokio::sync::Mutex;
 
 use torrent::util::BinaryData;
 use torrent::torrent::{Torrent};
-use torrent::result::GeneralError;
+use torrent::error;
 
 #[derive(Debug)]
 // enum WriterCommand {
@@ -178,10 +178,10 @@ async fn recv_handshake(stream: &mut ReadHalf<'_>) -> Result<HandshakeMessage, B
     let mut buf: [u8; 68] = [0; 68];
     stream.read_exact(&mut buf).await?;
     if buf[0] != 19 {
-        return Err(GeneralError::new(&format!("Expected {} as string length, expected 19", buf[0])));
+        return Err(error!("Expected {} as string length, expected 19", buf[0]));
     }
     if &buf[1..20] != b"BitTorrent protocol" {
-        return Err(GeneralError::new(&format!("Incorrect protocol; got {}", String::from_utf8_lossy(&buf[1..20]))));
+        return Err(error!("Incorrect protocol; got {}", String::from_utf8_lossy(&buf[1..20])));
     }
 
     let mut info_hash: [u8; 20] = [0; 20];
@@ -253,31 +253,31 @@ async fn read_message<'a>(reader: &mut ReadHalf<'a>) -> Result<Message, Box<dyn 
         match id {
             0 => { // choke
                 if body.len() != 0 {
-                    return Err(GeneralError::new(&format!("Choke body: {} bytes, expected 0", body.len())));
+                    return Err(error!("Choke body: {} bytes, expected 0", body.len()));
                 }
                 return Ok(Message::Choke);
             }
             1 => { // unchoke
                 if body.len() != 0 {
-                    return Err(GeneralError::new(&format!("Unchoke body: {} bytes, expected 0", body.len())));
+                    return Err(error!("Unchoke body: {} bytes, expected 0", body.len()));
                 }
                 return Ok(Message::Unchoke);
             }
             2 => { // interested
                 if body.len() != 0 {
-                    return Err(GeneralError::new(&format!("Interested body: {} bytes, expected 0", body.len())));
+                    return Err(error!("Interested body: {} bytes, expected 0", body.len()));
                 }
                 return Ok(Message::Interested);
             }
             3 => { // not interested
                 if body.len() != 0 {
-                    return Err(GeneralError::new(&format!("NotInterested body: {} bytes, expected 0", body.len())));
+                    return Err(error!("NotInterested body: {} bytes, expected 0", body.len()));
                 }
                 return Ok(Message::NotInterested);
             }
             4 => { // have
                 if body.len() != 4 {
-                    return Err(GeneralError::new(&format!("Have body: {} bytes, expected 4", body.len())));
+                    return Err(error!("Have body: {} bytes, expected 4", body.len()));
                 }
                 let mut data: [u8; 4] = [0; 4];
                 data.copy_from_slice(&body[0..4]);
@@ -291,7 +291,7 @@ async fn read_message<'a>(reader: &mut ReadHalf<'a>) -> Result<Message, Box<dyn 
             // }
             7 => { // piece
                 if body.len() < 8 {
-                    return Err(GeneralError::new(&format!("Have body: {} bytes, expected >= 8", body.len())));
+                    return Err(error!("Have body: {} bytes, expected >= 8", body.len()));
                 }
                 let mut index_raw: [u8; 4] = [0; 4];
                 index_raw.copy_from_slice(&body[0..4]);
@@ -506,7 +506,7 @@ async fn connection_writer<'a>(peer: Arc<Mutex<PeerConnection>>, mut writer: Wri
 
 async fn do_peer_connection(peer: String, torrent: Torrent) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let peer_addr: SocketAddr = match lookup_host(&peer).await?.next() {
-        None => return Err(GeneralError::new(&format!("Lookup failed: {}", peer))),
+        None => return Err(error!("Lookup failed: {}", peer)),
         Some(r) => r,
     };
     println!("Got peer: {}", peer_addr);

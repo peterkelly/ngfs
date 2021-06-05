@@ -12,7 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::rand::SystemRandom;
-use torrent::result::GeneralError;
+use torrent::StringError;
 use torrent::util::{from_hex, escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use torrent::crypt::HashAlgorithm;

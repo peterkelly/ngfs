@@ -14,7 +14,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 // use tokio_tls;
 use openssl::rsa::Rsa;
 use rand::prelude::Rng;
-use super::result::{GeneralError, general_error};
+use super::error;
 use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, PBufWriter, VarInt};
 use super::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
@@ -68,7 +68,7 @@ impl PublicKey {
                         2 => Some(KeyType::Secp256k1),
                         3 => Some(KeyType::ECDSA),
                         _ => {
-                            return general_error(&format!("Unknown key type: {}", key_type_int));
+                            return Err(error!("Unknown key type: {}", key_type_int));
                         }
                     }
                 }
@@ -80,8 +80,8 @@ impl PublicKey {
             }
         }
 
-        let key_type: KeyType = key_type.ok_or_else(|| GeneralError::new(&format!("Missing field: key_type")))?;
-        let data: Vec<u8> = data.ok_or_else(|| GeneralError::new(&format!("Missing field: data")))?;
+        let key_type: KeyType = key_type.ok_or_else(|| error!("Missing field: key_type"))?;
+        let data: Vec<u8> = data.ok_or_else(|| error!("Missing field: data"))?;
 
         Ok(PublicKey {
             key_type,
@@ -152,11 +152,11 @@ impl Propose {
             }
         }
 
-        let rand: Vec<u8> = rand.ok_or_else(|| GeneralError::new(&format!("Missing field: rand")))?;
-        let pubkey: Vec<u8> = pubkey.ok_or_else(|| GeneralError::new(&format!("Missing field: pubkey")))?;
-        let exchanges: String = exchanges.ok_or_else(|| GeneralError::new(&format!("Missing field: exchanges")))?;
-        let ciphers: String = ciphers.ok_or_else(|| GeneralError::new(&format!("Missing field: ciphers")))?;
-        let hashes: String = hashes.ok_or_else(|| GeneralError::new(&format!("Missing field: hashes")))?;
+        let rand: Vec<u8> = rand.ok_or_else(|| error!("Missing field: rand"))?;
+        let pubkey: Vec<u8> = pubkey.ok_or_else(|| error!("Missing field: pubkey"))?;
+        let exchanges: String = exchanges.ok_or_else(|| error!("Missing field: exchanges"))?;
+        let ciphers: String = ciphers.ok_or_else(|| error!("Missing field: ciphers"))?;
+        let hashes: String = hashes.ok_or_else(|| error!("Missing field: hashes"))?;
 
         Ok(Propose {
             rand,
@@ -210,8 +210,8 @@ impl Exchange {
             }
         }
 
-        let epubkey: Vec<u8> = epubkey.ok_or_else(|| GeneralError::new(&format!("Missing field: epubkey")))?;
-        let signature: Vec<u8> = signature.ok_or_else(|| GeneralError::new(&format!("Missing field: signature")))?;
+        let epubkey: Vec<u8> = epubkey.ok_or_else(|| error!("Missing field: epubkey"))?;
+        let signature: Vec<u8> = signature.ok_or_else(|| error!("Missing field: signature"))?;
 
         Ok(Exchange {
             epubkey,
@@ -241,7 +241,7 @@ async fn send_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), B
     let w = stream.write(&tosend).await?;
     // println!("Sent {} bytes", w);
     if w != tosend.len() {
-        return general_error(&format!("Only sent {} bytes of {}", w, tosend.len()));
+        return Err(error!("Only sent {} bytes of {}", w, tosend.len()));
     }
     Ok(())
 }
@@ -253,7 +253,7 @@ async fn send_length_prefixed_bytes(stream: &mut TcpStream, tosend_bytes: &[u8])
     let w = stream.write(&tosend).await?;
     // println!("Sent {} bytes", w);
     if w != tosend.len() {
-        return general_error(&format!("Only sent {} bytes of {}", w, tosend.len()));
+        return Err(error!("Only sent {} bytes of {}", w, tosend.len()));
     }
     Ok(())
 }
@@ -280,13 +280,13 @@ async fn recv_length_prefixed_binary(stream: &mut TcpStream) -> Result<Vec<u8>, 
     let mut length_buf: [u8; 4] = [0; 4];
     let r = stream.read(&mut length_buf).await?;
     if r != 4 {
-        return general_error("Insufficient data while reading message length");
+        return Err(error!("Insufficient data while reading message length"));
     }
     println!("length_buf = {:?}", length_buf);
     let msglen = u32::from_be_bytes(length_buf) as usize;
     println!("msglen = {}", msglen);
     if msglen >= 0x800000 {
-        return general_error(&format!("Message length {} exceeds allowed length", msglen));
+        return Err(error!("Message length {} exceeds allowed length", msglen));
     }
     receive_exact(stream, msglen).await
 }
@@ -315,13 +315,13 @@ async fn receive_exact(stream: &mut TcpStream, msglen: usize) -> Result<Vec<u8>,
     }
 
     if total_read != msglen {
-        return general_error(&format!("Insufficient data while reading message body; got {} bytes, expected {}", total_read, msglen));
+        return Err(error!("Insufficient data while reading message body; got {} bytes, expected {}", total_read, msglen));
     }
 
 
     // let r = stream.read(&mut body).await?;
     // if r != msglen {
-    //     return general_error(&format!("Insufficient data while reading message body; got {} bytes, expected {}", r, msglen));
+    //     return Err(error!("Insufficient data while reading message body; got {} bytes, expected {}", r, msglen));
     // }
     Ok(body)
 }
@@ -365,13 +365,13 @@ async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8
         let mut single_buf: [u8; 1] = [0; 1];
         let r: usize = stream.read(&mut single_buf).await?;
         if r == 0 {
-            return general_error("Premature end of stream while reading varint length");
+            return Err(error!("Premature end of stream while reading varint length"));
         }
         let b = single_buf[0];
         // println!("b = 0x{:02x}", b);
         length_bytes.push(b);
         if length_bytes.len() > MAX_VARINT_BYTES {
-            return general_error("Length varint is too long");
+            return Err(error!("Length varint is too long"));
         }
         // if length_bytes.len() == 99 {
         //     break;
@@ -383,7 +383,7 @@ async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8
     }
     // println!("length_bytes = {}", BinaryData(&length_bytes));
     let mut offset = 0;
-    let length_varint = VarInt::read_from(&length_bytes, &mut offset).ok_or_else(|| GeneralError::new("Invalid varint"))?;
+    let length_varint = VarInt::read_from(&length_bytes, &mut offset).ok_or_else(|| error!("Invalid varint"))?;
     let length = length_varint.to_usize();
     // println!("length = {}", length);
 
@@ -420,7 +420,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     // Open the connection
     let peer_addr: SocketAddr = match lookup_host(server_addr_str).await?.next() {
         Some(v) => v,
-        None => return general_error(&format!("Cannot resolve host: {}", server_addr_str)),
+        None => return Err(error!("Cannot resolve host: {}", server_addr_str)),
     };
 
     println!("Before opening connection");
@@ -508,7 +508,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     println!("oh2 = {}", BinaryData(&oh2));
 
     let preference: Preference = if oh1_raw == oh2_raw {
-        return general_error("Talking to self");
+        return Err(error!("Talking to self"));
     }
     else if oh1_raw < oh2_raw {
         Preference::Remote
@@ -547,7 +547,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     remote_verifier.update(&local_propose_bytes)?;
     remote_verifier.update(&remote_exchange.epubkey)?;
     if !remote_verifier.verify(&remote_exchange.signature)? {
-        return general_error("Invalid signature for remote exchange message");
+        return Err(error!("Invalid signature for remote exchange message"));
     }
 
 
@@ -716,7 +716,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let msg_parts = recv_length_prefixed_binary(&mut stream).await?;
     println!("Received: {}", BinaryData(&msg_parts));
     if msg_parts.len() < SHA256_DIGEST_SIZE {
-        return general_error("Encrypted data is smaller than digest size");
+        return Err(error!("Encrypted data is smaller than digest size"));
     }
     let message_enc = &msg_parts[..msg_parts.len() - SHA256_DIGEST_SIZE];
     let message_mac = &msg_parts[msg_parts.len() - SHA256_DIGEST_SIZE..];
@@ -755,7 +755,7 @@ fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Res
     println!("    computed_mac = ({} bytes) {}", computed_mac.len(), BinaryData(&computed_mac));
 
     if message_mac != computed_mac {
-        return general_error("MAC mismatch");
+        return Err(error!("MAC mismatch"));
     }
 
     Ok(())

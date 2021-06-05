@@ -9,7 +9,7 @@ use tokio;
 use std::env;
 use std::error::Error;
 use std::future::Future;
-use torrent::result::{GeneralError, general_error};
+use torrent::error;
 use torrent::multibase::decode;
 use torrent::util::{BinaryData};
 use torrent::protobuf::{PBufReader, PBufWriter, VarInt};
@@ -25,7 +25,7 @@ fn get_argument<'a>(args: &'a [String], index: usize, name: &str) -> Result<&'a 
             Ok(command)
         }
         None => {
-            Err(GeneralError::new(&format!("Missing argument: {}", name)))
+            Err(error!("Missing argument: {}", name))
         }
     }
 }
@@ -70,11 +70,11 @@ async fn varint_command(args: &[String]) -> Result<(), Box<dyn Error>> {
                     println!("{:10} 0x{:016x} OK", i, value);
                 }
                 else {
-                    return general_error(&format!("0x{:016x} != 0x{:016x}", value, decoded_value));
+                    return Err(error!("0x{:016x} != 0x{:016x}", value, decoded_value));
                 }
             }
             None => {
-                return general_error(&format!("0x{:016x} INVALID", value));
+                return Err(error!("0x{:016x} INVALID", value));
             }
         }
     }
@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         _ => {
-            Err(GeneralError::new(&format!("Unknown command: {}", command)))?
+            Err(error!("Unknown command: {}", command))?
         }
     }
 }

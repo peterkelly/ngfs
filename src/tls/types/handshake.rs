@@ -8,7 +8,7 @@
 use std::error::Error;
 use std::fmt;
 use super::super::super::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
-use super::super::super::result::GeneralError;
+use super::super::super::error;
 use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
 use super::super::super::x509;
 use super::extension::*;
@@ -303,7 +303,7 @@ impl FromBinary for EndOfEarlyData {
     type Output = EndOfEarlyData;
 
     fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(GeneralError::new("EndOfEarlyData::from_binary(): Not implemented"))
+        Err(error!("EndOfEarlyData::from_binary(): Not implemented"))
     }
 }
 

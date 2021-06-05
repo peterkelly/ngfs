@@ -1,5 +1,5 @@
 use std::error::Error;
-use super::super::result::GeneralError;
+use super::super::error;
 use super::value::{
     Class,
     Form,
@@ -43,7 +43,7 @@ fn encode_identifier(
     out: &mut Vec<u8>,
 ) -> Result<(), Box<dyn Error>> {
     if tag > 30 {
-        return Err(GeneralError::new(format!("Unsupported ASN1 value: tag {} is > 30", tag)));
+        return Err(error!("Unsupported ASN1 value: tag {} is > 30", tag));
     }
     let class: u8 = match class {
         Class::Universal => 0,

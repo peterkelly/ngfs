@@ -10,10 +10,19 @@ use std::fmt;
 use std::error::Error;
 use torrent::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use torrent::binary::BinaryReader;
-use torrent::result::GeneralError;
+use torrent::error;
 use torrent::asn1;
 use torrent::asn1::printer::ObjectDescriptor;
 use torrent::x509;
+
+fn test(ok: bool) -> Result<(), Box<dyn Error>> {
+    if ok {
+        Ok(())
+    }
+    else {
+        Err(error!("Test error {:02x}", 65535))
+    }
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let filename = match std::env::args().nth(1) {
@@ -34,6 +43,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut registry = asn1::printer::ObjectRegistry::new();
     x509::populate_registry(&mut registry);
     x509::print_certificate(&registry, &certificate);
+
+    // let x: () = error!("test");
+    println!();
+    println!("==== before test");
+    test(false)?;
+    println!("==== after test");
+
 
 
     Ok(())

@@ -10,7 +10,7 @@ use std::fmt;
 use std::error::Error;
 use torrent::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use torrent::binary::BinaryReader;
-use torrent::result::GeneralError;
+use torrent::error;
 use torrent::asn1;
 use torrent::asn1::printer::ObjectDescriptor;
 use torrent::asn1::writer::encode_item;
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         else if input_filename.is_some() {
             // eprintln!("Unexpected argument: {}", args[argno]);
             // std::process::exit(1);
-            return Err(GeneralError::new(format!("Unexpected argument: {}", args[argno])));
+            return Err(error!("Unexpected argument: {}", args[argno]));
         }
         else {
             input_filename = Some(&args[argno]);
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let input_filename: &str = match input_filename {
         Some(v) => v,
         None => {
-            return Err(GeneralError::new("No input file specified"));
+            return Err(error!("No input file specified"));
         }
     };
 
@@ -68,7 +68,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut output_data: Vec<u8> = Vec::new();
         encode_item(&item, &mut output_data)?;
         std::fs::write(&output_filename, &output_data)
-            .map_err(|e| GeneralError::new(format!("{}: {}", output_filename, e)))?;
+            .map_err(|e| error!("{}: {}", output_filename, e))?;
         println!("Wrote {}", output_filename);
     }
 

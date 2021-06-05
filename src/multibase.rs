@@ -6,7 +6,6 @@
 // #![allow(unused_macros)]
 
 // use super::util::{escape_string, from_hex, BinaryData};
-// use super::result::general_error;
 use std::iter::FromIterator;
 use std::error::Error;
 use std::fmt;

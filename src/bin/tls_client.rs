@@ -16,7 +16,7 @@ use tokio::time::sleep;
 use std::time::Duration;
 use ring::agreement::{EphemeralPrivateKey, X25519};
 use ring::rand::SystemRandom;
-use torrent::result::GeneralError;
+use torrent::error;
 use torrent::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
 use torrent::binary::{BinaryReader, BinaryWriter};
 use torrent::crypt::{HashAlgorithm, AeadAlgorithm};
@@ -165,7 +165,7 @@ fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
             argno += 2;
         }
         else {
-            return Err(GeneralError::new(format!("Unexpected argument: {}", args[argno])));
+            return Err(error!("Unexpected argument: {}", args[argno]));
         }
     }
 
@@ -184,10 +184,10 @@ fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
             };
         }
         (Some(_), None) => {
-            return Err(GeneralError::new("--client-cert option requires --client-key"));
+            return Err(error!("--client-cert option requires --client-key"));
         }
         (None, Some(_)) => {
-            return Err(GeneralError::new("--client-key option requires --client-cert"));
+            return Err(error!("--client-key option requires --client-cert"));
         }
         _ => {
             client_auth = ClientAuth::None;

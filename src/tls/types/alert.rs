@@ -8,7 +8,7 @@
 use std::error::Error;
 use std::fmt;
 use super::super::super::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
-use super::super::super::result::GeneralError;
+use super::super::super::StringError;
 use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
 
 #[derive(Debug, Eq, PartialEq)]
