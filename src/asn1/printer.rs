@@ -82,6 +82,7 @@ pub struct Printer<'a> {
     pub truncate: bool,
     pub lines: bool,
     pub registry: Option<&'a ObjectRegistry>,
+    pub ranges: bool,
 }
 
 impl Printer<'_> {
@@ -90,6 +91,7 @@ impl Printer<'_> {
             truncate: false,
             lines: false,
             registry: None,
+            ranges: false,
         }
     }
 
@@ -130,6 +132,9 @@ impl Printer<'_> {
 
     fn print_item(&self, item: &Item, prefix: &str, indent: &str) {
         print!("{}", prefix);
+        if self.ranges {
+            print!("[{:x}..{:x}] ", item.range.start, item.range.end);
+        }
 
         match &item.value {
             Value::Boolean(inner) => {

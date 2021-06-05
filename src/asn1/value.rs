@@ -1,3 +1,8 @@
+// Useful references for testing:
+//
+// https://github.com/PeculiarVentures/asn1.js
+// https://www.strozhevsky.com/free_docs/free_asn1_testsuite_descr.pdf
+
 use std::fmt;
 use std::error::Error;
 use std::ops::Range;
