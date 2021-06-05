@@ -74,9 +74,9 @@ pub enum Value {
     Sequence(Vec<Item>),
     Set(Vec<Item>),
 
-    Application(u32, Vec<Item>),
-    ContextSpecific(u32, Vec<Item>),
-    Private(u32, Vec<Item>),
+    Application(u32, Box<Item>),
+    ContextSpecific(u32, Box<Item>),
+    Private(u32, Box<Item>),
 
     Unknown(Identifier, u32),
 }

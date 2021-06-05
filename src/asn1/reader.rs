@@ -305,21 +305,21 @@ fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>> {
             let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::Application(tag, read_item_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::Application(tag, Box::new(read_item(&mut contents)?))),
             }
         }
         Class::ContextSpecific => {
             let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::ContextSpecific(tag, read_item_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::ContextSpecific(tag, Box::new(read_item(&mut contents)?))),
             }
         }
         Class::Private => {
             let tag = identifier.tag;
             match identifier.form {
                 Form::Primitive => Ok(Value::Unknown(identifier, length)),
-                Form::Constructed => Ok(Value::Private(tag, read_item_list(&mut contents)?)),
+                Form::Constructed => Ok(Value::Private(tag, Box::new(read_item(&mut contents)?))),
             }
         }
         // Class::ContextSpecific => Err(GeneralError::new("Unsupported value: class is ContextSpecific")),

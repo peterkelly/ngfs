@@ -289,13 +289,8 @@ impl TBSCertificate {
         let mut elem = it.next().ok_or("Missing version")?;
         let mut version = Version::V1;
         match &elem.value {
-            Value::ContextSpecific(0, children) => {
-                if children.len() != 1 {
-                    return Err(GeneralError::new("Expected one item for version"));
-                }
-                else {
-                    version = Version::from_asn1(&children[0])?;
-                }
+            Value::ContextSpecific(0, child) => {
+                version = Version::from_asn1(child)?;
                 elem = it.next().ok_or("Missing serial_number")?;
             }
             _ => {
@@ -324,16 +319,10 @@ impl TBSCertificate {
         match it.next() {
             Some(elem) => {
                 match &elem.value {
-                    Value::ContextSpecific(3, ext_elements) => {
-                        match ext_elements.get(0) {
-                            Some(ext_elements2) => {
-                                let ext_elements3 = ext_elements2.as_sequence()?;
-                                for ext_elem in ext_elements3 {
-                                    extensions.push(Extension::from_asn1(ext_elem)?);
-                                }
-                            }
-                            None => {
-                            }
+                    Value::ContextSpecific(3, ext_elements2) => {
+                        let ext_elements3 = ext_elements2.as_sequence()?;
+                        for ext_elem in ext_elements3 {
+                            extensions.push(Extension::from_asn1(ext_elem)?);
                         }
                     }
                     _ => {

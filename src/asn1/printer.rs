@@ -105,7 +105,7 @@ impl Printer<'_> {
         s
     }
 
-    fn print_list(&self, name: &str, items: &[Item], prefix: &str, indent: &str) {
+    fn print_list(&self, name: &str, items: &[Item], indent: &str) {
         println!("{}", name);
         for (i, item) in items.iter().enumerate() {
             if i + 1 < items.len() {
@@ -119,6 +119,13 @@ impl Printer<'_> {
                 self.print_item(item, c_prefix, c_indent);
             }
         }
+    }
+
+    fn print_single_child(&self, name: &str, child: &Item, indent: &str) {
+        println!("{}", name);
+        let c_prefix = &format!("{}└── ", indent);
+        let c_indent = &format!("{}    ", indent);
+        self.print_item(child, c_prefix, c_indent);
     }
 
     fn print_item(&self, item: &Item, prefix: &str, indent: &str) {
@@ -166,22 +173,22 @@ impl Printer<'_> {
                 println!("GeneralizedTime {}", escape_string(s));
             }
             Value::Sequence(inner) => {
-                self.print_list("Sequence", inner, indent, indent);
+                self.print_list("Sequence", inner, indent);
             }
             Value::Set(inner) => {
-                self.print_list("Set", inner, indent, indent);
+                self.print_list("Set", inner, indent);
             }
             Value::Application(tag, inner) => {
                 let label = &format!("Application ({})", tag);
-                self.print_list(label, inner, indent, indent);
+                self.print_single_child(label, inner, indent);
             }
             Value::ContextSpecific(tag, inner) => {
                 let label = &format!("ContextSpecific ({})", tag);
-                self.print_list(label, inner, indent, indent);
+                self.print_single_child(label, inner, indent);
             }
             Value::Private(tag, inner) => {
                 let label = &format!("Private ({})", tag);
-                self.print_list(label, inner, indent, indent);
+                self.print_single_child(label, inner, indent);
             }
             Value::Unknown(ident, len) => {
                 println!("Unknown {:?}, len = {}", ident, len)
