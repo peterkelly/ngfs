@@ -73,6 +73,15 @@ impl AlgorithmIdentifier {
             parameters,
         })
     }
+
+    pub fn to_asn1(&self) -> Item {
+        let mut items: Vec<Item> = Vec::new();
+        items.push(Item::from(Value::ObjectIdentifier(self.algorithm.clone())));
+        if let Some(parameters) = &self.parameters {
+            items.push(parameters.clone());
+        }
+        Item::from(Value::Sequence(items))
+    }
 }
 
 impl AlgorithmIdentifier {
@@ -91,7 +100,7 @@ impl AlgorithmIdentifier {
 pub struct Certificate {
     pub tbs_certificate: TBSCertificate,
     pub signature_algorithm: AlgorithmIdentifier,
-    pub signature_value: Vec<u8>,
+    pub signature_value: BitString,
 }
 
 impl Certificate {
@@ -106,9 +115,9 @@ impl Certificate {
 
         let tbs_certificate = TBSCertificate::from_asn1(&elements[0])?;
         let signature_algorithm = AlgorithmIdentifier::from_asn1(&elements[1])?;
-        let signature_value: Vec<u8> = match &elements[2].value {
+        let signature_value: BitString = match &elements[2].value {
             Value::BitString(bit_string) => {
-                bit_string.bytes.clone()
+                bit_string.clone()
             }
             _ => {
                 return Err(error!("Certificate: Expected elements[2] to be a bit string"));
@@ -120,6 +129,14 @@ impl Certificate {
             signature_algorithm,
             signature_value,
         })
+    }
+
+    pub fn to_asn1(&self) -> Item {
+        let mut items: Vec<Item> = Vec::new();
+        items.push(self.tbs_certificate.to_asn1());
+        items.push(self.signature_algorithm.to_asn1());
+        items.push(Item::from(Value::BitString(self.signature_value.clone())));
+        Item::from(Value::Sequence(items))
     }
 }
 
@@ -143,6 +160,14 @@ impl Version {
             _ => Err(error!("Invalid version")),
         }
     }
+
+    pub fn to_asn1(&self) -> Item {
+        match self {
+            Version::V1 => Item::from(Value::Integer(Integer(vec![0]))),
+            Version::V2 => Item::from(Value::Integer(Integer(vec![1]))),
+            Version::V3 => Item::from(Value::Integer(Integer(vec![2]))),
+        }
+    }
 }
 
 pub struct RelativeDistinguishedName {
@@ -159,6 +184,20 @@ impl RelativeDistinguishedName {
             value: elements[1].clone(),
         })
     }
+
+    pub fn to_asn1(&self) -> Item {
+        let id_item = Item::from(Value::ObjectIdentifier(self.id.clone()));
+        let value_item = self.value.clone();
+        let mut inner_items: Vec<Item> = Vec::new();
+        inner_items.push(id_item);
+        inner_items.push(value_item);
+
+        let mut outer_items: Vec<Item> = Vec::new();
+        outer_items.push(Item::from(Value::Sequence(inner_items)));
+
+
+        Item::from(Value::Set(outer_items))
+    }
 }
 
 pub struct Name {
@@ -174,14 +213,34 @@ impl Name {
         }
         Ok(Name { parts })
     }
+
+    pub fn to_asn1(&self) -> Item {
+        let mut items: Vec<Item> = Vec::new();
+        for part in self.parts.iter() {
+            items.push(part.to_asn1());
+        }
+        Item::from(Value::Sequence(items))
+    }
 }
 
 pub struct UTCTime {
-    data: String,
+    pub data: String,
+}
+
+impl UTCTime {
+    pub fn to_asn1(&self) -> Item {
+        Item::from(Value::UTCTime(self.data.clone()))
+    }
 }
 
 pub struct GeneralizedTime {
-    data: String,
+    pub data: String,
+}
+
+impl GeneralizedTime {
+    pub fn to_asn1(&self) -> Item {
+        Item::from(Value::UTCTime(self.data.clone()))
+    }
 }
 
 pub enum Time {
@@ -197,6 +256,13 @@ impl Time {
             _ => Err(error!("Expected a UTCTime or GeneralizedTime")),
         }
     }
+
+    pub fn to_asn1(&self) -> Item {
+        match self {
+            Time::UTCTime(t) => t.to_asn1(),
+            Time::GeneralizedTime(t) => t.to_asn1(),
+        }
+    }
 }
 
 pub struct Validity {
@@ -210,6 +276,12 @@ impl Validity {
         let not_before = Time::from_asn1(&elements[0])?;
         let not_after = Time::from_asn1(&elements[1])?;
         Ok(Validity { not_before, not_after })
+    }
+
+    pub fn to_asn1(&self) -> Item {
+        Item::from(Value::Sequence(vec![
+            self.not_before.to_asn1(),
+            self.not_after.to_asn1()]))
     }
 }
 
@@ -227,6 +299,12 @@ impl SubjectPublicKeyInfo {
             algorithm,
             subject_public_key,
         })
+    }
+
+    pub fn to_asn1(&self) -> Item {
+        Item::from(Value::Sequence(vec![
+            self.algorithm.to_asn1(),
+            Item::from(Value::BitString(self.subject_public_key.clone()))]))
     }
 
     pub fn print(&self, reg: &ObjectRegistry, indent: &str) {
@@ -262,6 +340,16 @@ impl Extension {
         Ok(Extension { id, critical, data })
     }
 
+    pub fn to_asn1(&self) -> Item {
+        let mut items: Vec<Item> = Vec::new();
+        items.push(Item::from(Value::ObjectIdentifier(self.id.clone())));
+        if self.critical {
+            items.push(Item::from(Value::Boolean(self.critical)));
+        }
+        items.push(Item::from(Value::OctetString(self.data.clone())));
+        Item::from(Value::Sequence(items))
+    }
+
     pub fn print(&self, reg: &ObjectRegistry, indent: &str) {
         println!("{}id = {}", indent, reg.get_long_name(&self.id));
         println!("{}critical = {}", indent, self.critical);
@@ -283,6 +371,35 @@ pub struct TBSCertificate {
 }
 
 impl TBSCertificate {
+    pub fn to_asn1(&self) -> Item {
+        let mut items: Vec<Item> = Vec::new();
+
+        let version_item: Item = self.version.to_asn1();
+        let cs_item: Item = Item::from(Value::ContextSpecific(0, Box::new(version_item)));
+
+        items.push(cs_item);
+
+
+        items.push(Item::from(Value::Integer(self.serial_number.clone())));
+        items.push(self.signature.to_asn1());
+        items.push(self.issuer.to_asn1());
+        items.push(self.validity.to_asn1());
+        items.push(self.subject.to_asn1());
+        items.push(self.subject_public_key_info.to_asn1());
+        // TODO: issuer_unique_id
+        // TODO: subject_unique_id
+        let mut extension_items: Vec<Item> = Vec::new();
+        for extension in self.extensions.iter() {
+            extension_items.push(extension.to_asn1());
+        }
+        let extensions_item = Item::from(Value::Sequence(extension_items));
+        let cs_extensions = Item::from(Value::ContextSpecific(3, Box::new(extensions_item)));
+        items.push(cs_extensions);
+
+
+        Item::from(Value::Sequence(items))
+    }
+
     pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
         let mut it = item.as_sequence_iter()?;
 
@@ -415,7 +532,7 @@ pub fn print_certificate(reg: &ObjectRegistry, certificate: &Certificate) {
     let child_indent: &str = &"        ";
     print_tbs_certificate(tbs, reg, child_indent);
     println!("    signature_algorithm = {}", certificate.signature_algorithm.to_string(reg));
-    println!("    signature_value = <{} bytes>", certificate.signature_value.len());
+    println!("    signature_value = <{} bytes>", certificate.signature_value.bytes.len());
 }
 
 pub fn populate_registry(registry: &mut ObjectRegistry) {

@@ -144,12 +144,15 @@ impl Printer<'_> {
                 println!("INTEGER {}", self.bytes_to_string(&inner.0));
             }
             Value::BitString(bitstring) => {
-                println!("BIT STRING {} (unused {})",
+                println!("BIT STRING {} ({} bytes, {} unused bits)",
                          self.bytes_to_string(&bitstring.bytes),
+                         bitstring.bytes.len(),
                          bitstring.unused_bits);
             }
             Value::OctetString(bytes) => {
-                println!("OCTET STRING {}", self.bytes_to_string(bytes));
+                println!("OCTET STRING {} ({} bytes)",
+                    self.bytes_to_string(bytes),
+                    bytes.len());
             }
             Value::Null => {
                 println!("NULL");
