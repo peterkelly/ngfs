@@ -41,6 +41,13 @@ pub const CRYPTO_SHA_512_WITH_RSA_ENCRYPTION: [u64; 7] = [1, 2, 840, 113549, 1, 
 pub const CRYPTO_SHA_224_WITH_RSA_ENCRYPTION: [u64; 7] = [1, 2, 840, 113549, 1, 1, 14];
 pub const CRYPTO_RSA_ENCRYPTION: [u64; 7] = [1, 2, 840, 113549, 1, 1, 1];
 
+pub const CRYPTO_EC_PUBLIC_KEY: [u64; 6] = [1, 2, 840, 10045, 2, 1];
+pub const CRYPTO_ECDSA_WITH_SHA224: [u64; 7] = [1, 2, 840, 10045, 4, 3, 1];
+pub const CRYPTO_ECDSA_WITH_SHA256: [u64; 7] = [1, 2, 840, 10045, 4, 3, 2];
+pub const CRYPTO_ECDSA_WITH_SHA384: [u64; 7] = [1, 2, 840, 10045, 4, 3, 3];
+pub const CRYPTO_ECDSA_WITH_SHA512: [u64; 7] = [1, 2, 840, 10045, 4, 3, 4];
+pub const CRYPTO_CURVE_PRIME256V1: [u64; 7] = [1, 2, 840, 10045, 3, 1, 7]; // aka secp256r1
+
 // Certificate  ::=  SEQUENCE  {
 //        tbsCertificate       TBSCertificate,
 //        signatureAlgorithm   AlgorithmIdentifier,
@@ -559,4 +566,10 @@ pub fn populate_registry(registry: &mut ObjectRegistry) {
     registry.add(&CRYPTO_SHA_512_WITH_RSA_ENCRYPTION, "sha512WithRSAEncryption");
     registry.add(&CRYPTO_SHA_224_WITH_RSA_ENCRYPTION, "sha224WithRSAEncryption");
     registry.add(&CRYPTO_RSA_ENCRYPTION, "rsaEncryption");
+    registry.add(&CRYPTO_EC_PUBLIC_KEY, "ecPublicKey");
+    registry.add(&CRYPTO_ECDSA_WITH_SHA224, "ecdsa-with-SHA224");
+    registry.add(&CRYPTO_ECDSA_WITH_SHA256, "ecdsa-with-SHA256");
+    registry.add(&CRYPTO_ECDSA_WITH_SHA384, "ecdsa-with-SHA384");
+    registry.add(&CRYPTO_ECDSA_WITH_SHA512, "ecdsa-with-SHA512");
+    registry.add(&CRYPTO_CURVE_PRIME256V1, "prime256v1");
 }
