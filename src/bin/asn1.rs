@@ -8,6 +8,8 @@
 
 use std::fmt;
 use std::error::Error;
+use std::path::PathBuf;
+use clap::{Clap, ValueHint};
 use torrent::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use torrent::binary::BinaryReader;
 use torrent::error;
@@ -16,41 +18,24 @@ use torrent::asn1::printer::ObjectDescriptor;
 use torrent::asn1::writer::encode_item;
 use torrent::x509;
 
+#[derive(Clap, Debug)]
+#[clap(name = "asn1: Test for reading/writing ASN.1 DER files")]
+struct Opt {
+    #[clap(long, about = "Show byte ranges for each value")]
+    ranges: bool,
+
+    #[clap(index = 1, value_name = "INFILE", value_hint=ValueHint::FilePath,
+        about = "DER-encoded file to read from")]
+    input: String,
+
+    #[clap(value_name = "OUTFILE", long, value_hint=ValueHint::FilePath,
+        about = "Re-encode data structure from input and write to OUTFILE")]
+    output: Option<String>,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut ranges: bool = false;
-    let mut input_filename: Option<&str> = None;
-    let mut output_filename: Option<&str> = None;
-
-    let mut argno = 1;
-    while argno < args.len() {
-        if argno + 1 < args.len() && args[argno] == "--output" {
-            output_filename = Some(&args[argno + 1]);
-            argno += 2;
-        }
-        else if args[argno] == "--ranges" {
-            ranges = true;
-            argno += 1;
-        }
-        else if input_filename.is_some() {
-            // eprintln!("Unexpected argument: {}", args[argno]);
-            // std::process::exit(1);
-            return Err(error!("Unexpected argument: {}", args[argno]));
-        }
-        else {
-            input_filename = Some(&args[argno]);
-            argno += 1;
-        }
-    }
-
-    let input_filename: &str = match input_filename {
-        Some(v) => v,
-        None => {
-            return Err(error!("No input file specified"));
-        }
-    };
-
-    let data: Vec<u8> = std::fs::read(input_filename)?;
+    let opt = Opt::parse();
+    let data: Vec<u8> = std::fs::read(opt.input)?;
     let mut reader = BinaryReader::new(&data);
     let item = asn1::reader::read_item(&mut reader)?;
 
@@ -61,15 +46,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     printer.truncate = true;
     printer.lines = true;
     printer.registry = Some(&registry);
-    printer.ranges = ranges;
+    printer.ranges = opt.ranges;
     printer.print(&item);
 
-    if let Some(output_filename) = output_filename {
+    if let Some(output) = opt.output {
         let mut output_data: Vec<u8> = Vec::new();
         encode_item(&item, &mut output_data)?;
-        std::fs::write(&output_filename, &output_data)
-            .map_err(|e| error!("{}: {}", output_filename, e))?;
-        println!("Wrote {}", output_filename);
+        std::fs::write(&output, &output_data).map_err(|e| error!("{}: {}", output, e))?;
+        println!("Wrote {}", output);
     }
 
     Ok(())

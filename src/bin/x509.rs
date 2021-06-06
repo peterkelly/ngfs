@@ -8,6 +8,7 @@
 
 use std::fmt;
 use std::error::Error;
+use clap::{Clap, ValueHint};
 use torrent::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use torrent::binary::BinaryReader;
 use torrent::error;
@@ -15,42 +16,55 @@ use torrent::asn1;
 use torrent::asn1::printer::ObjectDescriptor;
 use torrent::x509;
 
-fn test(ok: bool) -> Result<(), Box<dyn Error>> {
-    if ok {
-        Ok(())
-    }
-    else {
-        Err(error!("Test error {:02x}", 65535))
-    }
+#[derive(Clap)]
+#[clap(name="x509")]
+struct Opt {
+    #[clap(subcommand)]
+    subcmd: SubCommand,
+}
+
+#[derive(Clap)]
+enum SubCommand {
+    Print(Print),
+    Generate(Print),
+}
+
+#[derive(Clap)]
+struct Print {
+    #[clap(index = 1, value_name = "INFILE", value_hint=ValueHint::FilePath,
+        about = "DER-encoded file to read certificate from")]
+    infile: String,
+}
+
+#[derive(Clap)]
+struct Generate {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let filename = match std::env::args().nth(1) {
-        Some(v) => v,
-        None => {
-            eprintln!("Please specify filename");
-            std::process::exit(1);
-        }
-    };
-    let data: Vec<u8> = std::fs::read(filename)?;
-    // println!("data.len() = {}", data.len());
+    let opt = Opt::parse();
+    match opt.subcmd {
+        SubCommand::Print(s) => print(&s),
+        SubCommand::Generate(s) => generate()
+    }
+}
+
+fn generate() -> Result<(), Box<dyn Error>> {
+    Ok(())
+}
+
+fn print(subcmd: &Print) -> Result<(), Box<dyn Error>> {
+    // Read ASN.1 structure from file
+    let data: Vec<u8> = std::fs::read(&subcmd.infile)?;
     let mut reader = BinaryReader::new(&data);
     let item = asn1::reader::read_item(&mut reader)?;
 
+    // Parse ASN.1 structure to create certificate
     let certificate = x509::Certificate::from_asn1(&item)?;
-    println!("Got certificate");
 
+    // Print certificate
     let mut registry = asn1::printer::ObjectRegistry::new();
     x509::populate_registry(&mut registry);
     x509::print_certificate(&registry, &certificate);
-
-    // let x: () = error!("test");
-    println!();
-    println!("==== before test");
-    test(false)?;
-    println!("==== after test");
-
-
 
     Ok(())
 }

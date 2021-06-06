@@ -9,6 +9,8 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::fmt;
 use std::fs;
+use std::path::PathBuf;
+use clap::{Clap, ValueHint};
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
@@ -143,30 +145,36 @@ fn make_client_hello(my_public_key_bytes: &[u8]) -> ClientHello {
     }
 }
 
+#[derive(Clap, Debug)]
+#[clap(name="tls_client")]
+struct Opt {
+    #[clap(long, value_hint=ValueHint::FilePath)]
+    ca_cert: Option<PathBuf>,
+
+    #[clap(long, value_hint=ValueHint::FilePath)]
+    client_cert: Option<PathBuf>,
+
+    #[clap(long, value_hint=ValueHint::FilePath)]
+    client_key: Option<PathBuf>,
+}
+
 fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut argno = 1;
+    let opt = Opt::parse();
 
     let mut ca_cert: Option<Vec<u8>> = None;
     let mut client_cert: Option<Vec<u8>> = None;
     let mut client_key: Option<Vec<u8>> = None;
 
-    while argno < args.len() {
-        if args[argno] == "--ca-cert" && argno + 1 < args.len() {
-            ca_cert = Some(fs::read(&args[argno + 1])?);
-            argno += 2;
-        }
-        else if args[argno] == "--client-cert" && argno + 1 < args.len() {
-            client_cert = Some(fs::read(&args[argno + 1])?);
-            argno += 2;
-        }
-        else if args[argno] == "--client-key" && argno + 1 < args.len() {
-            client_key = Some(fs::read(&args[argno + 1])?);
-            argno += 2;
-        }
-        else {
-            return Err(error!("Unexpected argument: {}", args[argno]));
-        }
+    if let Some(filename) = opt.ca_cert {
+        ca_cert = Some(fs::read(filename)?);
+    }
+
+    if let Some(filename) = opt.client_cert {
+        client_cert = Some(fs::read(filename)?);
+    }
+
+    if let Some(filename) = opt.client_key {
+        client_key = Some(fs::read(filename)?);
     }
 
     let server_auth: ServerAuth;
