@@ -1,5 +1,5 @@
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
-use ring::signature::{RsaEncoding, RsaKeyPair};
+use ring::signature::{RsaEncoding, RsaKeyPair, VerificationAlgorithm};
 use ring::rand::SecureRandom;
 use super::super::crypt::{HashAlgorithm, AeadAlgorithm, CryptError};
 use super::super::util::{vec_with_len};
@@ -351,17 +351,14 @@ pub fn rsa_verify(
     input: &[u8],
     signature: &[u8],
 ) -> Result<(), TLSError> {
-    let rsa_parameters = match scheme {
+    let parameters: &'static dyn VerificationAlgorithm = match scheme {
+        SignatureScheme::EcdsaSecp256r1Sha256 => &ring::signature::ECDSA_P256_SHA256_ASN1,
         SignatureScheme::RsaPssRsaeSha256 => &ring::signature::RSA_PSS_2048_8192_SHA256,
         SignatureScheme::RsaPssRsaeSha384 => &ring::signature::RSA_PSS_2048_8192_SHA384,
         SignatureScheme::RsaPssRsaeSha512 => &ring::signature::RSA_PSS_2048_8192_SHA512,
-        _ => {
-            return Err(TLSError::UnsupportedSignatureScheme);
-        }
+        _ => return Err(TLSError::UnsupportedSignatureScheme),
     };
-    let ring_public_key = ring::signature::UnparsedPublicKey::new(
-        rsa_parameters,
-        key);
-    ring_public_key.verify(&input, signature)
-        .map_err(|_| TLSError::SignatureVerificationFailed)
+
+    let ring_public_key = ring::signature::UnparsedPublicKey::new(parameters, key);
+    ring_public_key.verify(&input, signature).map_err(|_| TLSError::SignatureVerificationFailed)
 }

@@ -68,6 +68,7 @@ use super::super::super::x509;
 pub enum ServerAuth {
     None,
     CertificateAuthority(Vec<u8>),
+    SelfSigned,
 }
 
 pub enum ClientAuth {
@@ -219,15 +220,18 @@ fn verify_certificate(ca_raw: &[u8], target_raw: &[u8]) -> Result<(), TLSError> 
         .map_err(|_| TLSError::InvalidCertificate)?;
     let signature = &signature_value_bit_string.bytes;
 
-    let rsa_parameters: &ring::signature::RsaParameters;
+    let parameters: &'static dyn ring::signature::VerificationAlgorithm;
     if signature_algorithm.algorithm.0 == x509::CRYPTO_SHA_256_WITH_RSA_ENCRYPTION {
-        rsa_parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA256;
+        parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA256;
     }
     else if signature_algorithm.algorithm.0 == x509::CRYPTO_SHA_384_WITH_RSA_ENCRYPTION {
-        rsa_parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA384;
+        parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA384;
     }
     else if signature_algorithm.algorithm.0 == x509::CRYPTO_SHA_512_WITH_RSA_ENCRYPTION {
-        rsa_parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA512;
+        parameters = &ring::signature::RSA_PKCS1_2048_8192_SHA512;
+    }
+    else if signature_algorithm.algorithm.0 == x509::CRYPTO_ECDSA_WITH_SHA256 {
+        parameters = &ring::signature::ECDSA_P256_SHA256_ASN1;
     }
     else {
         return Err(TLSError::UnsupportedCertificateSignatureAlgorithm);
@@ -235,7 +239,7 @@ fn verify_certificate(ca_raw: &[u8], target_raw: &[u8]) -> Result<(), TLSError> 
 
     let ca_public_key_info = &ca_cert.tbs_certificate.subject_public_key_info;
     let ca_public_key = ring::signature::UnparsedPublicKey::new(
-        rsa_parameters,
+        parameters,
         &ca_public_key_info.subject_public_key.bytes);
     let tbs_data = &target_raw[elements[0].range.clone()];
     ca_public_key.verify(tbs_data, signature).map_err(|_| TLSError::VerifyCertificateFailed)?;
@@ -813,10 +817,9 @@ async fn do_phase_two(
     let server_cert: &x509::Certificate = &first_cert_entry.certificate;
 
     let ca_cert: &[u8] = match &conn.config.server_auth {
+        ServerAuth::None => return Err(error!("No CA certificate available")),
         ServerAuth::CertificateAuthority(v) => v,
-        ServerAuth::None => {
-            return Err(error!("No CA certificate available"));
-        }
+        ServerAuth::SelfSigned => &server_cert_raw,
     };
 
     println!("Before verify_certificate()");
