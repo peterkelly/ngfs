@@ -39,6 +39,45 @@ pub struct AEncryption {
     pub ciphers: Ciphers,
 }
 
+pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin {}
+
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin {}
+
+pub fn encrypt_record(
+    to_send: &mut BytesMut,
+    data_ref: &[u8],
+    content_type: ContentType,
+    traffic_secret: &EncryptionKey,
+    client_sequence_no: u64,
+    transcript: Option<&mut Vec<u8>>,
+) -> Result<(), TLSError> {
+    let mut data = data_ref.to_vec();
+
+    match transcript {
+        Some(transcript) => transcript.extend_from_slice(&data),
+        None => (),
+    }
+    data.push(content_type.to_raw());
+    encrypt_traffic(
+        traffic_secret,
+        client_sequence_no,
+        &mut data)?;
+
+    let output_record = TLSOutputPlaintext {
+        content_type: ContentType::ApplicationData,
+        legacy_record_version: 0x0303,
+        fragment: &data,
+    };
+    output_record.encode(to_send);
+    Ok(())
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                //
+//                                          ReceiveRecord                                         //
+//                                                                                                //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 pub struct ReceiveRecord<'a> {
     reader: &'a mut Box<dyn AsyncReadWrite>,
     incoming_data: Vec<u8>,
@@ -99,6 +138,10 @@ impl<'a> Future for ReceiveRecord<'a> {
                     fragment: fragment,
                     raw: raw,
                 };
+
+                assert!(self.incoming_data.len() == 5 + (length as usize));
+                self.incoming_data.truncate(0);
+
                 return Poll::Ready(Ok(record));
             }
             want = 5 + length;
@@ -141,41 +184,108 @@ impl<'a> Future for ReceiveRecord<'a> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                //
+//                                      ReceiveRecordIgnoreCC                                     //
+//                                                                                                //
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub fn encrypt_record(
-    to_send: &mut BytesMut,
-    data_ref: &[u8],
-    content_type: ContentType,
-    traffic_secret: &EncryptionKey,
-    client_sequence_no: u64,
-    transcript: Option<&mut Vec<u8>>,
-) -> Result<(), TLSError> {
-    let mut data = data_ref.to_vec();
+pub struct ReceiveRecordIgnoreCC<'a> {
+    inner: ReceiveRecord<'a>,
+}
 
-    match transcript {
-        Some(transcript) => transcript.extend_from_slice(&data),
-        None => (),
+impl<'a> ReceiveRecordIgnoreCC<'a> {
+    pub fn new(reader: &'a mut Box<dyn AsyncReadWrite>) -> ReceiveRecordIgnoreCC<'a> {
+        ReceiveRecordIgnoreCC {
+            inner: ReceiveRecord::new(reader)
+        }
     }
-    data.push(content_type.to_raw());
-    encrypt_traffic(
-        traffic_secret,
-        client_sequence_no,
-        &mut data)?;
+}
 
-    let output_record = TLSOutputPlaintext {
-        content_type: ContentType::ApplicationData,
-        legacy_record_version: 0x0303,
-        fragment: &data,
-    };
-    output_record.encode(to_send);
-    Ok(())
+impl<'a> Future for ReceiveRecordIgnoreCC<'a> {
+    type Output = Result<TLSOwnedPlaintext, Box<dyn Error>>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            match Pin::new(&mut self.inner).poll(cx) {
+                Poll::Ready(Ok(record)) => {
+                    if record.content_type != ContentType::ChangeCipherSpec {
+                        return Poll::Ready(Ok(record));
+                    }
+                }
+                Poll::Ready(Err(e)) => {
+                    return Poll::Ready(Err(e));
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                //
+//                                     ReceiveEncryptedMessage                                    //
+//                                                                                                //
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin {}
+pub struct ReceiveEncryptedMessage<'a, 'b> {
+    rric: ReceiveRecordIgnoreCC<'a>,
+    server_sequence_no: &'a mut u64,
+    encryption: &'a AEncryption,
+    transcript: Option<&'b mut Vec<u8>>
+}
 
-impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin {}
+impl ReceiveEncryptedMessage<'_, '_> {
+    pub fn new<'a, 'b>(
+        inner: &'a mut Box<dyn AsyncReadWrite>,
+        server_sequence_no: &'a mut u64,
+        encryption: &'a AEncryption,
+        transcript: Option<&'b mut Vec<u8>>,
+    ) -> ReceiveEncryptedMessage<'a, 'b> {
+        ReceiveEncryptedMessage {
+            rric: ReceiveRecordIgnoreCC::new(inner),
+            server_sequence_no,
+            encryption,
+            transcript,
+        }
+    }
+}
+
+impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
+    type Output = Result<Message, Box<dyn Error>>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match Pin::new(&mut self.rric).poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Ready(Ok(plaintext)) => {
+
+                println!("ReceiveEncryptedMessage: plaintext.raw.len() = {}, server_sequence_no =  {}",
+                    plaintext.raw.len(), self.server_sequence_no);
+                // TODO: Support records containing multiple handshake messages
+                // TODO: Cater for alerts
+                let (message, message_raw) = decrypt_message(
+                    *self.server_sequence_no,
+                    &self.encryption.traffic_secrets.server,
+                    &plaintext.raw)?;
+                println!("ReceiveEncryptedMessage: after decryption; message = {}",
+                         message.name());
+                *self.server_sequence_no += 1;
+                match &mut self.transcript {
+                    Some(transcript) => transcript.extend_from_slice(&message_raw),
+                    None => (),
+                };
+                Poll::Ready(Ok(message))
+
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                //
+//                                         EncryptedStream                                        //
+//                                                                                                //
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub struct EncryptedStream {
     pub inner: Box<dyn AsyncReadWrite>,
@@ -225,47 +335,18 @@ impl EncryptedStream {
         ReceiveRecord::new(&mut self.inner)
     }
 
-    pub async fn receive_record_ignore_cc(
-        &mut self,
-    ) -> Option<Result<TLSOwnedPlaintext, Box<dyn Error>>> {
-        loop {
-            match self.receive_record().await {
-                Ok(record) => {
-                    if record.content_type != ContentType::ChangeCipherSpec {
-                        return Some(Ok(record));
-                    }
-                }
-                Err(e) => {
-                    return Some(Err(e));
-                },
-            }
-        }
+    pub fn receive_record_ignore_cc(&mut self) -> ReceiveRecordIgnoreCC {
+        ReceiveRecordIgnoreCC::new(&mut self.inner)
     }
 
-    pub async fn receive_message(
-        &mut self,
-        transcript: Option<&mut Vec<u8>>,
-    ) -> Result<Message, Box<dyn Error>> {
-        let plaintext = match self.receive_record_ignore_cc().await {
-            Some(Ok(v)) => v,
-            Some(Err(e)) => return Err(e),
-            None => return Err(error!("No more messages")),
-        };
-        println!("receive_message_framed: plaintext.raw.len() = {}, server_sequence_no =  {}",
-            plaintext.raw.len(), self.server_sequence_no);
-        // TODO: Support records containing multiple handshake messages
-        // TODO: Cater for alerts
-        let (message, message_raw) = decrypt_message(
-            self.server_sequence_no,
-            &self.encryption.traffic_secrets.server,
-            &plaintext.raw)?;
-        println!("receive_message_framed: after decryption");
-        self.server_sequence_no += 1;
-        match transcript {
-            Some(transcript) => transcript.extend_from_slice(&message_raw),
-            None => (),
-        }
-
-        Ok(message)
+    pub fn receive_message<'a, 'b>(
+        &'a mut self,
+        transcript: Option<&'b mut Vec<u8>>,
+    ) -> ReceiveEncryptedMessage<'a, 'b> {
+        ReceiveEncryptedMessage::new(
+            &mut self.inner,
+            &mut self.server_sequence_no,
+            &self.encryption,
+            transcript)
     }
 }
