@@ -208,10 +208,9 @@ fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
     })
 }
 
-async fn test_echo<T>(
-    aconn: &mut EstablishedConnection<T>,
+async fn test_echo(
+    aconn: &mut EstablishedConnection,
 ) -> Result<(), Box<dyn Error>>
-    where T : AsyncRead + AsyncWrite + Unpin
 {
     let parts: &[&[u8]] = &[
         b"The primary goal of TLS is to provide a secure channel between two \
@@ -252,10 +251,9 @@ async fn test_echo<T>(
     Ok(())
 }
 
-async fn test_http<T>(
-    aconn: &mut EstablishedConnection<T>,
+async fn test_http(
+    aconn: &mut EstablishedConnection,
 ) -> Result<(), Box<dyn Error>>
-    where T : AsyncRead + AsyncWrite + Unpin
 {
     aconn.write_normal(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
     loop {
@@ -278,7 +276,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
 
     let mut socket = TcpStream::connect("localhost:443").await?;
 
-    let mut conn = establish_connection(config, socket, &handshake, private_key).await?;
+    let mut conn = establish_connection(config, Box::new(socket), &handshake, private_key).await?;
 
     test_http(&mut conn).await?;
     // test_echo(&mut conn).await?;

@@ -10,11 +10,17 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
-use tokio_util::codec::{Encoder, Decoder, Framed};
 use futures::stream::StreamExt;
 use futures::sink::SinkExt;
 use bytes::{BytesMut, Buf};
 use ring::agreement::EphemeralPrivateKey;
+use super::stream::{
+    AEncryption,
+    ReceiveRecord,
+    encrypt_record,
+    EncryptedStream,
+    AsyncReadWrite,
+};
 use super::super::helpers::{
     EncryptionKey,
     Ciphers,
@@ -83,37 +89,6 @@ pub struct ClientConfig {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-fn encrypt_record(
-    to_send: &mut BytesMut,
-    data_ref: &[u8],
-    content_type: ContentType,
-    traffic_secret: &EncryptionKey,
-    client_sequence_no: u64,
-    transcript: Option<&mut Vec<u8>>,
-) -> Result<(), TLSError> {
-    let mut data = data_ref.to_vec();
-
-    match transcript {
-        Some(transcript) => transcript.extend_from_slice(&data),
-        None => (),
-    }
-    data.push(content_type.to_raw());
-    encrypt_traffic(
-        traffic_secret,
-        client_sequence_no,
-        &mut data)?;
-
-    let output_record = TLSOutputPlaintext {
-        content_type: ContentType::ApplicationData,
-        legacy_record_version: 0x0303,
-        fragment: &data,
-    };
-    output_record.encode(to_send);
-    Ok(())
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
 enum Endpoint {
     Client,
     Server,
@@ -122,15 +97,15 @@ enum Endpoint {
 async fn send_finished(
     hash_alg: HashAlgorithm,
     new_transcript_hash: &[u8],
-    framed: &mut Framed<impl AsyncWrite + Unpin, RecordDecoder>,
+    stream: &mut EncryptedStream,
 ) -> Result<(), Box<dyn Error>> {
     let finished_key = derive_secret(
         hash_alg,
-        &framed.codec().encryption.traffic_secrets.client.raw,
+        &stream.encryption.traffic_secrets.client.raw,
         b"finished", &[])?;
     let verify_data = hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
     let client_finished = Handshake::Finished(Finished { verify_data });
-    send_handshake(&client_finished, None, framed).await?;
+    send_handshake(&client_finished, None, stream).await?;
     Ok(())
 }
 
@@ -141,7 +116,7 @@ async fn send_client_certificate(
     client_key_data: &[u8],
     signature_scheme: SignatureScheme,
     rng: &dyn ring::rand::SecureRandom,
-    framed: &mut Framed<impl AsyncWrite + Unpin, RecordDecoder>,
+    stream: &mut EncryptedStream,
 ) -> Result<(), Box<dyn Error>> {
     let client_cert = x509::Certificate::from_bytes(client_cert_data)?;
     let handshake = Handshake::Certificate(Certificate {
@@ -157,7 +132,7 @@ async fn send_client_certificate(
 
 
     println!("old transcript len = {}", transcript.len());
-    send_handshake(&handshake, Some(transcript), framed).await?;
+    send_handshake(&handshake, Some(transcript), stream).await?;
     println!("new transcript len = {}", transcript.len());
 
     let thash: Vec<u8> = hash_alg.hash(transcript);
@@ -171,7 +146,7 @@ async fn send_client_certificate(
         algorithm: signature_scheme,
         signature: signature,
     });
-    send_handshake(&handshake, Some(transcript), framed).await?;
+    send_handshake(&handshake, Some(transcript), stream).await?;
 
     Ok(())
 }
@@ -179,7 +154,7 @@ async fn send_client_certificate(
 async fn send_handshake(
     handshake: &Handshake,
     transcript: Option<&mut Vec<u8>>,
-    framed: &mut Framed<impl AsyncWrite + Unpin, RecordDecoder>,
+    stream: &mut EncryptedStream,
 ) -> Result<(), Box<dyn Error>> {
     let mut conn_to_send = BytesMut::new();
 
@@ -191,13 +166,13 @@ async fn send_handshake(
         &mut conn_to_send,
         &finished_bytes,         // to_encrypt
         ContentType::Handshake, // content_type
-        &framed.codec().encryption.traffic_secrets.client,        // traffic_secret
-        framed.codec().client_sequence_no, // sequence_no
+        &stream.encryption.traffic_secrets.client,        // traffic_secret
+        stream.client_sequence_no, // sequence_no
         transcript,
     )?;
 
-    framed.codec_mut().client_sequence_no += 1;
-    framed.send(&EncryptedToSend { data: &conn_to_send }).await?;
+    stream.client_sequence_no += 1;
+    stream.send_direct(&conn_to_send).await?;
 
     Ok(())
 }
@@ -277,273 +252,12 @@ fn verify_transcript(
     )
 }
 
-struct RecordDecoder {
-    client_sequence_no: u64,
-    server_sequence_no: u64,
-    encryption: AEncryption,
-}
-
-impl RecordDecoder {
-    fn new(encryption: AEncryption) -> Self {
-        RecordDecoder {
-            client_sequence_no: 0,
-            server_sequence_no: 0,
-            encryption,
-        }
-    }
-}
-
-impl Encoder<&EncryptedToSend<'_>> for RecordDecoder {
-    type Error = Box<dyn Error>;
-
-    fn encode(&mut self, item: &EncryptedToSend, dst: &mut BytesMut) -> Result<(), Box<dyn Error>> {
-        dst.extend_from_slice(&item.data);
-        Ok(())
-    }
-}
-
-impl Encoder<&UnencToSend<'_>> for RecordDecoder {
-    type Error = Box<dyn Error>;
-
-    fn encode(&mut self, item: &UnencToSend, dst: &mut BytesMut) -> Result<(), Box<dyn Error>> {
-        encrypt_record(
-            dst,
-            &item.data,
-            item.content_type,
-            &self.encryption.traffic_secrets.client,
-            self.client_sequence_no,
-            None,
-        )?;
-        self.client_sequence_no += 1;
-        Ok(())
-    }
-}
-
-impl Decoder for RecordDecoder {
-    type Item = TLSOwnedPlaintext;
-    type Error = Box<dyn Error>;
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<TLSOwnedPlaintext>, Box<dyn Error>> {
-        if src.len() < 5 {
-            return Ok(None);
-        }
-
-        let content_type = ContentType::from_raw(src[0]);
-
-        let mut legacy_record_version_bytes: [u8; 2] = Default::default();
-        legacy_record_version_bytes.copy_from_slice(&src[1..3]);
-        let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
-
-        let mut length_bytes: [u8; 2] = Default::default();
-        length_bytes.copy_from_slice(&src[3..5]);
-        let length = u16::from_be_bytes(length_bytes) as usize;
-
-        if length > TLS_RECORD_SIZE {
-            return Err(TLSPlaintextError::InvalidLength.into());
-        }
-        // println!("Attempting to decode fragment of len {}", length);
-
-        let total_length = 5 + length;
-        if src.len() >= total_length {
-            // println!("src.len() >= total_length");
-            println!("RecordDecoder: Parsing fragment of len {}; content_type = {:?}",
-                     length, content_type);
-
-
-            let mut header: [u8; 5] = [
-                src[0],
-                src[1],
-                src[2],
-                src[3],
-                src[4],
-            ];
-
-            let mut fragment: Vec<u8> = Vec::new();
-            fragment.extend_from_slice(&src[5..total_length]);
-
-            let mut raw: Vec<u8> = Vec::new();
-            raw.extend_from_slice(&src[0..total_length]);
-            src.advance(total_length);
-
-            let record = TLSOwnedPlaintext {
-                content_type,
-                legacy_record_version,
-                header: header,
-                fragment: fragment,
-                raw: raw,
-            };
-            return Ok(Some(record));
-        }
-        else {
-            println!("src.len() < total_length");
-        }
-
-        src.reserve(total_length - src.len());
-
-        return Ok(None)
-    }
-}
-
-pub struct ReceiveRecord<'a, T : AsyncRead + Unpin> {
-    reader: &'a mut T,
-    incoming_data: Vec<u8>,
-}
-
-impl<'a, T : AsyncRead + Unpin> ReceiveRecord<'a, T> {
-    fn new(reader: &'a mut T) -> ReceiveRecord<'a, T> {
-        ReceiveRecord {
-            reader: reader,
-            incoming_data: Vec::new(),
-        }
-    }
-}
-
-impl<'a, T : AsyncRead + Unpin> Future for ReceiveRecord<'a, T> {
-    type Output = Result<TLSOwnedPlaintext, Box<dyn Error>>;
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut want: usize = 5;
-        if self.incoming_data.len() >= 5 {
-            let content_type = ContentType::from_raw(self.incoming_data[0]);
-
-            let mut legacy_record_version_bytes: [u8; 2] = Default::default();
-            legacy_record_version_bytes.copy_from_slice(&self.incoming_data[1..3]);
-            let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
-
-
-            let mut length_bytes: [u8; 2] = Default::default();
-            length_bytes.copy_from_slice(&self.incoming_data[3..5]);
-            let length = u16::from_be_bytes(length_bytes) as usize;
-
-            if length > TLS_RECORD_SIZE {
-                return Poll::Ready(Err(TLSPlaintextError::InvalidLength.into()));
-            }
-
-
-            if self.incoming_data.len() >= 5 + length {
-                println!("ReceiveRecord: Parsing fragment of len {}; content_type = {:?}",
-                         length, content_type);
-                let mut header: [u8; 5] = [
-                    self.incoming_data[0],
-                    self.incoming_data[1],
-                    self.incoming_data[2],
-                    self.incoming_data[3],
-                    self.incoming_data[4],
-                ];
-
-                let mut fragment: Vec<u8> = Vec::new();
-                fragment.extend_from_slice(&self.incoming_data[5..]);
-
-                let mut raw: Vec<u8> = Vec::new();
-                raw.extend_from_slice(&self.incoming_data);
-
-                println!("ReceiveRecord: raw.len() = {}", raw.len());
-                let record = TLSOwnedPlaintext {
-                    content_type,
-                    legacy_record_version,
-                    header: header,
-                    fragment: fragment,
-                    raw: raw,
-                };
-                return Poll::Ready(Ok(record));
-            }
-            want = 5 + length;
-        }
-
-        let amt = want - self.incoming_data.len();
-        let mut recv_data = vec_with_len(amt);
-        let mut recv_buf = ReadBuf::new(&mut recv_data);
-        let old_filled = recv_buf.filled().len();
-
-        match AsyncRead::poll_read(Pin::new(&mut self.reader), cx, &mut recv_buf) {
-            Poll::Ready(Err(e)) => {
-                // println!("ReceiveRecord::poll(): inner returned error");
-                Poll::Ready(Err(e.into()))
-            }
-            Poll::Ready(Ok(())) => {
-                // println!("ReceiveRecord::poll(): inner is ready");
-                let new_filled = recv_buf.filled().len();
-                // println!("data = {}", &BinaryData(recv_buf.filled()));
-                let extra = new_filled - old_filled;
-                // TODO: if extra is 0, either we have unexpected end of data or the connection
-                // has been closed. RecordReceiver should actually return Option<Record> so that
-                // it can use None to indicate there are no more records.
-                // println!("# of bytes read = {}", extra);
-                // self.ok_done()
-                self.incoming_data.extend_from_slice(recv_buf.filled());
-
-                // println!("want = {}, have = {}", want, self.incoming_data.len());
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Poll::Pending => {
-                println!("ReceiveRecord::poll(): inner is not ready");
-                Poll::Pending
-            }
-        }
-        // let x: () = self.reader.read(&mut self.buf);
-        // unimplemented!()
-    }
-}
-
-pub struct AEncryption {
-    traffic_secrets: TrafficSecrets,
-    ciphers: Ciphers,
-}
-
-async fn receive_record_framed_ignore_cc(
-    framed: &mut Framed<impl AsyncRead + Unpin, RecordDecoder>,
-) -> Option<Result<TLSOwnedPlaintext, Box<dyn Error>>> {
-    loop {
-        match framed.next().await {
-            Some(Ok(record)) => {
-                if record.content_type != ContentType::ChangeCipherSpec {
-                    return Some(Ok(record));
-                }
-            }
-            Some(Err(e)) => {
-                return Some(Err(e));
-            }
-            None => {
-                return None;
-            }
-        }
-    }
-}
-
-async fn receive_message_framed(
-    framed: &mut Framed<impl AsyncRead + Unpin, RecordDecoder>,
-    transcript: Option<&mut Vec<u8>>,
-) -> Result<Message, Box<dyn Error>> {
-    let plaintext = match receive_record_framed_ignore_cc(framed).await {
-        Some(Ok(v)) => v,
-        Some(Err(e)) => return Err(e),
-        None => return Err(error!("No more messages")),
-    };
-    println!("receive_message_framed: plaintext.raw.len() = {}, server_sequence_no =  {}",
-        plaintext.raw.len(), framed.codec().server_sequence_no);
-    // TODO: Support records containing multiple handshake messages
-    // TODO: Cater for alerts
-    let (message, message_raw) = decrypt_message(
-        framed.codec().server_sequence_no,
-        &framed.codec().encryption.traffic_secrets.server,
-        &plaintext.raw)?;
-    println!("receive_message_framed: after decryption");
-    framed.codec_mut().server_sequence_no += 1;
-    match transcript {
-        Some(transcript) => transcript.extend_from_slice(&message_raw),
-        None => (),
-    }
-
-    Ok(message)
-}
-
-fn receive_record<'a, T : AsyncRead + Unpin>(
-    reader: &'a mut T,
-) -> ReceiveRecord<'a, T> {
+fn receive_record(reader: &mut Box<dyn AsyncReadWrite>) -> ReceiveRecord {
     ReceiveRecord::new(reader)
 }
 
 async fn receive_record_ignore_cc(
-    reader: &mut (impl AsyncRead + Unpin),
+    reader: &mut Box<dyn AsyncReadWrite>,
 ) -> Result<TLSOwnedPlaintext, Box<dyn Error>> {
     loop {
         let record = receive_record(reader).await?;
@@ -569,11 +283,11 @@ impl EncryptedHandshake {
         }
     }
 
-    async fn receive_handshake_framed(
+    async fn receive_handshake_est(
         &mut self,
-        framed: &mut Framed<impl AsyncRead + Unpin, RecordDecoder>,
+        stream: &mut EncryptedStream,
     ) -> Result<Handshake, Box<dyn Error>> {
-        let message = receive_message_framed(framed, Some(&mut self.transcript)).await?;
+        let message = stream.receive_message(Some(&mut self.transcript)).await?;
         match message {
             Message::Handshake(hs) => {
                 Ok(hs)
@@ -588,7 +302,7 @@ impl EncryptedHandshake {
 }
 
 async fn receive_plaintext_message(
-    reader: &mut (impl AsyncRead + Unpin),
+    reader: &mut Box<dyn AsyncReadWrite>,
     transcript: &mut Vec<u8>,
 ) -> Result<Message, Box<dyn Error>> {
     let plaintext = receive_record_ignore_cc(reader).await?;
@@ -599,7 +313,7 @@ async fn receive_plaintext_message(
 }
 
 async fn receive_plaintext_handshake(
-    reader: &mut (impl AsyncRead + Unpin),
+    reader: &mut Box<dyn AsyncReadWrite>,
     transcript: &mut Vec<u8>,
 ) -> Result<Handshake, Box<dyn Error>> {
     let message = receive_plaintext_message(reader, transcript).await?;
@@ -610,7 +324,7 @@ async fn receive_plaintext_handshake(
 }
 
 async fn receive_server_hello(
-    reader: &mut (impl AsyncRead + Unpin),
+    reader: &mut Box<dyn AsyncReadWrite>,
     transcript: &mut Vec<u8>,
 ) -> Result<ServerHello, Box<dyn Error>> {
     let handshake = receive_plaintext_handshake(reader, transcript).await?;
@@ -642,13 +356,12 @@ async fn write_plaintext_handshake(
     Ok(())
 }
 
-pub async fn establish_connection<T>(
+pub async fn establish_connection(
     config: ClientConfig,
-    mut stream: T,
+    mut stream: Box<dyn AsyncReadWrite>,
     client_hello: &Handshake,
     private_key: EphemeralPrivateKey,
-) -> Result<EstablishedConnection<T>, Box<dyn Error>>
-    where T : AsyncRead + AsyncWrite + Unpin
+) -> Result<EstablishedConnection, Box<dyn Error>>
 {
     let mut initial_transcript: Vec<u8> = Vec::new();
     write_plaintext_handshake(&mut stream, client_hello, &mut initial_transcript).await?;
@@ -663,19 +376,20 @@ pub async fn establish_connection<T>(
     };
 
     let mut conn = EncryptedHandshake::new(config, initial_transcript);
-    let mut framed = Framed::new(stream, RecordDecoder::new(encryption));
-    let sm = receive_server_messages(&mut conn, &mut framed).await?;
-    let p2 = do_phase_two(&mut conn, &prk, &sm, &mut framed).await?;
+    // let mut framed = Framed::new(stream, RecordDecoder::new(encryption));
+    let mut enc_stream = EncryptedStream::new(stream, encryption);
+    let sm = receive_server_messages(&mut conn, &mut enc_stream).await?;
+    let p2 = do_phase_two(&mut conn, &prk, &sm, &mut enc_stream).await?;
 
 
-    framed.codec_mut().client_sequence_no = 0;
-    framed.codec_mut().server_sequence_no = 0;
-    framed.codec_mut().encryption = p2;
+    enc_stream.client_sequence_no = 0;
+    enc_stream.server_sequence_no = 0;
+    enc_stream.encryption = p2;
 
-    println!("After  send_finished()");
+    // println!("After  send_finished()");
 
     Ok(EstablishedConnection {
-        framed: framed,
+        stream: enc_stream,
     })
 }
 
@@ -716,42 +430,42 @@ struct ServerMessages {
 
 async fn receive_server_messages(
     conn: &mut EncryptedHandshake,
-    framed: &mut Framed<impl AsyncRead + Unpin, RecordDecoder>,
+    stream: &mut EncryptedStream,
 ) -> Result<ServerMessages, Box<dyn Error>> {
     // TODO: Allow some of these to be absent depending on the config
-    let handshake = conn.receive_handshake_framed(framed).await?;
+    let handshake = conn.receive_handshake_est(stream).await?;
     let encrypted_extensions = match handshake {
         Handshake::EncryptedExtensions(v) => v,
         _ => return Err(error!("Expected EncryptedExtensions, got {}", handshake.name())),
     };
     println!("Phase two: Got encrypted_extensions");
 
-    let handshake = conn.receive_handshake_framed(framed).await?;
+    let handshake = conn.receive_handshake_est(stream).await?;
     let certificate_request = match handshake {
         Handshake::CertificateRequest(v) => Some(v),
         _ => return Err(error!("Expected CertificateRequest, got {}", handshake.name())),
     };
     println!("Phase two: Got certificate_request");
 
-    let handshake = conn.receive_handshake_framed(framed).await?;
+    let handshake = conn.receive_handshake_est(stream).await?;
     let certificate = match handshake {
         Handshake::Certificate(v) => Some(v),
         _ => return Err(error!("Expected Certificate, got {}", handshake.name())),
     };
 
     println!("Phase two: Got certificate");
-    let certificate_verify_thash = framed.codec().encryption.ciphers.hash_alg.hash(&conn.transcript);
+    let certificate_verify_thash = stream.encryption.ciphers.hash_alg.hash(&conn.transcript);
 
-    let handshake = conn.receive_handshake_framed(framed).await?;
+    let handshake = conn.receive_handshake_est(stream).await?;
     let certificate_verify = match handshake {
         Handshake::CertificateVerify(v) => Some((v, certificate_verify_thash)),
         _ => return Err(error!("Expected CertificateVerify, got {}", handshake.name())),
     };
 
     println!("Phase two: Got certificate_verify");
-    let finished_thash = framed.codec().encryption.ciphers.hash_alg.hash(&conn.transcript);
+    let finished_thash = stream.encryption.ciphers.hash_alg.hash(&conn.transcript);
 
-    let handshake = conn.receive_handshake_framed(framed).await?;
+    let handshake = conn.receive_handshake_est(stream).await?;
     let finished = match handshake {
         Handshake::Finished(v) => (v, finished_thash),
         _ => return Err(error!("Expected Finished, got {}", handshake.name())),
@@ -772,12 +486,12 @@ async fn do_phase_two(
     conn: &mut EncryptedHandshake,
     prk: &[u8],
     sm: &ServerMessages,
-    framed: &mut Framed<impl AsyncWrite + Unpin, RecordDecoder>,
+    stream: &mut EncryptedStream,
 ) -> Result<AEncryption, Box<dyn Error>> {
-    let ciphers_copy = framed.codec().encryption.ciphers.clone();
+    let ciphers_copy = stream.encryption.ciphers.clone();
     let secrets_copy = TrafficSecrets {
-        client: framed.codec().encryption.traffic_secrets.client.clone(),
-        server: framed.codec().encryption.traffic_secrets.server.clone(),
+        client: stream.encryption.traffic_secrets.client.clone(),
+        server: stream.encryption.traffic_secrets.server.clone(),
     };
 
 
@@ -859,7 +573,7 @@ async fn do_phase_two(
                 client_key, // client_key_data: &[u8],
                 SignatureScheme::RsaPssRsaeSha256, // signature_scheme: SignatureScheme,
                 &rng,
-                framed,
+                stream,
             ).await?;
 
             println!("After  send_client_certificate()");
@@ -876,7 +590,7 @@ async fn do_phase_two(
     send_finished(
         ciphers.hash_alg,
         &new_thash,
-        framed).await?;
+        stream).await?;
 
     Ok(AEncryption {
         traffic_secrets: application_secrets,
@@ -884,31 +598,19 @@ async fn do_phase_two(
     })
 }
 
-pub struct EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
-    framed: Framed<T, RecordDecoder>,
+pub struct EstablishedConnection {
+    stream: EncryptedStream,
 }
 
-struct UnencToSend<'a> {
-    data: &'a [u8],
-    content_type: ContentType,
-}
-
-struct EncryptedToSend<'a> {
-    data: &'a [u8],
-}
-
-impl<T> EstablishedConnection<T> where T : AsyncRead + AsyncWrite + Unpin {
+impl EstablishedConnection {
     pub async fn write_normal(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
-        self.framed.send(&UnencToSend {
-            data: data,
-            content_type: ContentType::ApplicationData,
-        }).await?;
+        self.stream.encrypt_and_send(data, ContentType::ApplicationData).await?;
         Ok(())
     }
 
     pub async fn read_normal(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
         loop {
-            let message = receive_message_framed(&mut self.framed, None).await?;
+            let message = self.stream.receive_message(None).await?;
 
             match message {
                 Message::Handshake(Handshake::NewSessionTicket(ticket)) => {

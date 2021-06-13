@@ -188,11 +188,10 @@ async fn write_multistream_data(writer: &mut (impl AsyncWrite + Unpin), data: &[
     Ok(())
 }
 
-async fn write_multistream_data_client<T>(
-    conn: &mut EstablishedConnection<T>,
+async fn write_multistream_data_client(
+    conn: &mut EstablishedConnection,
     data: &[u8],
 ) -> Result<(), Box<dyn Error>>
-    where T : AsyncRead + AsyncWrite + Unpin
 {
     let len_bytes = VarInt::encode_usize(data.len());
     let mut buf: Vec<u8> = Vec::new();
@@ -584,7 +583,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let handshake = Handshake::ClientHello(client_hello);
 
     println!("Before establish_connection()");
-    let mut conn = establish_connection(config, socket, &handshake, private_key).await?;
+    let mut conn = establish_connection(config, Box::new(socket), &handshake, private_key).await?;
     println!("After establish_connection()");
 
     let data = conn.read_normal().await?;
