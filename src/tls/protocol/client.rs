@@ -16,8 +16,8 @@ use bytes::{BytesMut, Buf};
 use ring::agreement::EphemeralPrivateKey;
 use super::stream::{
     AEncryption,
-    ReceiveRecord,
     encrypt_record,
+    PlaintextStream,
     EncryptedStream,
     AsyncReadWrite,
 };
@@ -252,27 +252,6 @@ fn verify_transcript(
     )
 }
 
-fn receive_record(reader: &mut Box<dyn AsyncReadWrite>) -> ReceiveRecord {
-    ReceiveRecord::new(reader)
-}
-
-async fn receive_record_ignore_cc(
-    reader: &mut Box<dyn AsyncReadWrite>,
-) -> Result<Option<TLSOwnedPlaintext>, Box<dyn Error>> {
-    loop {
-        match receive_record(reader).await? {
-            Some(record) => {
-                if record.content_type != ContentType::ChangeCipherSpec {
-                    return Ok(Some(record));
-                }
-            }
-            None => {
-                return Ok(None);
-            }
-        }
-    }
-}
-
 pub struct EncryptedHandshake {
     transcript: Vec<u8>,
     config: ClientConfig,
@@ -302,28 +281,11 @@ impl EncryptedHandshake {
 
 }
 
-async fn receive_plaintext_message(
-    reader: &mut Box<dyn AsyncReadWrite>,
-    transcript: &mut Vec<u8>,
-) -> Result<Option<Message>, Box<dyn Error>> {
-    match receive_record_ignore_cc(reader).await? {
-        Some(plaintext) => {
-            // TODO: Support records containing multiple handshake messages
-            transcript.extend_from_slice(&plaintext.fragment);
-            let message = Message::from_raw(&plaintext.fragment, plaintext.content_type)?;
-            Ok(Some(message))
-        }
-        None => {
-            Ok(None)
-        }
-    }
-}
-
 async fn receive_plaintext_handshake(
-    reader: &mut Box<dyn AsyncReadWrite>,
+    stream: &mut PlaintextStream,
     transcript: &mut Vec<u8>,
 ) -> Result<Option<Handshake>, Box<dyn Error>> {
-    match receive_plaintext_message(reader, transcript).await? {
+    match stream.receive_plaintext_message(transcript).await? {
         Some(Message::Handshake(hs)) => Ok(Some(hs)),
         Some(message) => Err(error!("Expected a handshake, got {:?}", message.content_type())),
         None => Err(error!("Expected a handshake, got EOF")),
@@ -331,10 +293,10 @@ async fn receive_plaintext_handshake(
 }
 
 async fn receive_server_hello(
-    reader: &mut Box<dyn AsyncReadWrite>,
+    stream: &mut PlaintextStream,
     transcript: &mut Vec<u8>,
 ) -> Result<ServerHello, Box<dyn Error>> {
-    let handshake = receive_plaintext_handshake(reader, transcript).await?;
+    let handshake = receive_plaintext_handshake(stream, transcript).await?;
     match handshake {
         Some(Handshake::ServerHello(v)) => Ok(v),
         Some(handshake) => Err(error!("Expected ServerHello, got {}", handshake.name())),
@@ -372,8 +334,9 @@ pub async fn establish_connection(
 ) -> Result<EstablishedConnection, Box<dyn Error>>
 {
     let mut initial_transcript: Vec<u8> = Vec::new();
-    write_plaintext_handshake(&mut stream, client_hello, &mut initial_transcript).await?;
-    let server_hello = receive_server_hello(&mut stream, &mut initial_transcript).await?;
+    let mut plaintext_stream = PlaintextStream::new(stream, BytesMut::new());
+    write_plaintext_handshake(&mut plaintext_stream.inner, client_hello, &mut initial_transcript).await?;
+    let server_hello = receive_server_hello(&mut plaintext_stream, &mut initial_transcript).await?;
 
     let henc = get_handshake_encryption(&initial_transcript, &server_hello, private_key)?;
     let prk = henc.prk;
@@ -384,17 +347,14 @@ pub async fn establish_connection(
     };
 
     let mut conn = EncryptedHandshake::new(config, initial_transcript);
-    // let mut framed = Framed::new(stream, RecordDecoder::new(encryption));
-    let mut enc_stream = EncryptedStream::new(stream, encryption);
+    let mut enc_stream = EncryptedStream::new(
+        plaintext_stream.inner, plaintext_stream.incoming_data, encryption);
     let sm = receive_server_messages(&mut conn, &mut enc_stream).await?;
     let p2 = do_phase_two(&mut conn, &prk, &sm, &mut enc_stream).await?;
-
 
     enc_stream.client_sequence_no = 0;
     enc_stream.server_sequence_no = 0;
     enc_stream.encryption = p2;
-
-    // println!("After  send_finished()");
 
     Ok(EstablishedConnection {
         stream: enc_stream,
