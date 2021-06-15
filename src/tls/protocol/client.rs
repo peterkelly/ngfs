@@ -258,11 +258,17 @@ fn receive_record(reader: &mut Box<dyn AsyncReadWrite>) -> ReceiveRecord {
 
 async fn receive_record_ignore_cc(
     reader: &mut Box<dyn AsyncReadWrite>,
-) -> Result<TLSOwnedPlaintext, Box<dyn Error>> {
+) -> Result<Option<TLSOwnedPlaintext>, Box<dyn Error>> {
     loop {
-        let record = receive_record(reader).await?;
-        if record.content_type != ContentType::ChangeCipherSpec {
-            return Ok(record)
+        match receive_record(reader).await? {
+            Some(record) => {
+                if record.content_type != ContentType::ChangeCipherSpec {
+                    return Ok(Some(record));
+                }
+            }
+            None => {
+                return Ok(None);
+            }
         }
     }
 }
@@ -287,15 +293,10 @@ impl EncryptedHandshake {
         &mut self,
         stream: &mut EncryptedStream,
     ) -> Result<Handshake, Box<dyn Error>> {
-        let message = stream.receive_message(Some(&mut self.transcript)).await?;
-        match message {
-            Message::Handshake(hs) => {
-                Ok(hs)
-            }
-            _ => {
-                Err(error!("Expected a handshake, got {:?}",
-                    message.content_type()))
-            }
+        match stream.receive_message(Some(&mut self.transcript)).await? {
+            Some(Message::Handshake(hs)) => Ok(hs),
+            Some(message) => Err(error!("Expected a handshake, got {:?}", message.content_type())),
+            None => Err(error!("Expected a handshake, got EOF")),
         }
     }
 
@@ -304,22 +305,28 @@ impl EncryptedHandshake {
 async fn receive_plaintext_message(
     reader: &mut Box<dyn AsyncReadWrite>,
     transcript: &mut Vec<u8>,
-) -> Result<Message, Box<dyn Error>> {
-    let plaintext = receive_record_ignore_cc(reader).await?;
-    // TODO: Support records containing multiple handshake messages
-    transcript.extend_from_slice(&plaintext.fragment);
-    let message = Message::from_raw(&plaintext.fragment, plaintext.content_type)?;
-    Ok(message)
+) -> Result<Option<Message>, Box<dyn Error>> {
+    match receive_record_ignore_cc(reader).await? {
+        Some(plaintext) => {
+            // TODO: Support records containing multiple handshake messages
+            transcript.extend_from_slice(&plaintext.fragment);
+            let message = Message::from_raw(&plaintext.fragment, plaintext.content_type)?;
+            Ok(Some(message))
+        }
+        None => {
+            Ok(None)
+        }
+    }
 }
 
 async fn receive_plaintext_handshake(
     reader: &mut Box<dyn AsyncReadWrite>,
     transcript: &mut Vec<u8>,
-) -> Result<Handshake, Box<dyn Error>> {
-    let message = receive_plaintext_message(reader, transcript).await?;
-    match message {
-        Message::Handshake(hs) => Ok(hs),
-        _ => Err(error!("Expected a handshake, got {:?}", message.content_type())),
+) -> Result<Option<Handshake>, Box<dyn Error>> {
+    match receive_plaintext_message(reader, transcript).await? {
+        Some(Message::Handshake(hs)) => Ok(Some(hs)),
+        Some(message) => Err(error!("Expected a handshake, got {:?}", message.content_type())),
+        None => Err(error!("Expected a handshake, got EOF")),
     }
 }
 
@@ -329,8 +336,9 @@ async fn receive_server_hello(
 ) -> Result<ServerHello, Box<dyn Error>> {
     let handshake = receive_plaintext_handshake(reader, transcript).await?;
     match handshake {
-        Handshake::ServerHello(v) => Ok(v),
-        _ => Err(error!("Expected ServerHello, got {}", handshake.name()))
+        Some(Handshake::ServerHello(v)) => Ok(v),
+        Some(handshake) => Err(error!("Expected ServerHello, got {}", handshake.name())),
+        None => Err(error!("Expected ServerHello, got EOF")),
     }
 }
 
@@ -610,21 +618,22 @@ impl EstablishedConnection {
 
     pub async fn read_normal(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
         loop {
-            let message = self.stream.receive_message(None).await?;
-
-            match message {
-                Message::Handshake(Handshake::NewSessionTicket(ticket)) => {
+            match self.stream.receive_message(None).await? {
+                Some(Message::Handshake(Handshake::NewSessionTicket(ticket))) => {
                     println!("read_normal: got ticket (ignoring)");
                     // println!("ticket = {:#?}", ticket);
                 }
-                Message::ApplicationData(data) => {
+                Some(Message::ApplicationData(data)) => {
                     return Ok(data);
                 }
-                Message::Alert(alert) => {
+                Some(Message::Alert(alert)) => {
                     return Err(error!("PhaseThree: Received alert {:?}", alert));
                 }
-                _ => {
+                Some(message) => {
                     return Err(error!("PhaseThree: Received unexpected {}", message.name()));
+                }
+                None => {
+                    return Err(error!("PhaseThree: Received unexpected EOF"));
                 }
             }
         }

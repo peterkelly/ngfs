@@ -93,7 +93,7 @@ impl<'a> ReceiveRecord<'a> {
 }
 
 impl<'a> Future for ReceiveRecord<'a> {
-    type Output = Result<TLSOwnedPlaintext, Box<dyn Error>>;
+    type Output = Result<Option<TLSOwnedPlaintext>, Box<dyn Error>>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut want: usize = 5;
         if self.incoming_data.len() >= 5 {
@@ -142,7 +142,7 @@ impl<'a> Future for ReceiveRecord<'a> {
                 assert!(self.incoming_data.len() == 5 + (length as usize));
                 self.incoming_data.truncate(0);
 
-                return Poll::Ready(Ok(record));
+                return Poll::Ready(Ok(Some(record)));
             }
             want = 5 + length;
         }
@@ -202,14 +202,17 @@ impl<'a> ReceiveRecordIgnoreCC<'a> {
 }
 
 impl<'a> Future for ReceiveRecordIgnoreCC<'a> {
-    type Output = Result<TLSOwnedPlaintext, Box<dyn Error>>;
+    type Output = Result<Option<TLSOwnedPlaintext>, Box<dyn Error>>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
             match Pin::new(&mut self.inner).poll(cx) {
-                Poll::Ready(Ok(record)) => {
+                Poll::Ready(Ok(Some(record))) => {
                     if record.content_type != ContentType::ChangeCipherSpec {
-                        return Poll::Ready(Ok(record));
+                        return Poll::Ready(Ok(Some(record)));
                     }
+                }
+                Poll::Ready(Ok(None)) => {
+                    return Poll::Ready(Ok(None));
                 }
                 Poll::Ready(Err(e)) => {
                     return Poll::Ready(Err(e));
@@ -252,12 +255,13 @@ impl ReceiveEncryptedMessage<'_, '_> {
 }
 
 impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
-    type Output = Result<Message, Box<dyn Error>>;
+    type Output = Result<Option<Message>, Box<dyn Error>>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.rric).poll(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            Poll::Ready(Ok(plaintext)) => {
+            Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
+            Poll::Ready(Ok(Some(plaintext))) => {
 
                 println!("ReceiveEncryptedMessage: plaintext.raw.len() = {}, server_sequence_no =  {}",
                     plaintext.raw.len(), self.server_sequence_no);
@@ -274,7 +278,7 @@ impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
                     Some(transcript) => transcript.extend_from_slice(&message_raw),
                     None => (),
                 };
-                Poll::Ready(Ok(message))
+                Poll::Ready(Ok(Some(message)))
 
             }
         }
