@@ -13,7 +13,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use futures::stream::StreamExt;
 use futures::sink::SinkExt;
 use bytes::{BytesMut, Buf};
-use ring::agreement::EphemeralPrivateKey;
+use ring::agreement::{EphemeralPrivateKey, X25519};
 use ring::rand::{SystemRandom, SecureRandom};
 use super::stream::{
     Encryption,
@@ -95,11 +95,12 @@ pub enum ClientAuth {
 pub struct ClientConfig {
     pub client_auth: ClientAuth,
     pub server_auth: ServerAuth,
+    pub server_name: Option<String>,
 }
 
 pub fn make_client_hello(
     my_public_key_bytes: &[u8],
-    server_name: Option<&str>,
+    server_name: Option<&String>,
 ) -> Result<ClientHello, TLSError> {
     let mut random: [u8; 32] = Default::default();
     let mut session_id: [u8; 32] = Default::default();
@@ -407,16 +408,24 @@ async fn write_plaintext_handshake(
     Ok(())
 }
 
-pub async fn establish_connection(
+pub async fn establish_connection<T: 'static>(
+    transport: T,
     config: ClientConfig,
-    transport: Box<dyn AsyncReadWrite>,
-    client_hello: &Handshake,
-    private_key: EphemeralPrivateKey,
 ) -> Result<EstablishedConnection, Box<dyn Error>>
+    where T : AsyncRead + AsyncWrite + Unpin
 {
+    let transport = Box::new(transport);
+    let private_key = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())?;
+    let public_key = private_key.compute_public_key()?;
+    let client_hello = make_client_hello(public_key.as_ref(), config.server_name.as_ref())?;
+    let client_hello_handshake = Handshake::ClientHello(client_hello);
+
     let mut initial_transcript: Vec<u8> = Vec::new();
     let mut plaintext_stream = PlaintextStream::new(transport, BytesMut::new());
-    write_plaintext_handshake(&mut plaintext_stream.inner, client_hello, &mut initial_transcript).await?;
+    write_plaintext_handshake(
+        &mut plaintext_stream.inner,
+        &client_hello_handshake,
+        &mut initial_transcript).await?;
     let server_hello = receive_server_hello(&mut plaintext_stream, &mut initial_transcript).await?;
 
     let henc = get_handshake_encryption(&initial_transcript, &server_hello, private_key)?;

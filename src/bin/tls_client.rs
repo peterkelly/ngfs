@@ -135,6 +135,7 @@ fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
     Ok(ClientConfig {
         client_auth,
         server_auth,
+        server_name: None,
     })
 }
 
@@ -196,19 +197,12 @@ async fn test_http(
 }
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
-    let config = parse_args()?;
+    let mut config = parse_args()?;
+    config.server_name = Some(String::from("localhost"));
 
-    let rng = SystemRandom::new();
-    let private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
-    let public_key = private_key.compute_public_key()?;
-    println!("public_key_bytes    = {}", BinaryData(public_key.as_ref()));
 
-    let client_hello = make_client_hello(public_key.as_ref(), Some("localhost"))?;
-    let handshake = Handshake::ClientHello(client_hello);
-
-    let mut socket = TcpStream::connect("localhost:443").await?;
-
-    let mut conn = establish_connection(config, Box::new(socket), &handshake, private_key).await?;
+    let socket = TcpStream::connect("localhost:443").await?;
+    let mut conn = establish_connection(socket, config).await?;
 
     test_http(&mut conn).await?;
     // test_echo(&mut conn).await?;

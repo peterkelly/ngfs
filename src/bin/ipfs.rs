@@ -462,6 +462,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             key: client_key,
         },
         server_auth: ServerAuth::SelfSigned,
+        server_name: None,
     };
 
 
@@ -492,16 +493,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 
 
-    let rng = SystemRandom::new();
-    let private_key = EphemeralPrivateKey::generate(&X25519, &rng)?;
-    let public_key = private_key.compute_public_key()?;
-    println!("public_key_bytes    = {}", BinaryData(public_key.as_ref()));
-
-    let client_hello = make_client_hello(public_key.as_ref(), None)?;
-    let handshake = Handshake::ClientHello(client_hello);
 
     println!("Before establish_connection()");
-    let mut conn = establish_connection(config, Box::new(socket), &handshake, private_key).await?;
+    let mut conn = establish_connection(socket, config).await?;
     println!("After establish_connection()");
 
     let mut buf = vec_with_len(65536);
