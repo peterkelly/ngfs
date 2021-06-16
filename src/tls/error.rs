@@ -20,6 +20,7 @@ pub enum TLSError {
     SignatureVerificationFailed,
     InvalidCertificate,
     UnsupportedCertificateSignatureAlgorithm,
+    RandomFillFailed,
 }
 
 impl fmt::Display for TLSError {

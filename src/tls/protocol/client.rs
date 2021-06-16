@@ -14,6 +14,7 @@ use futures::stream::StreamExt;
 use futures::sink::SinkExt;
 use bytes::{BytesMut, Buf};
 use ring::agreement::EphemeralPrivateKey;
+use ring::rand::{SystemRandom, SecureRandom};
 use super::stream::{
     Encryption,
     encrypt_record,
@@ -44,9 +45,18 @@ use super::super::types::handshake::{
     CertificateRequest,
     CertificateVerify,
     Finished,
+    ClientHello,
+    CipherSuite,
 };
 use super::super::types::extension::{
+    ECPointFormat,
     Extension,
+    KeyShareEntry,
+    NamedCurve,
+    NamedGroup,
+    ProtocolName,
+    PskKeyExchangeMode,
+    ServerName,
     SignatureScheme,
 };
 use super::super::types::record::{
@@ -85,6 +95,77 @@ pub enum ClientAuth {
 pub struct ClientConfig {
     pub client_auth: ClientAuth,
     pub server_auth: ServerAuth,
+}
+
+pub fn make_client_hello(
+    my_public_key_bytes: &[u8],
+    server_name: Option<&str>,
+) -> Result<ClientHello, TLSError> {
+    let mut random: [u8; 32] = Default::default();
+    let mut session_id: [u8; 32] = Default::default();
+    SystemRandom::new().fill(&mut random).map_err(|_| TLSError::RandomFillFailed)?;
+    SystemRandom::new().fill(&mut session_id).map_err(|_| TLSError::RandomFillFailed)?;
+
+    let mut cipher_suites = Vec::<CipherSuite>::new();
+    cipher_suites.push(CipherSuite::TLS_AES_128_GCM_SHA256);
+    cipher_suites.push(CipherSuite::TLS_AES_256_GCM_SHA384);
+    // cipher_suites.push(CipherSuite::TLS_CHACHA20_POLY1305_SHA256);
+    cipher_suites.push(CipherSuite::Unknown(0x00ff));
+
+    let mut extensions = vec![
+        Extension::ECPointFormats(vec![
+            ECPointFormat::Uncompressed,
+            ECPointFormat::ANSIX962CompressedPrime,
+            ECPointFormat::ANSIX962CompressedChar2]),
+        Extension::SupportedGroups(vec![
+            NamedCurve::X25519,
+            NamedCurve::Secp256r1,
+            NamedCurve::X448,
+            NamedCurve::Secp521r1,
+            NamedCurve::Secp384r1]),
+        Extension::NextProtocolNegotiation(vec![]),
+        Extension::ApplicationLayerProtocolNegotiation(vec![
+            ProtocolName { data: Vec::from("h2".as_bytes()) },
+            ProtocolName { data: Vec::from("http/1.1".as_bytes()) },
+            ]),
+        Extension::EncryptThenMac,
+        Extension::ExtendedMasterSecret,
+        Extension::PostHandshakeAuth,
+        Extension::SignatureAlgorithms(vec![
+            SignatureScheme::EcdsaSecp256r1Sha256,
+            SignatureScheme::EcdsaSecp384r1Sha384,
+            SignatureScheme::EcdsaSecp521r1Sha512,
+            SignatureScheme::Ed25519,
+            SignatureScheme::Ed448,
+            SignatureScheme::RsaPssPssSha256,
+            SignatureScheme::RsaPssPssSha384,
+            SignatureScheme::RsaPssPssSha512,
+            SignatureScheme::RsaPssRsaeSha256,
+            SignatureScheme::RsaPssRsaeSha384,
+            SignatureScheme::RsaPssRsaeSha512,
+            SignatureScheme::RsaPkcs1Sha256,
+            SignatureScheme::RsaPkcs1Sha384,
+            SignatureScheme::RsaPkcs1Sha512]),
+        Extension::SupportedVersions(vec![2, 3, 4]),
+        Extension::PskKeyExchangeModes(vec![PskKeyExchangeMode::PskDheKe]),
+        Extension::KeyShareClientHello(vec![
+            KeyShareEntry {
+                group: NamedGroup::X25519,
+                key_exchange: Vec::from(my_public_key_bytes),
+            }])
+    ];
+    if let Some(server_name) = server_name {
+        extensions.push(Extension::ServerName(vec![ServerName::HostName(String::from(server_name))]));
+    }
+
+    Ok(ClientHello {
+        legacy_version: 0x0303,
+        random: random,
+        legacy_session_id: Vec::from(session_id),
+        cipher_suites: cipher_suites,
+        legacy_compression_methods: vec![0],
+        extensions: extensions,
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -529,7 +610,7 @@ async fn do_phase_two(
             let client_cert = cert;
             let client_key = key;
 
-            let rng = ring::rand::SystemRandom::new();
+            let rng = SystemRandom::new();
             println!("Before send_client_certificate()");
             send_client_certificate(
                 ciphers.hash_alg, // hash_alg: HashAlgorithm,
