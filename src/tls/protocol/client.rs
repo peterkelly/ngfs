@@ -15,7 +15,7 @@ use futures::sink::SinkExt;
 use bytes::{BytesMut, Buf};
 use ring::agreement::EphemeralPrivateKey;
 use super::stream::{
-    AEncryption,
+    Encryption,
     encrypt_record,
     PlaintextStream,
     EncryptedStream,
@@ -328,27 +328,26 @@ async fn write_plaintext_handshake(
 
 pub async fn establish_connection(
     config: ClientConfig,
-    mut stream: Box<dyn AsyncReadWrite>,
+    transport: Box<dyn AsyncReadWrite>,
     client_hello: &Handshake,
     private_key: EphemeralPrivateKey,
 ) -> Result<EstablishedConnection, Box<dyn Error>>
 {
     let mut initial_transcript: Vec<u8> = Vec::new();
-    let mut plaintext_stream = PlaintextStream::new(stream, BytesMut::new());
+    let mut plaintext_stream = PlaintextStream::new(transport, BytesMut::new());
     write_plaintext_handshake(&mut plaintext_stream.inner, client_hello, &mut initial_transcript).await?;
     let server_hello = receive_server_hello(&mut plaintext_stream, &mut initial_transcript).await?;
 
     let henc = get_handshake_encryption(&initial_transcript, &server_hello, private_key)?;
     let prk = henc.prk;
 
-    let encryption = AEncryption {
+    let encryption = Encryption {
         traffic_secrets: henc.traffic_secrets,
         ciphers: henc.ciphers,
     };
 
     let mut conn = EncryptedHandshake::new(config, initial_transcript);
-    let mut enc_stream = EncryptedStream::new(
-        plaintext_stream.inner, plaintext_stream.incoming_data, encryption);
+    let mut enc_stream = EncryptedStream::new(plaintext_stream, encryption);
     let sm = receive_server_messages(&mut conn, &mut enc_stream).await?;
     let p2 = do_phase_two(&mut conn, &prk, &sm, &mut enc_stream).await?;
 
@@ -356,9 +355,7 @@ pub async fn establish_connection(
     enc_stream.server_sequence_no = 0;
     enc_stream.encryption = p2;
 
-    Ok(EstablishedConnection {
-        stream: enc_stream,
-    })
+    Ok(EstablishedConnection::new(enc_stream))
 }
 
 struct HandshakeEncryption {
@@ -455,7 +452,7 @@ async fn do_phase_two(
     prk: &[u8],
     sm: &ServerMessages,
     stream: &mut EncryptedStream,
-) -> Result<AEncryption, Box<dyn Error>> {
+) -> Result<Encryption, Box<dyn Error>> {
     let ciphers_copy = stream.encryption.ciphers.clone();
     let secrets_copy = TrafficSecrets {
         client: stream.encryption.traffic_secrets.client.clone(),
@@ -560,7 +557,7 @@ async fn do_phase_two(
         &new_thash,
         stream).await?;
 
-    Ok(AEncryption {
+    Ok(Encryption {
         traffic_secrets: application_secrets,
         ciphers: ciphers.clone(),
     })
@@ -568,33 +565,85 @@ async fn do_phase_two(
 
 pub struct EstablishedConnection {
     stream: EncryptedStream,
+    incoming_decrypted: BytesMut,
+    read_closed: bool,
+    write_closed: bool,
 }
 
 impl EstablishedConnection {
+    pub fn new(stream: EncryptedStream) -> Self {
+        EstablishedConnection {
+            stream: stream,
+            incoming_decrypted: BytesMut::new(),
+            read_closed: false,
+            write_closed: false,
+        }
+    }
+
     pub async fn write_normal(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
         self.stream.encrypt_and_send(data, ContentType::ApplicationData).await?;
         Ok(())
     }
 
-    pub async fn read_normal(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Box<dyn Error>>> {
+        if self.incoming_decrypted.remaining() > 0 {
+            return Poll::Ready(Ok(()));
+        }
         loop {
-            match self.stream.receive_message(None).await? {
-                Some(Message::Handshake(Handshake::NewSessionTicket(ticket))) => {
-                    println!("read_normal: got ticket (ignoring)");
+            match self.stream.poll_receive_encrypted_message(cx, None) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Ready(Ok(Some(Message::Handshake(Handshake::NewSessionTicket(ticket))))) => {
+                    println!("poll_fill_incoming: got ticket (ignoring)");
                     // println!("ticket = {:#?}", ticket);
                 }
-                Some(Message::ApplicationData(data)) => {
-                    return Ok(data);
+                Poll::Ready(Ok(Some(Message::ApplicationData(data)))) => {
+                    self.incoming_decrypted.extend_from_slice(&data);
+                    return Poll::Ready(Ok(()));
                 }
-                Some(Message::Alert(alert)) => {
-                    return Err(error!("PhaseThree: Received alert {:?}", alert));
+                Poll::Ready(Ok(Some(Message::Alert(alert)))) => {
+                    self.read_closed = true;
+                    return Poll::Ready(Err(error!("PhaseThree: Received alert {:?}", alert)));
                 }
-                Some(message) => {
-                    return Err(error!("PhaseThree: Received unexpected {}", message.name()));
+                Poll::Ready(Ok(Some(message))) => {
+                    self.read_closed = true;
+                    return Poll::Ready(Err(error!("PhaseThree: Received unexpected {}", message.name())));
                 }
-                None => {
-                    return Err(error!("PhaseThree: Received unexpected EOF"));
+                Poll::Ready(Ok(None)) => {
+                    self.read_closed = true;
+                    return Poll::Ready(Err(error!("PhaseThree: Received unexpected EOF")));
                 }
+            }
+        }
+    }
+}
+
+impl AsyncRead for EstablishedConnection {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>
+    ) -> Poll<Result<(), std::io::Error>> {
+        if self.read_closed {
+            return Poll::Ready(
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    error!("Read end is closed"))));
+        }
+        let direct = Pin::into_inner(self);
+        match direct.poll_fill_incoming(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        error!("{}", e))))
+            }
+            Poll::Ready(Ok(())) => {
+                let amt = std::cmp::min(direct.incoming_decrypted.remaining(), buf.remaining());
+                buf.put_slice(&direct.incoming_decrypted[0..amt]);
+                direct.incoming_decrypted.advance(amt);
+                Poll::Ready(Ok(()))
             }
         }
     }

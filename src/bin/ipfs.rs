@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncRead, AsyncWrite};
 use ring::agreement::{EphemeralPrivateKey, X25519};
 use ring::signature::{RsaKeyPair, KeyPair};
 use torrent::p2p::{PublicKey, KeyType};
-use torrent::util::{from_hex, escape_string, BinaryData, DebugHexDump};
+use torrent::util::{from_hex, escape_string, vec_with_len, BinaryData, DebugHexDump};
 use torrent::error;
 use torrent::protobuf::VarInt;
 use torrent::tls::types::handshake::{
@@ -586,26 +586,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut conn = establish_connection(config, Box::new(socket), &handshake, private_key).await?;
     println!("After establish_connection()");
 
-    let data = conn.read_normal().await?;
-    println!("Read {} bytes", data.len());
-    println!("data =\n{:#?}", DebugHexDump(&data));
+    let mut buf = vec_with_len(65536);
+    let r = conn.read(&mut buf).await?;
+    println!("Read {} bytes", r);
+    println!("data =\n{:#?}", DebugHexDump(&buf[0..r]));
 
     write_multistream_data_client(&mut conn, b"/multistream/1.0.0\n").await?;
     // write_multistream_data_client(&mut conn, b"ls\n").await?;
 
     write_multistream_data_client(&mut conn, b"/mplex/6.7.0\n").await?;
 
-    let data = conn.read_normal().await?;
-    println!("Read {} bytes", data.len());
-    println!("data =\n{:#?}", DebugHexDump(&data));
+    let r = conn.read(&mut buf).await?;
+    println!("Read {} bytes", r);
+    println!("data =\n{:#?}", DebugHexDump(&buf[0..r]));
 
-    let data = conn.read_normal().await?;
-    println!("Read {} bytes", data.len());
-    println!("data =\n{:#?}", DebugHexDump(&data));
+    let r = conn.read(&mut buf).await?;
+    println!("Read {} bytes", r);
+    println!("data =\n{:#?}", DebugHexDump(&buf[0..r]));
 
-    let data = conn.read_normal().await?;
-    println!("Read {} bytes", data.len());
-    println!("data =\n{:#?}", DebugHexDump(&data));
+    let r = conn.read(&mut buf).await?;
+    println!("Read {} bytes", r);
+    println!("data =\n{:#?}", DebugHexDump(&buf[0..r]));
 
     // let data = read_multistream_data(&mut socket).await?;
     // println!("{:#?}", &DebugHexDump(&data));

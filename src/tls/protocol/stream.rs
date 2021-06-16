@@ -34,7 +34,7 @@ use super::super::helpers::{
 };
 use super::super::super::error;
 
-pub struct AEncryption {
+pub struct Encryption {
     pub traffic_secrets: TrafficSecrets,
     pub ciphers: Ciphers,
 }
@@ -264,22 +264,19 @@ fn poll_receive_plaintext_message(
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub struct EncryptedStream {
-    pub inner: Box<dyn AsyncReadWrite>,
-    pub incoming_data: BytesMut,
+    pub plaintext: PlaintextStream,
     pub client_sequence_no: u64,
     pub server_sequence_no: u64,
-    pub encryption: AEncryption,
+    pub encryption: Encryption,
 }
 
 impl EncryptedStream {
     pub fn new(
-        inner: Box<dyn AsyncReadWrite>,
-        incoming_data: BytesMut,
-        encryption: AEncryption,
+        plaintext: PlaintextStream,
+        encryption: Encryption,
     ) -> Self {
         EncryptedStream {
-            inner: inner,
-            incoming_data,
+            plaintext,
             client_sequence_no: 0,
             server_sequence_no: 0,
             encryption: encryption,
@@ -288,7 +285,7 @@ impl EncryptedStream {
 
     // formerly encode EncryptedToSend
     pub async fn send_direct(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
-        self.inner.write_all(data).await
+        self.plaintext.inner.write_all(data).await
     }
 
     // formerly encode UnencToSend
@@ -317,8 +314,22 @@ impl EncryptedStream {
         transcript: Option<&'b mut Vec<u8>>,
     ) -> ReceiveEncryptedMessage<'a, 'b> {
         ReceiveEncryptedMessage::new(
-            &mut self.inner,
-            &mut self.incoming_data,
+            &mut self.plaintext.inner,
+            &mut self.plaintext.incoming_data,
+            &mut self.server_sequence_no,
+            &self.encryption,
+            transcript)
+    }
+
+    pub fn poll_receive_encrypted_message<'a, 'b, 'c>(
+        &'a mut self,
+        cx: &'b mut Context<'_>,
+        transcript: Option<&'c mut Vec<u8>>,
+    ) -> Poll<Result<Option<Message>, Box<dyn Error>>> {
+        poll_receive_encrypted_message(
+            cx,
+            &mut self.plaintext.inner,
+            &mut self.plaintext.incoming_data,
             &mut self.server_sequence_no,
             &self.encryption,
             transcript)
@@ -329,7 +340,7 @@ pub struct ReceiveEncryptedMessage<'a, 'b> {
     reader: &'a mut Box<dyn AsyncReadWrite>,
     incoming_data: &'a mut BytesMut,
     server_sequence_no: &'a mut u64,
-    encryption: &'a AEncryption,
+    encryption: &'a Encryption,
     transcript: Option<&'b mut Vec<u8>>
 }
 
@@ -338,7 +349,7 @@ impl ReceiveEncryptedMessage<'_, '_> {
         reader: &'a mut Box<dyn AsyncReadWrite>,
         incoming_data: &'a mut BytesMut,
         server_sequence_no: &'a mut u64,
-        encryption: &'a AEncryption,
+        encryption: &'a Encryption,
         transcript: Option<&'b mut Vec<u8>>
     ) -> ReceiveEncryptedMessage<'a, 'b> {
         ReceiveEncryptedMessage {
@@ -374,7 +385,7 @@ fn poll_receive_encrypted_message(
     reader: &mut Box<dyn AsyncReadWrite>,
     incoming_data: &mut BytesMut,
     server_sequence_no: &mut u64,
-    encryption: &AEncryption,
+    encryption: &Encryption,
     transcript: Option<&mut Vec<u8>>
 ) -> Poll<Result<Option<Message>, Box<dyn Error>>> {
     match poll_receive_record_ignore_cc(cx, reader, incoming_data) {
