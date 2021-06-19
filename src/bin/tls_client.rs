@@ -86,24 +86,25 @@ struct Opt {
 
     #[clap(long, value_hint=ValueHint::FilePath)]
     client_key: Option<PathBuf>,
+
+    #[clap(long)]
+    address: Option<String>,
 }
 
-fn parse_args() -> Result<ClientConfig, Box<dyn Error>> {
-    let opt = Opt::parse();
-
+fn parse_args(opt: &Opt) -> Result<ClientConfig, Box<dyn Error>> {
     let mut ca_cert: Option<Vec<u8>> = None;
     let mut client_cert: Option<Vec<u8>> = None;
     let mut client_key: Option<Vec<u8>> = None;
 
-    if let Some(filename) = opt.ca_cert {
+    if let Some(filename) = &opt.ca_cert {
         ca_cert = Some(fs::read(filename)?);
     }
 
-    if let Some(filename) = opt.client_cert {
+    if let Some(filename) = &opt.client_cert {
         client_cert = Some(fs::read(filename)?);
     }
 
-    if let Some(filename) = opt.client_key {
+    if let Some(filename) = &opt.client_key {
         client_key = Some(fs::read(filename)?);
     }
 
@@ -205,11 +206,13 @@ async fn test_http(
 }
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
-    let mut config = parse_args()?;
+    let opt = Opt::parse();
+    let mut config = parse_args(&opt)?;
     config.server_name = Some(String::from("localhost"));
 
+    let address = opt.address.unwrap_or(String::from("localhost:443"));
 
-    let socket = TcpStream::connect("localhost:443").await?;
+    let socket = TcpStream::connect(&address).await?;
     let mut conn = establish_connection(socket, config).await?;
 
     test_http(&mut conn).await?;
