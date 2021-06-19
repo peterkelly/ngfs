@@ -9,7 +9,7 @@ use crypto::aead::{AeadInPlace, AeadCore, Key, Nonce, NewAead};
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use generic_array::typenum::Unsigned;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CryptError {
     InvalidPrkLength,
     InvalidLength,

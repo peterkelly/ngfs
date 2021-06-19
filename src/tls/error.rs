@@ -1,12 +1,19 @@
 use std::error::Error;
 use std::fmt;
 use super::super::crypt::CryptError;
+use super::types::alert::Alert;
+use super::types::record::ContentType;
 use ring::error::KeyRejected;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TLSError {
     EncryptionFailed,
     DecryptionFailed,
+    MessageEncodingFailed,
+    UnexpectedMessage(ContentType),
+    UnexpectedHandshake(String),
+    UnexpectedEOF,
+    UnexpectedAlert(Alert),
     InvalidPlaintextRecord,
     InvalidMessageRecord,
     Internal(CryptError),
@@ -21,6 +28,24 @@ pub enum TLSError {
     InvalidCertificate,
     UnsupportedCertificateSignatureAlgorithm,
     RandomFillFailed,
+    EphemeralPrivateKeyGenerationFailed,
+    ComputePublicKeyFailed,
+    GetSharedSecretFailed,
+    EmptyCertificatList,
+    MissingCertificateMessage,
+    MissingCertificateVerifyMessage,
+    CACertificateUnavailable,
+    IOError(std::io::ErrorKind),
+}
+
+impl Into<std::io::Error> for TLSError {
+    fn into(self) -> std::io::Error {
+        match self {
+            TLSError::IOError(kind) => std::io::Error::from(kind),
+            _ => std::io::Error::new(std::io::ErrorKind::Other, self),
+        }
+    }
+
 }
 
 impl fmt::Display for TLSError {

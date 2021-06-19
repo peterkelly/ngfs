@@ -180,7 +180,7 @@ async fn send_finished(
     hash_alg: HashAlgorithm,
     new_transcript_hash: &[u8],
     stream: &mut EncryptedStream,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), TLSError> {
     let finished_key = derive_secret(
         hash_alg,
         &stream.encryption.traffic_secrets.client.raw,
@@ -199,8 +199,9 @@ async fn send_client_certificate(
     signature_scheme: SignatureScheme,
     rng: &dyn ring::rand::SecureRandom,
     stream: &mut EncryptedStream,
-) -> Result<(), Box<dyn Error>> {
-    let client_cert = x509::Certificate::from_bytes(client_cert_data)?;
+) -> Result<(), TLSError> {
+    let client_cert = x509::Certificate::from_bytes(client_cert_data)
+        .map_err(|_| TLSError::InvalidCertificate)?;
     let handshake = Handshake::Certificate(Certificate {
         certificate_request_context: Vec::new(),
         certificate_list: vec![
@@ -237,12 +238,12 @@ async fn send_handshake(
     handshake: &Handshake,
     transcript: Option<&mut Vec<u8>>,
     stream: &mut EncryptedStream,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), TLSError> {
     let mut conn_to_send = BytesMut::new();
 
 
     let mut writer = BinaryWriter::new();
-    writer.write_item(handshake)?;
+    writer.write_item(handshake).map_err(|_| TLSError::MessageEncodingFailed)?;
     let finished_bytes: Vec<u8> = Vec::from(writer);
     encrypt_record(
         &mut conn_to_send,
@@ -254,7 +255,7 @@ async fn send_handshake(
     )?;
 
     stream.client_sequence_no += 1;
-    stream.send_direct(&conn_to_send).await?;
+    stream.send_direct(&conn_to_send).await.map_err(|e| TLSError::IOError(e.kind()))?;
 
     Ok(())
 }
@@ -353,11 +354,11 @@ impl EncryptedHandshake {
     async fn receive_handshake_est(
         &mut self,
         stream: &mut EncryptedStream,
-    ) -> Result<Handshake, Box<dyn Error>> {
+    ) -> Result<Handshake, TLSError> {
         match stream.receive_message(Some(&mut self.transcript)).await? {
             Some(Message::Handshake(hs)) => Ok(hs),
-            Some(message) => Err(error!("Expected a handshake, got {:?}", message.content_type())),
-            None => Err(error!("Expected a handshake, got EOF")),
+            Some(message) => Err(TLSError::UnexpectedMessage(message.content_type())),
+            None => Err(TLSError::UnexpectedEOF),
         }
     }
 
@@ -366,23 +367,23 @@ impl EncryptedHandshake {
 async fn receive_plaintext_handshake(
     stream: &mut PlaintextStream,
     transcript: &mut Vec<u8>,
-) -> Result<Option<Handshake>, Box<dyn Error>> {
+) -> Result<Option<Handshake>, TLSError> {
     match stream.receive_plaintext_message(transcript).await? {
         Some(Message::Handshake(hs)) => Ok(Some(hs)),
-        Some(message) => Err(error!("Expected a handshake, got {:?}", message.content_type())),
-        None => Err(error!("Expected a handshake, got EOF")),
+        Some(message) => Err(TLSError::UnexpectedMessage(message.content_type())),
+        None => Err(TLSError::UnexpectedEOF),
     }
 }
 
 async fn receive_server_hello(
     stream: &mut PlaintextStream,
     transcript: &mut Vec<u8>,
-) -> Result<ServerHello, Box<dyn Error>> {
+) -> Result<ServerHello, TLSError> {
     let handshake = receive_plaintext_handshake(stream, transcript).await?;
     match handshake {
         Some(Handshake::ServerHello(v)) => Ok(v),
-        Some(handshake) => Err(error!("Expected ServerHello, got {}", handshake.name())),
-        None => Err(error!("Expected ServerHello, got EOF")),
+        Some(handshake) => Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
+        None => Err(TLSError::UnexpectedEOF),
     }
 }
 
@@ -390,9 +391,9 @@ async fn write_plaintext_handshake(
     writer: &mut (impl AsyncWrite + Unpin),
     handshake: &Handshake,
     transcript: &mut Vec<u8>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), TLSError> {
     let mut bin_writer = BinaryWriter::new();
-    bin_writer.write_item(handshake)?;
+    bin_writer.write_item(handshake).map_err(|_| TLSError::MessageEncodingFailed)?;
     let fragment_vec = Vec::<u8>::from(bin_writer);
 
     let record = TLSOutputPlaintext {
@@ -404,19 +405,21 @@ async fn write_plaintext_handshake(
     transcript.extend_from_slice(&record.fragment);
     let mut encoded = BytesMut::new();
     record.encode(&mut encoded);
-    writer.write_all(&encoded).await?;
+    writer.write_all(&encoded).await.map_err(|e| TLSError::IOError(e.kind()))?;
     Ok(())
 }
 
 pub async fn establish_connection<T: 'static>(
     transport: T,
     config: ClientConfig,
-) -> Result<EstablishedConnection, Box<dyn Error>>
+) -> Result<EstablishedConnection, TLSError>
     where T : AsyncRead + AsyncWrite + Unpin
 {
     let transport = Box::new(transport);
-    let private_key = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())?;
-    let public_key = private_key.compute_public_key()?;
+    let private_key = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
+        .map_err(|_| TLSError::EphemeralPrivateKeyGenerationFailed)?;
+    let public_key = private_key.compute_public_key()
+        .map_err(|_| TLSError::ComputePublicKeyFailed)?;
     let client_hello = make_client_hello(public_key.as_ref(), config.server_name.as_ref())?;
     let client_hello_handshake = Handshake::ClientHello(client_hello);
 
@@ -458,14 +461,14 @@ fn get_handshake_encryption(
     transcript: &[u8],
     server_hello: &ServerHello,
     private_key: EphemeralPrivateKey,
-) -> Result<HandshakeEncryption, Box<dyn Error>> {
+) -> Result<HandshakeEncryption, TLSError> {
 
     println!("PhaseOne: Received ServerHello");
     println!("{:#?}", &Indent(&server_hello));
     let ciphers = Ciphers::from_server_hello(&server_hello)?;
 
     let secret = get_server_hello_x25519_shared_secret(private_key, &server_hello)
-        .ok_or_else(|| error!("Cannot get shared secret"))?;
+        .ok_or_else(|| TLSError::GetSharedSecretFailed)?;
     println!("Shared secret = {}", BinaryData(&secret));
 
     let prk = get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), &secret)?;
@@ -486,26 +489,26 @@ struct ServerMessages {
 async fn receive_server_messages(
     conn: &mut EncryptedHandshake,
     stream: &mut EncryptedStream,
-) -> Result<ServerMessages, Box<dyn Error>> {
+) -> Result<ServerMessages, TLSError> {
     // TODO: Allow some of these to be absent depending on the config
     let handshake = conn.receive_handshake_est(stream).await?;
     let encrypted_extensions = match handshake {
         Handshake::EncryptedExtensions(v) => v,
-        _ => return Err(error!("Expected EncryptedExtensions, got {}", handshake.name())),
+        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
     };
     println!("Phase two: Got encrypted_extensions");
 
     let handshake = conn.receive_handshake_est(stream).await?;
     let certificate_request = match handshake {
         Handshake::CertificateRequest(v) => Some(v),
-        _ => return Err(error!("Expected CertificateRequest, got {}", handshake.name())),
+        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
     };
     println!("Phase two: Got certificate_request");
 
     let handshake = conn.receive_handshake_est(stream).await?;
     let certificate = match handshake {
         Handshake::Certificate(v) => Some(v),
-        _ => return Err(error!("Expected Certificate, got {}", handshake.name())),
+        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
     };
 
     println!("Phase two: Got certificate");
@@ -514,7 +517,7 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_est(stream).await?;
     let certificate_verify = match handshake {
         Handshake::CertificateVerify(v) => Some((v, certificate_verify_thash)),
-        _ => return Err(error!("Expected CertificateVerify, got {}", handshake.name())),
+        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
     };
 
     println!("Phase two: Got certificate_verify");
@@ -523,7 +526,7 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_est(stream).await?;
     let finished = match handshake {
         Handshake::Finished(v) => (v, finished_thash),
-        _ => return Err(error!("Expected Finished, got {}", handshake.name())),
+        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
     };
 
     println!("Phase two: Got finished");
@@ -542,7 +545,7 @@ async fn do_phase_two(
     prk: &[u8],
     sm: &ServerMessages,
     stream: &mut EncryptedStream,
-) -> Result<Encryption, Box<dyn Error>> {
+) -> Result<Encryption, TLSError> {
     let ciphers_copy = stream.encryption.ciphers.clone();
     let secrets_copy = TrafficSecrets {
         client: stream.encryption.traffic_secrets.client.clone(),
@@ -554,7 +557,8 @@ async fn do_phase_two(
     let secrets = &secrets_copy;
 
     let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
-    let new_prk = get_derived_prk(ciphers.hash_alg, prk, input_psk)?;
+    let new_prk = get_derived_prk(ciphers.hash_alg, prk, input_psk)
+        .map_err(|e| TLSError::Internal(e))?;
 
     let application_secrets = TrafficSecrets::derive_from(&ciphers, &conn.transcript, &new_prk, "ap")?;
     println!("KEY CLIENT_TRAFFIC_SECRET_0 = {}", BinaryData(&application_secrets.client.raw));
@@ -573,12 +577,12 @@ async fn do_phase_two(
             match certificate.certificate_list.get(0) {
                 Some(v) => v,
                 None => {
-                    return Err(error!("Server sent an empty certificate list"));
+                    return Err(TLSError::EmptyCertificatList);
                 }
             }
         }
         None => {
-            return Err(error!("Server did not send a Certificate message"));
+            return Err(TLSError::MissingCertificateMessage);
         }
     };
 
@@ -586,7 +590,7 @@ async fn do_phase_two(
     let server_cert: &x509::Certificate = &first_cert_entry.certificate;
 
     let ca_cert: &[u8] = match &conn.config.server_auth {
-        ServerAuth::None => return Err(error!("No CA certificate available")),
+        ServerAuth::None => return Err(TLSError::CACertificateUnavailable),
         ServerAuth::CertificateAuthority(v) => v,
         ServerAuth::SelfSigned => &server_cert_raw,
     };
@@ -608,7 +612,7 @@ async fn do_phase_two(
             )?;
         }
         None => {
-            return Err(error!("Server did not send CertificateVerify message"));
+            return Err(TLSError::MissingCertificateVerifyMessage);
         }
     }
     println!("After  verify_transcript()");
@@ -670,19 +674,19 @@ impl EstablishedConnection {
         }
     }
 
-    pub async fn write_normal(&mut self, data: &[u8]) -> Result<(), Box<dyn Error>> {
+    pub async fn write_normal(&mut self, data: &[u8]) -> Result<(), TLSError> {
         self.stream.encrypt_and_send(data, ContentType::ApplicationData).await?;
         Ok(())
     }
 
-    pub fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Box<dyn Error>>> {
+    pub fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
         if self.incoming_decrypted.remaining() > 0 {
             return Poll::Ready(Ok(()));
         }
         loop {
             match self.stream.poll_receive_encrypted_message(cx, None) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
                 Poll::Ready(Ok(Some(Message::Handshake(Handshake::NewSessionTicket(ticket))))) => {
                     println!("poll_fill_incoming: got ticket (ignoring)");
                     // println!("ticket = {:#?}", ticket);
@@ -693,15 +697,15 @@ impl EstablishedConnection {
                 }
                 Poll::Ready(Ok(Some(Message::Alert(alert)))) => {
                     self.read_closed = true;
-                    return Poll::Ready(Err(error!("PhaseThree: Received alert {:?}", alert)));
+                    return Poll::Ready(Err(TLSError::UnexpectedAlert(alert)));
                 }
                 Poll::Ready(Ok(Some(message))) => {
                     self.read_closed = true;
-                    return Poll::Ready(Err(error!("PhaseThree: Received unexpected {}", message.name())));
+                    return Poll::Ready(Err(TLSError::UnexpectedMessage(message.content_type())));
                 }
                 Poll::Ready(Ok(None)) => {
                     self.read_closed = true;
-                    return Poll::Ready(Err(error!("PhaseThree: Received unexpected EOF")));
+                    return Poll::Ready(Err(TLSError::UnexpectedEOF));
                 }
             }
         }

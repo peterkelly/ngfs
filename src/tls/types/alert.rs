@@ -11,7 +11,7 @@ use super::super::super::binary::{BinaryReader, BinaryWriter, FromBinary, ToBina
 use super::super::super::StringError;
 use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum AlertLevel {
     Warning, // (1),
     Fatal, // (2),
@@ -50,7 +50,7 @@ impl ToBinary for AlertLevel {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum AlertDescription {
     CloseNotify, // (0),
     UnexpectedMessage, // (10),
@@ -164,7 +164,7 @@ impl ToBinary for AlertDescription {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Alert {
     pub level: AlertLevel,
     pub description: AlertDescription,
