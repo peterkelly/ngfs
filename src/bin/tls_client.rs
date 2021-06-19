@@ -173,7 +173,8 @@ async fn test_echo(
 
     for part in parts.iter() {
         sleep(Duration::from_millis(1000)).await;
-        aconn.write_normal(part).await?;
+        aconn.write_all(part).await?;
+        aconn.flush().await?;
         let mut buf = vec_with_len(65536);
         let r = aconn.read(&mut buf).await?;
         println!("receive application data =");
@@ -187,7 +188,8 @@ async fn test_http(
     aconn: &mut EstablishedConnection,
 ) -> Result<(), Box<dyn Error>>
 {
-    aconn.write_normal(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await?;
+    aconn.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await?;
+    aconn.flush().await?;
     loop {
         let mut buf = vec_with_len(65536);
         let r = aconn.read(&mut buf).await?;

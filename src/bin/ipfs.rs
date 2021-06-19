@@ -115,8 +115,8 @@ async fn write_multistream_data_client(
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(&len_bytes);
     buf.extend_from_slice(&data);
-    // writer.flush().await?;
-    conn.write_normal(&buf).await?;
+    conn.write_all(&buf).await?;
+    conn.flush().await?;
     Ok(())
 }
 

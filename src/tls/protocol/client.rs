@@ -5,6 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
+use std::io;
 use std::error::Error;
 use std::future::Future;
 use std::pin::Pin;
@@ -70,6 +71,7 @@ use super::super::types::record::{
 };
 use super::super::types::alert::{
     Alert,
+    AlertLevel,
     AlertDescription,
 };
 use super::super::error::{
@@ -693,33 +695,93 @@ enum ReadState {
 
 enum WriteState {
     Active,
-    Eof,
+    InShutdown,
     Error(TLSError),
 }
 
 pub struct EstablishedConnection {
     stream: EncryptedStream,
     incoming_decrypted: BytesMut,
+    outgoing_encrypted: BytesMut,
     read_state: ReadState,
     write_state: WriteState,
 }
 
 impl EstablishedConnection {
-    pub fn new(stream: EncryptedStream) -> Self {
+    fn new(stream: EncryptedStream) -> Self {
         EstablishedConnection {
             stream: stream,
             incoming_decrypted: BytesMut::new(),
+            outgoing_encrypted: BytesMut::new(),
             read_state: ReadState::Active,
             write_state: WriteState::Active,
         }
     }
 
-    pub async fn write_normal(&mut self, data: &[u8]) -> Result<(), TLSError> {
-        self.stream.encrypt_and_send(data, ContentType::ApplicationData).await?;
-        Ok(())
+    fn append_record(&mut self, data: &[u8], content_type: ContentType) -> Result<(), TLSError> {
+        match encrypt_record(
+            &mut self.outgoing_encrypted,
+            data,
+            content_type,
+            &self.stream.encryption.traffic_secrets.client,
+            self.stream.client_sequence_no,
+            None,
+        ) {
+            Ok(()) => {
+                self.stream.client_sequence_no += 1;
+                Ok(())
+            }
+            Err(e) => {
+                self.write_state = WriteState::Error(e.clone());
+                Err(e)
+            }
+        }
     }
 
-    pub fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
+    fn append_application_data(&mut self, data: &[u8]) -> Result<(), TLSError> {
+        self.append_record(data, ContentType::ApplicationData)
+    }
+
+    fn append_close_notify(&mut self) -> Result<(), TLSError> {
+        let alert = Alert {
+            level: AlertLevel::Warning,
+            description: AlertDescription::CloseNotify,
+        };
+
+        let alert_data: &[u8] = &[
+            alert.level.to_raw(),
+            alert.description.to_raw(),
+        ];
+
+        self.append_record(&alert_data, ContentType::Alert)
+    }
+
+
+    fn poll_drain_encrypted(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
+        while self.outgoing_encrypted.len() > 0 {
+            // println!("poll_drain_encrypted: outgoing_encrypted.len() = {}", self.outgoing_encrypted.len());
+            match AsyncWrite::poll_write(Pin::new(&mut self.stream.plaintext.inner), cx, &self.outgoing_encrypted) {
+                Poll::Ready(Ok(w)) => {
+                    // println!("poll_drain_encrypted: wrote {} bytes", w);
+                    self.outgoing_encrypted.advance(w);
+                }
+                Poll::Ready(Err(e)) => {
+                    // let x: () = e;
+                    let tls_e: TLSError = TLSError::IOError(e.kind());
+                    self.write_state = WriteState::Error(tls_e.clone());
+                    return Poll::Ready(Err(tls_e));
+                }
+                Poll::Pending => {
+                    // println!("poll_drain_encrypted: pending");
+                    return Poll::Pending;
+                }
+            }
+        }
+        // println!("poll_drain_encrypted: outgoing_encrypted.len() = {}", self.outgoing_encrypted.len());
+        return Poll::Ready(Ok(()));
+    }
+
+    fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
         if self.incoming_decrypted.remaining() > 0 {
             return Poll::Ready(Ok(()));
         }
@@ -764,7 +826,8 @@ impl AsyncRead for EstablishedConnection {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>
-    ) -> Poll<Result<(), std::io::Error>> {
+    ) -> Poll<Result<(), io::Error>> {
+        // Check for existing error condition
         match &self.read_state {
             ReadState::Eof => return Poll::Ready(Ok(())),
             ReadState::Error(e) => return Poll::Ready(Err(e.clone().into())),
@@ -781,5 +844,102 @@ impl AsyncRead for EstablishedConnection {
                 Poll::Ready(Ok(()))
             }
         }
+    }
+}
+
+impl AsyncWrite for EstablishedConnection {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8]
+    ) -> Poll<Result<usize, io::Error>> {
+        println!("EstablishedConnection::poll_write: buf.len() = {}", buf.len());
+
+        // Check for existing error condition
+        match &self.write_state {
+            WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
+            WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
+            WriteState::Active => (), // ok, continue
+        }
+
+
+        let direct = Pin::into_inner(self);
+        match direct.poll_drain_encrypted(cx) {
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Ok(())) => (),
+        }
+
+        let max_write: usize = TLS_RECORD_SIZE;
+        let amt = std::cmp::min(buf.len(), max_write);
+
+        match direct.append_application_data(&buf[0..amt]) {
+            Ok(()) => Poll::Ready(Ok(amt)),
+            Err(e) => Poll::Ready(Err(e.into())),
+        }
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<Result<(), io::Error>> {
+        // Check for existing error condition
+        match &self.write_state {
+            WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
+            WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
+            WriteState::Active => (), // ok, continue
+        }
+
+        let direct = Pin::into_inner(self);
+        match direct.poll_drain_encrypted(cx) {
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+        }
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<Result<(), io::Error>> {
+        let mut direct = Pin::into_inner(self);
+
+        // Check for existing error condition
+        match &direct.write_state {
+            WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
+            WriteState::InShutdown => (), // ok, continue
+            WriteState::Active => {
+                match direct.append_close_notify() {
+                    Err(e) => {
+                        return Poll::Ready(Err(e.into()));
+                    }
+                    Ok(()) => {
+                        // Record the fact that shutdown() has been requested. This will cause
+                        // future calls to write() or flush() will fail.
+                        direct.write_state = WriteState::InShutdown;
+                    }
+                }
+            }
+        }
+
+        // Wait until any remaining data has been sent; we don't want to shut down the connection
+        // until this has been sent.
+        match direct.poll_drain_encrypted(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+            Poll::Ready(Ok(())) => (),
+        };
+
+        // There is no remaining data to be sent. Perform the actual shutdown.
+        match Pin::new(&mut direct.stream.plaintext.inner).poll_shutdown(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Ready(Ok(())) => (),
+        }
+
+        // Shutdown is now complete. Cause any future calls to shutdown() to fail. Note that
+        // read() and write() will already fail since we transitioned to the InShutdown state.
+        direct.write_state = WriteState::Error(TLSError::IOError(io::ErrorKind::BrokenPipe));
+        return Poll::Ready(Ok(()));
     }
 }

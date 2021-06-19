@@ -51,6 +51,10 @@ pub fn encrypt_record(
     client_sequence_no: u64,
     transcript: Option<&mut Vec<u8>>,
 ) -> Result<(), TLSError> {
+    if data_ref.len() > TLS_RECORD_SIZE {
+        return Err(TLSError::InvalidPlaintextRecord);
+    }
+
     let mut data = data_ref.to_vec();
 
     match transcript {
@@ -289,27 +293,6 @@ impl EncryptedStream {
     // formerly encode EncryptedToSend
     pub async fn send_direct(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
         self.plaintext.inner.write_all(data).await
-    }
-
-    // formerly encode UnencToSend
-    pub async fn encrypt_and_send(
-        &mut self,
-        data: &[u8],
-        content_type: ContentType,
-    ) -> Result<(), TLSError> {
-        // unimplemented!()
-        let mut dst = BytesMut::new();
-        encrypt_record(
-            &mut dst,
-            &data,
-            content_type,
-            &self.encryption.traffic_secrets.client,
-            self.client_sequence_no,
-            None,
-        )?;
-        self.client_sequence_no += 1;
-        self.send_direct(&dst).await.map_err(|e| TLSError::IOError(e.kind()))?;
-        Ok(())
     }
 
     pub fn receive_message<'a, 'b>(
