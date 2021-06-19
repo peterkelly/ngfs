@@ -335,6 +335,11 @@ fn verify_transcript(
     )
 }
 
+struct HashAndHandshake {
+    hash: Vec<u8>,
+    handshake: Handshake,
+}
+
 pub struct EncryptedHandshake {
     transcript: Vec<u8>,
     config: ClientConfig,
@@ -351,7 +356,7 @@ impl EncryptedHandshake {
         }
     }
 
-    async fn receive_handshake_est(
+    async fn receive_handshake(
         &mut self,
         stream: &mut EncryptedStream,
     ) -> Result<Handshake, TLSError> {
@@ -362,6 +367,17 @@ impl EncryptedHandshake {
         }
     }
 
+    async fn receive_hash_and_handshake(
+        &mut self,
+        stream: &mut EncryptedStream,
+    ) -> Result<HashAndHandshake, TLSError> {
+        let hash = stream.encryption.ciphers.hash_alg.hash(&self.transcript);
+        let handshake = self.receive_handshake(stream).await?;
+        Ok(HashAndHandshake {
+            hash,
+            handshake,
+        })
+    }
 }
 
 async fn receive_plaintext_handshake(
@@ -490,43 +506,54 @@ async fn receive_server_messages(
     conn: &mut EncryptedHandshake,
     stream: &mut EncryptedStream,
 ) -> Result<ServerMessages, TLSError> {
-    // TODO: Allow some of these to be absent depending on the config
-    let handshake = conn.receive_handshake_est(stream).await?;
-    let encrypted_extensions = match handshake {
+    let mut hh: HashAndHandshake;
+
+    hh = conn.receive_hash_and_handshake(stream).await?;
+    let encrypted_extensions = match hh.handshake {
         Handshake::EncryptedExtensions(v) => v,
-        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
+        _ => return Err(TLSError::UnexpectedMessage(hh.handshake.name())),
     };
     println!("Phase two: Got encrypted_extensions");
 
-    let handshake = conn.receive_handshake_est(stream).await?;
-    let certificate_request = match handshake {
-        Handshake::CertificateRequest(v) => Some(v),
-        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
+    hh = conn.receive_hash_and_handshake(stream).await?;
+    let certificate_request = match hh.handshake {
+        Handshake::CertificateRequest(v) => {
+            hh = conn.receive_hash_and_handshake(stream).await?;
+            Some(v)
+        }
+        _ => {
+            None
+        }
     };
     println!("Phase two: Got certificate_request");
 
-    let handshake = conn.receive_handshake_est(stream).await?;
-    let certificate = match handshake {
-        Handshake::Certificate(v) => Some(v),
-        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
+    let certificate = match hh.handshake {
+        Handshake::Certificate(v) => {
+            hh = conn.receive_hash_and_handshake(stream).await?;
+            Some(v)
+        }
+        _ => {
+            None
+        }
     };
-
     println!("Phase two: Got certificate");
-    let certificate_verify_thash = stream.encryption.ciphers.hash_alg.hash(&conn.transcript);
 
-    let handshake = conn.receive_handshake_est(stream).await?;
-    let certificate_verify = match handshake {
-        Handshake::CertificateVerify(v) => Some((v, certificate_verify_thash)),
-        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
+    let certificate_verify = match hh.handshake {
+        Handshake::CertificateVerify(v) => {
+            let r = Some((v, hh.hash));
+            hh = conn.receive_hash_and_handshake(stream).await?;
+            r
+        }
+        _ => {
+            None
+        }
     };
 
     println!("Phase two: Got certificate_verify");
-    let finished_thash = stream.encryption.ciphers.hash_alg.hash(&conn.transcript);
 
-    let handshake = conn.receive_handshake_est(stream).await?;
-    let finished = match handshake {
-        Handshake::Finished(v) => (v, finished_thash),
-        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
+    let finished = match hh.handshake {
+        Handshake::Finished(v) => (v, hh.hash),
+        _ => return Err(TLSError::UnexpectedMessage(hh.handshake.name())),
     };
 
     println!("Phase two: Got finished");
