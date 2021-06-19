@@ -1,62 +1,25 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 // https://github.com/libp2p/specs/blob/master/connections/README.md#connection-upgrade
-
-use ring::rand::SystemRandom;
 
 use std::error::Error;
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncRead, AsyncWrite};
-use ring::agreement::{EphemeralPrivateKey, X25519};
-use ring::signature::{RsaKeyPair, KeyPair};
-use torrent::p2p::{PublicKey, KeyType};
-use torrent::util::{from_hex, escape_string, vec_with_len, BinaryData, DebugHexDump};
+use torrent::util::{escape_string, vec_with_len, DebugHexDump};
 use torrent::error;
 use torrent::protobuf::VarInt;
-use torrent::tls::types::handshake::{
-    CipherSuite,
-    Handshake,
-    ClientHello
-};
+use torrent::libp2p::tls::generate_certificate;
 use torrent::tls::protocol::client::{
-    make_client_hello,
     ServerAuth,
     ClientAuth,
     ClientConfig,
-    establish_connection,
     EstablishedConnection,
-};
-use torrent::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
-use torrent::asn1::writer::encode_item;
-use torrent::x509;
-use torrent::asn1;
-use torrent::x509::{
-    Certificate,
-    TBSCertificate,
-    Version,
-    AlgorithmIdentifier,
-    Name,
-    Validity,
-    SubjectPublicKeyInfo,
-    Time,
-    UTCTime,
-    RelativeDistinguishedName,
-    // Extension,
-    populate_registry,
-    print_certificate,
-    CRYPTO_SHA_256_WITH_RSA_ENCRYPTION,
-    CRYPTO_RSA_ENCRYPTION,
-    X509_COUNTRY_NAME,
-    X509_ORGANIZATION_NAME,
-    X509_COMMON_NAME,
-    X509_AUTHORITY_KEY_IDENTIFIER,
-    X509_BASIC_CONSTRAINTS,
-    X509_KEY_USAGE,
+    establish_connection,
 };
 
 async fn read_multistream_varint(reader: &mut (impl AsyncRead + Unpin)) -> Result<usize, Box<dyn Error>> {
@@ -120,340 +83,16 @@ async fn write_multistream_data_client(
     Ok(())
 }
 
-
-
-
-
-
-fn generate_certificate(
-    key_pair: &RsaKeyPair,
-    libp2p_ext_public_key: &[u8],
-    libp2p_ext_signature: &[u8],
-) -> Result<Vec<u8>, Box<dyn Error>> {
-
-    let mut libp2p_ext_items: Vec<Item> = Vec::new();
-
-
-    // libp2p_ext_items.push(Item::from(Value::BitString(BitString {
-    //     bytes: Vec::from(libp2p_ext_public_key),
-    //     unused_bits: 0,
-    // })));
-    // libp2p_ext_items.push(Item::from(Value::BitString(BitString {
-    //     bytes: Vec::from(libp2p_ext_signature),
-    //     unused_bits: 0,
-    // })));
-
-    libp2p_ext_items.push(Item::from(Value::OctetString(Vec::from(libp2p_ext_public_key))));
-    libp2p_ext_items.push(Item::from(Value::OctetString(Vec::from(libp2p_ext_signature))));
-
-
-
-
-
-
-    let mut libp2p_ext_item = Item::from(Value::Sequence(libp2p_ext_items));
-    let mut libp2p_ext_bytes: Vec<u8> = Vec::new();
-    encode_item(&libp2p_ext_item, &mut libp2p_ext_bytes)?;
-
-
-    // pub serial_number: Integer,
-    let serial_number = from_hex("00fece0a9eaa3eddc3")
-        .ok_or_else(|| error!("Invalid hex string: serial_number"))?;
-
-    let authority_key_identifier = from_hex(
-        &format!("{}{}",
-        "3050a143a441303f310b300906035504061302555331173015060355040a0c0e4d7920506572736f6e",
-        "616c2043413117301506035504030c0e6d792e706572736f6e616c2e6361820900d7c3d885fa68751d"))
-        .ok_or_else(|| error!("Invalid hex string: authority_key_identifier"))?;
-    let basic_constraints = from_hex("3000")
-        .ok_or_else(|| error!("Invalid hex string: basic_constraints"))?;
-    let key_usage = from_hex("030204f0")
-        .ok_or_else(|| error!("Invalid hex string: key_usage"))?;
-
-
-    // let subject_key_pair = std::fs::read(&subcmd.subject_private_key)
-    //     .map_err(|e| error!("{}: {}", subcmd.subject_private_key, e))?;
-    // println!("Got subject_key_pair");
-    // let subject_key_pair = RsaKeyPair::from_der(&subject_key_pair)?;
-    // println!("Got subject_key_pair");
-    let subject_public_key: Vec<u8> = Vec::from(key_pair.public_key().as_ref());
-
-
-
-    // let signer_key_pair_bytes = std::fs::read(&subcmd.signer_private_key)
-    //     .map_err(|e| error!("{}: {}", subcmd.signer_private_key, e))?;
-    // println!("Got signer_key_pair");
-    // let signer_key_pair = RsaKeyPair::from_der(&signer_key_pair_bytes)?;
-
-
-
-    // println!("generate: subject_key = {:?}", subcmd.subject_key);
-    // println!("generate: signing_key = {:?}", subcmd.signing_key);
-    // println!("generate: output = {:?}", subcmd.output);
-    let tbs_certificate = TBSCertificate {
-        version: Version::V3,
-        serial_number: Integer(serial_number.clone()),
-        signature: AlgorithmIdentifier {
-            algorithm: ObjectIdentifier(Vec::from(CRYPTO_SHA_256_WITH_RSA_ENCRYPTION)),
-            parameters: Some(Item::from(Value::Null)),
-        },
-        issuer: Name { parts: vec![
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_COUNTRY_NAME)),
-                value: Item::from(Value::PrintableString(String::from("US"))),
-            },
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_ORGANIZATION_NAME)),
-                value: Item::from(Value::UTF8String(String::from("My Personal CA"))),
-            },
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_COMMON_NAME)),
-                value: Item::from(Value::UTF8String(String::from("my.personal.ca"))),
-            } ] },
-        validity: Validity {
-            not_before: Time::UTCTime(UTCTime { data: String::from("210515162539Z") }),
-            not_after: Time::UTCTime(UTCTime {  data: String::from("220312162539Z") }),
-        },
-        subject: Name { parts: vec![
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_COMMON_NAME)),
-                value: Item::from(Value::UTF8String(String::from("client"))),
-            } ] },
-        subject_public_key_info: SubjectPublicKeyInfo {
-            algorithm: AlgorithmIdentifier {
-                algorithm: ObjectIdentifier(Vec::from(CRYPTO_RSA_ENCRYPTION)),
-                parameters: Some(Item::from(Value::Null)),
-            },
-            subject_public_key: BitString {
-                unused_bits: 0,
-                bytes: subject_public_key,
-            },
-        },
-        issuer_unique_id: None,
-        subject_unique_id: None,
-        extensions: vec![
-            x509::Extension {
-                id: ObjectIdentifier(Vec::from(X509_AUTHORITY_KEY_IDENTIFIER)),
-                critical: false,
-                data: authority_key_identifier,
-            },
-            x509::Extension {
-                id: ObjectIdentifier(Vec::from(X509_BASIC_CONSTRAINTS)),
-                critical: false,
-                data: basic_constraints,
-            },
-            x509::Extension {
-                id: ObjectIdentifier(Vec::from(X509_KEY_USAGE)),
-                critical: false,
-                data: key_usage,
-            },
-            x509::Extension {
-                id: ObjectIdentifier(Vec::from([1, 3, 6, 1, 4, 1, 53594, 1, 1])),
-                critical: true,
-                data: libp2p_ext_bytes,
-            }
-        ],
-    };
-
-    let output_data = sign_tbs_certificate(&tbs_certificate, &key_pair)?;
-    // std::fs::write(&subcmd.output, &output_data).map_err(|e| error!("{}: {}", subcmd.output, e))?;
-    // println!("Wrote {}", subcmd.output);
-
-    Ok(output_data)
-}
-
-fn sign_tbs_certificate(
-    tbs_certificate: &x509::TBSCertificate,
-    signer_key_pair: &ring::signature::RsaKeyPair) -> Result<Vec<u8>, Box<dyn Error>> {
-
-
-    let mut encoded_tbs_certificate: Vec<u8> = Vec::new();
-    encode_item(&tbs_certificate.to_asn1(), &mut encoded_tbs_certificate)?;
-
-    let mut signature = vec![0; signer_key_pair.public_modulus_len()];
-    let rng = ring::rand::SystemRandom::new();
-
-    let encoding = &ring::signature::RSA_PKCS1_SHA256;
-    // let encoding = &ring::signature::RSA_PSS_SHA256; // bad
-    signer_key_pair.sign(encoding, &rng, &encoded_tbs_certificate, &mut signature)
-        .map_err(|e| error!("Signing failed: {}", e))?;
-
-
-    let signature_algorithm = AlgorithmIdentifier {
-        algorithm: ObjectIdentifier(Vec::from(CRYPTO_SHA_256_WITH_RSA_ENCRYPTION)),
-        parameters: Some(Item::from(Value::Null)),
-    };
-    let signature_value = BitString {
-        unused_bits: 0,
-        bytes: signature,
-    };
-
-    wrap_signature(tbs_certificate, &signature_algorithm, &signature_value)
-}
-
-fn wrap_signature(
-    tbs_certificate: &TBSCertificate,
-    signature_algorithm: &AlgorithmIdentifier,
-    signature_value: &BitString) -> Result<Vec<u8>, Box<dyn Error>> {
-
-    let mut items: Vec<Item> = Vec::new();
-    items.push(tbs_certificate.to_asn1());
-    items.push(signature_algorithm.to_asn1());
-    items.push(Item::from(Value::BitString(signature_value.clone())));
-    let item = Item::from(Value::Sequence(items));
-
-    let mut output_data: Vec<u8> = Vec::new();
-    encode_item(&item, &mut output_data)?;
-    Ok(output_data)
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // println!("Start");
 
-    // let rng = ring::rand::SystemRandom::new();
-    // let mut bytes: [u8; 32] = [0; 32];
-    // ring::rand::SecureRandom::fill(&rng, &mut bytes)?;
-    // println!("Filled {} bytes from ring's SystemRandom", bytes.len());
-
-
-
-    use ed25519_dalek::{Keypair, Signature, Signer};
-    // use rand_chacha::rand_core::SeedableRng;
-    // use ed25519_dalek::*;
-
-    // let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
     let mut rng = rand::rngs::OsRng {};
-    let dalek_keypair: Keypair = Keypair::generate(&mut rng);
+    let dalek_keypair: ed25519_dalek::Keypair = ed25519_dalek::Keypair::generate(&mut rng);
 
+    let client_key = openssl::rsa::Rsa::generate(2048)?.private_key_to_der()?;
+    let rsa_key_pair = ring::signature::RsaKeyPair::from_der(&client_key)?;
+    let certificate = generate_certificate(&rsa_key_pair, &dalek_keypair)?;
 
-    use ed25519_dalek::{PUBLIC_KEY_LENGTH, SECRET_KEY_LENGTH, KEYPAIR_LENGTH, SIGNATURE_LENGTH};
-
-    let public_key = &dalek_keypair.public;
-
-    let public_key_bytes: [u8; PUBLIC_KEY_LENGTH] = public_key.to_bytes();     // 32
-    let secret_key_bytes: [u8; SECRET_KEY_LENGTH] = dalek_keypair.secret.to_bytes(); // 32
-    let keypair_bytes:    [u8; KEYPAIR_LENGTH]    = dalek_keypair.to_bytes();        // 64
-    // let signature_bytes:  [u8; SIGNATURE_LENGTH]  = signature.to_bytes();
-
-
-    println!("public_key_bytes.len() = {}", public_key_bytes.len());
-    println!("secret_key_bytes.len() = {}", secret_key_bytes.len());
-    println!("keypair_bytes.len()    = {}", keypair_bytes.len());
-
-
-    let libp2p_public_key = PublicKey {
-        key_type: KeyType::Ed25519,
-        data: Vec::from(public_key_bytes),
-    };
-    let libp2p_public_key_bytes = libp2p_public_key.to_pb();
-
-
-    // use rand::{RngCore, thread_rng};
-    // use rand::SeedableRng;
-    // use rsa::PrivateKeyEncoding;
-    // // let mut rng = rand::rngs::OsRng;
-
-
-    // println!("Here 0");
-    // let mut key = [0u8; 16];
-    // OsRng.fill_bytes(&mut key);
-    // let random_u64 = OsRng.next_u64();
-    // println!("random_u64 = {}", random_u64);
-
-    // println!("Here 1");
-    // let new_private_key = rsa::RSAPrivateKey::new(&mut rng, 2048)?;
-    // println!("Here 2");
-    // let new_private_key_pkcs8: Vec<u8> = new_private_key.to_pkcs1()?;
-    // println!("Here 3");
-    // let key_pair = ring::signature::RsaKeyPair::from_der(&new_private_key_pkcs8)?;
-    // println!("Generated key pair");
-    // let certificate = generate_certificate(&key_pair)?;
-    // println!("Generated certificate");
-
-    println!("Before openssl key generation");
-    let local_rsa_private_key = openssl::rsa::Rsa::generate(2048)?;
-    let client_key = local_rsa_private_key.private_key_to_der()?;
-    println!("After openssl key generation");
-
-    // let client_cert = std::fs::read("nginx/conf/client.crt.der")?;
-    // let client_key = std::fs::read("nginx/conf/client.key.der")?;
-
-    let key_pair = ring::signature::RsaKeyPair::from_der(&client_key)?;
-    println!("Generated key pair");
-
-
-
-    let p2p_subject_public_key_info = SubjectPublicKeyInfo {
-        algorithm: AlgorithmIdentifier {
-            algorithm: ObjectIdentifier(Vec::from(CRYPTO_RSA_ENCRYPTION)),
-            parameters: Some(Item::from(Value::Null)),
-        },
-        subject_public_key: BitString {
-            unused_bits: 0,
-            bytes: Vec::from(key_pair.public_key().as_ref()),
-        },
-    };
-    let p2p_subject_public_key_info_item = p2p_subject_public_key_info.to_asn1();
-    let mut p2p_subject_public_key_info_bytes: Vec<u8> = Vec::new();
-    encode_item(&p2p_subject_public_key_info_item, &mut p2p_subject_public_key_info_bytes)?;
-
-
-
-
-
-
-
-
-
-
-
-    let mut signature_input: Vec<u8> = Vec::new();
-    signature_input.extend_from_slice(b"libp2p-tls-handshake:");
-    // signature_input.extend_from_slice(key_pair.public_key().as_ref());
-    signature_input.extend_from_slice(&p2p_subject_public_key_info_bytes);
-    let signature: Signature = dalek_keypair.sign(&signature_input);
-
-    let certificate: Vec<u8> = generate_certificate(
-        &key_pair,
-        &libp2p_public_key_bytes,
-        &signature.to_bytes())?;
     println!("Generated certificate");
 
     let config = ClientConfig {
@@ -464,14 +103,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         server_auth: ServerAuth::SelfSigned,
         server_name: None,
     };
-
-
-
-
-
-
-
-
 
     let mut socket = TcpStream::connect("localhost:4001").await?;
 
@@ -486,13 +117,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let data = read_multistream_data(&mut socket).await?;
     println!("{:#?}", &DebugHexDump(&data));
     println!("Got {}", escape_string(&String::from_utf8_lossy(&data)));
-
-
-
-
-
-
-
 
     println!("Before establish_connection()");
     let mut conn = establish_connection(socket, config).await?;

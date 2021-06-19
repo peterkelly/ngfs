@@ -12,6 +12,7 @@ pub mod tls;
 pub mod asn1;
 pub mod x509;
 pub mod crypt;
+pub mod libp2p;
 
 use std::fmt;
 use std::error::Error;
