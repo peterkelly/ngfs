@@ -100,8 +100,6 @@ fn poll_receive_record(
 
 
         if incoming_data.remaining() >= 5 + length {
-            println!("ReceiveRecord: Parsing fragment of len {}; content_type = {:?}",
-                     length, content_type);
             let mut header: [u8; 5] = [
                 incoming_data[0],
                 incoming_data[1],
@@ -116,7 +114,6 @@ fn poll_receive_record(
             let mut raw: Vec<u8> = Vec::new();
             raw.extend_from_slice(&incoming_data);
 
-            println!("ReceiveRecord: raw.len() = {}", raw.len());
             let record = TLSOwnedPlaintext {
                 content_type,
                 legacy_record_version,
@@ -140,13 +137,10 @@ fn poll_receive_record(
 
     match AsyncRead::poll_read(Pin::new(reader), cx, &mut recv_buf) {
         Poll::Ready(Err(e)) => {
-            // println!("ReceiveRecord::poll(): inner returned error");
             Poll::Ready(Err(TLSError::IOError(e.kind())))
         }
         Poll::Ready(Ok(())) => {
-            // println!("ReceiveRecord::poll(): inner is ready");
             let new_filled = recv_buf.filled().len();
-            // println!("data = {}", &BinaryData(recv_buf.filled()));
             let extra = new_filled - old_filled;
             // If extra is 0, either we have unexpected end of data or the connection
             // has been closed.
@@ -156,13 +150,11 @@ fn poll_receive_record(
             else {
                 incoming_data.extend_from_slice(recv_buf.filled());
 
-                // println!("want = {}, have = {}", want, incoming_data.len());
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
         }
         Poll::Pending => {
-            println!("ReceiveRecord::poll(): inner is not ready");
             Poll::Pending
         }
     }
@@ -379,16 +371,12 @@ fn poll_receive_encrypted_message(
         Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
         Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
         Poll::Ready(Ok(Some(plaintext))) => {
-            println!("ReceiveEncryptedMessage: plaintext.raw.len() = {}, server_sequence_no =  {}",
-                plaintext.raw.len(), server_sequence_no);
             // TODO: Support records containing multiple handshake messages
             // TODO: Cater for alerts
             let (message, message_raw) = decrypt_message(
                 *server_sequence_no,
                 &encryption.traffic_secrets.server,
                 &plaintext.raw)?;
-            println!("ReceiveEncryptedMessage: after decryption; message = {}",
-                     message.name());
             *server_sequence_no += 1;
             match transcript {
                 Some(transcript) => transcript.extend_from_slice(&message_raw),

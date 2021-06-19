@@ -215,25 +215,15 @@ async fn send_client_certificate(
             }
         ],
     });
-
-
-    println!("old transcript len = {}", transcript.len());
     send_handshake(&handshake, Some(transcript), stream).await?;
-    println!("new transcript len = {}", transcript.len());
-
     let thash: Vec<u8> = hash_alg.hash(transcript);
-
     let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
-
     let signature = rsa_sign(client_key_data, &verify_input, signature_scheme, rng)?;
-
-
     let handshake = Handshake::CertificateVerify(CertificateVerify {
         algorithm: signature_scheme,
         signature: signature,
     });
     send_handshake(&handshake, Some(transcript), stream).await?;
-
     Ok(())
 }
 
@@ -481,19 +471,11 @@ fn get_handshake_encryption(
     server_hello: &ServerHello,
     private_key: EphemeralPrivateKey,
 ) -> Result<HandshakeEncryption, TLSError> {
-
-    println!("PhaseOne: Received ServerHello");
-    println!("{:#?}", &Indent(&server_hello));
     let ciphers = Ciphers::from_server_hello(&server_hello)?;
-
     let secret = get_server_hello_x25519_shared_secret(private_key, &server_hello)
         .ok_or_else(|| TLSError::GetSharedSecretFailed)?;
-    println!("Shared secret = {}", BinaryData(&secret));
-
     let prk = get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), &secret)?;
     let traffic_secrets = TrafficSecrets::derive_from(&ciphers, transcript, &prk, "hs")?;
-    println!("KEY CLIENT_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&traffic_secrets.client.raw));
-    println!("KEY SERVER_HANDSHAKE_TRAFFIC_SECRET = {}", BinaryData(&traffic_secrets.server.raw));
     Ok(HandshakeEncryption { traffic_secrets, ciphers, prk })
 }
 
@@ -516,7 +498,6 @@ async fn receive_server_messages(
         Handshake::EncryptedExtensions(v) => v,
         _ => return Err(TLSError::UnexpectedMessage(hh.handshake.name())),
     };
-    println!("Phase two: Got encrypted_extensions");
 
     hh = conn.receive_hash_and_handshake(stream).await?;
     let certificate_request = match hh.handshake {
@@ -528,7 +509,6 @@ async fn receive_server_messages(
             None
         }
     };
-    println!("Phase two: Got certificate_request");
 
     let certificate = match hh.handshake {
         Handshake::Certificate(v) => {
@@ -539,7 +519,6 @@ async fn receive_server_messages(
             None
         }
     };
-    println!("Phase two: Got certificate");
 
     let certificate_verify = match hh.handshake {
         Handshake::CertificateVerify(v) => {
@@ -552,14 +531,10 @@ async fn receive_server_messages(
         }
     };
 
-    println!("Phase two: Got certificate_verify");
-
     let finished = match hh.handshake {
         Handshake::Finished(v) => (v, hh.hash),
         _ => return Err(TLSError::UnexpectedMessage(hh.handshake.name())),
     };
-
-    println!("Phase two: Got finished");
 
     Ok(ServerMessages {
         encrypted_extensions,
@@ -591,16 +566,10 @@ async fn do_phase_two(
         .map_err(|e| TLSError::Internal(e))?;
 
     let application_secrets = TrafficSecrets::derive_from(&ciphers, &conn.transcript, &new_prk, "ap")?;
-    println!("KEY CLIENT_TRAFFIC_SECRET_0 = {}", BinaryData(&application_secrets.client.raw));
-    println!("KEY SERVER_TRAFFIC_SECRET_0 = {}", BinaryData(&application_secrets.server.raw));
-
-
     // let mut bad_finished = Finished { verify_data: finished.verify_data.clone() };
     // bad_finished.verify_data.push(0);
-    println!("Before verify_finished()");
     let (finished, finished_thash) = &sm.finished;
     verify_finished(ciphers.hash_alg, &secrets.server, finished_thash, finished)?;
-    println!("After  verify_finished()");
 
     let first_cert_entry : &CertificateEntry = match &sm.certificate {
         Some(certificate) => {
@@ -624,13 +593,7 @@ async fn do_phase_two(
         ServerAuth::CertificateAuthority(v) => v,
         ServerAuth::SelfSigned => &server_cert_raw,
     };
-
-    println!("Before verify_certificate()");
     verify_certificate(ca_cert, &server_cert_raw)?;
-    println!("After  verify_certificate()");
-
-
-    println!("Before verify_transcript()");
 
     match &sm.certificate_verify {
         Some((certificate_verify, certificate_verify_thash)) => {
@@ -645,7 +608,6 @@ async fn do_phase_two(
             return Err(TLSError::MissingCertificateVerifyMessage);
         }
     }
-    println!("After  verify_transcript()");
 
     // FIXME: Don't hard-code SignatureScheme
     match &conn.config.client_auth {
@@ -654,7 +616,6 @@ async fn do_phase_two(
             let client_key = key;
 
             let rng = SystemRandom::new();
-            println!("Before send_client_certificate()");
             send_client_certificate(
                 ciphers.hash_alg, // hash_alg: HashAlgorithm,
                 &mut conn.transcript, // transcript: &mut Vec<u8>,
@@ -664,8 +625,6 @@ async fn do_phase_two(
                 &rng,
                 stream,
             ).await?;
-
-            println!("After  send_client_certificate()");
         }
         ClientAuth::None => {
         }
@@ -675,7 +634,6 @@ async fn do_phase_two(
 
     // let mut bad_new_thash = new_thash.clone();
     // bad_new_thash.push(0);
-    println!("Before send_finished()");
     send_finished(
         ciphers.hash_alg,
         &new_thash,
@@ -759,25 +717,20 @@ impl EstablishedConnection {
 
     fn poll_drain_encrypted(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
         while self.outgoing_encrypted.len() > 0 {
-            // println!("poll_drain_encrypted: outgoing_encrypted.len() = {}", self.outgoing_encrypted.len());
             match AsyncWrite::poll_write(Pin::new(&mut self.stream.plaintext.inner), cx, &self.outgoing_encrypted) {
                 Poll::Ready(Ok(w)) => {
-                    // println!("poll_drain_encrypted: wrote {} bytes", w);
                     self.outgoing_encrypted.advance(w);
                 }
                 Poll::Ready(Err(e)) => {
-                    // let x: () = e;
                     let tls_e: TLSError = TLSError::IOError(e.kind());
                     self.write_state = WriteState::Error(tls_e.clone());
                     return Poll::Ready(Err(tls_e));
                 }
                 Poll::Pending => {
-                    // println!("poll_drain_encrypted: pending");
                     return Poll::Pending;
                 }
             }
         }
-        // println!("poll_drain_encrypted: outgoing_encrypted.len() = {}", self.outgoing_encrypted.len());
         return Poll::Ready(Ok(()));
     }
 
@@ -790,8 +743,7 @@ impl EstablishedConnection {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
                 Poll::Ready(Ok(Some(Message::Handshake(Handshake::NewSessionTicket(ticket))))) => {
-                    println!("poll_fill_incoming: got ticket (ignoring)");
-                    // println!("ticket = {:#?}", ticket);
+                    // ignore; repeat loop
                 }
                 Poll::Ready(Ok(Some(Message::ApplicationData(data)))) => {
                     self.incoming_decrypted.extend_from_slice(&data);
@@ -853,8 +805,6 @@ impl AsyncWrite for EstablishedConnection {
         cx: &mut Context<'_>,
         buf: &[u8]
     ) -> Poll<Result<usize, io::Error>> {
-        println!("EstablishedConnection::poll_write: buf.len() = {}", buf.len());
-
         // Check for existing error condition
         match &self.write_state {
             WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
