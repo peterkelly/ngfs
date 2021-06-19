@@ -2,7 +2,6 @@ use std::error::Error;
 use std::fmt;
 use super::super::crypt::CryptError;
 use super::types::alert::Alert;
-use super::types::record::ContentType;
 use ring::error::KeyRejected;
 
 #[derive(Debug, Clone)]
@@ -10,8 +9,7 @@ pub enum TLSError {
     EncryptionFailed,
     DecryptionFailed,
     MessageEncodingFailed,
-    UnexpectedMessage(ContentType),
-    UnexpectedHandshake(String),
+    UnexpectedMessage(&'static str),
     UnexpectedEOF,
     UnexpectedAlert(Alert),
     InvalidPlaintextRecord,

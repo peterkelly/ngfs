@@ -357,7 +357,7 @@ impl EncryptedHandshake {
     ) -> Result<Handshake, TLSError> {
         match stream.receive_message(Some(&mut self.transcript)).await? {
             Some(Message::Handshake(hs)) => Ok(hs),
-            Some(message) => Err(TLSError::UnexpectedMessage(message.content_type())),
+            Some(message) => Err(TLSError::UnexpectedMessage(message.name())),
             None => Err(TLSError::UnexpectedEOF),
         }
     }
@@ -370,7 +370,7 @@ async fn receive_plaintext_handshake(
 ) -> Result<Option<Handshake>, TLSError> {
     match stream.receive_plaintext_message(transcript).await? {
         Some(Message::Handshake(hs)) => Ok(Some(hs)),
-        Some(message) => Err(TLSError::UnexpectedMessage(message.content_type())),
+        Some(message) => Err(TLSError::UnexpectedMessage(message.name())),
         None => Err(TLSError::UnexpectedEOF),
     }
 }
@@ -382,7 +382,7 @@ async fn receive_server_hello(
     let handshake = receive_plaintext_handshake(stream, transcript).await?;
     match handshake {
         Some(Handshake::ServerHello(v)) => Ok(v),
-        Some(handshake) => Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
+        Some(handshake) => Err(TLSError::UnexpectedMessage(handshake.name())),
         None => Err(TLSError::UnexpectedEOF),
     }
 }
@@ -494,21 +494,21 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_est(stream).await?;
     let encrypted_extensions = match handshake {
         Handshake::EncryptedExtensions(v) => v,
-        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
+        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
     };
     println!("Phase two: Got encrypted_extensions");
 
     let handshake = conn.receive_handshake_est(stream).await?;
     let certificate_request = match handshake {
         Handshake::CertificateRequest(v) => Some(v),
-        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
+        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
     };
     println!("Phase two: Got certificate_request");
 
     let handshake = conn.receive_handshake_est(stream).await?;
     let certificate = match handshake {
         Handshake::Certificate(v) => Some(v),
-        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
+        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
     };
 
     println!("Phase two: Got certificate");
@@ -517,7 +517,7 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_est(stream).await?;
     let certificate_verify = match handshake {
         Handshake::CertificateVerify(v) => Some((v, certificate_verify_thash)),
-        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
+        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
     };
 
     println!("Phase two: Got certificate_verify");
@@ -526,7 +526,7 @@ async fn receive_server_messages(
     let handshake = conn.receive_handshake_est(stream).await?;
     let finished = match handshake {
         Handshake::Finished(v) => (v, finished_thash),
-        _ => return Err(TLSError::UnexpectedHandshake(String::from(handshake.name()))),
+        _ => return Err(TLSError::UnexpectedMessage(handshake.name())),
     };
 
     println!("Phase two: Got finished");
@@ -701,7 +701,7 @@ impl EstablishedConnection {
                 }
                 Poll::Ready(Ok(Some(message))) => {
                     self.read_closed = true;
-                    return Poll::Ready(Err(TLSError::UnexpectedMessage(message.content_type())));
+                    return Poll::Ready(Err(TLSError::UnexpectedMessage(message.name())));
                 }
                 Poll::Ready(Ok(None)) => {
                     self.read_closed = true;
