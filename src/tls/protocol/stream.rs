@@ -144,16 +144,18 @@ fn poll_receive_record(
             let new_filled = recv_buf.filled().len();
             // println!("data = {}", &BinaryData(recv_buf.filled()));
             let extra = new_filled - old_filled;
-            // TODO: if extra is 0, either we have unexpected end of data or the connection
-            // has been closed. RecordReceiver should actually return Option<Record> so that
-            // it can use None to indicate there are no more records.
-            // println!("# of bytes read = {}", extra);
-            // self_ok_done()
-            incoming_data.extend_from_slice(recv_buf.filled());
+            // If extra is 0, either we have unexpected end of data or the connection
+            // has been closed.
+            if extra == 0 {
+                Poll::Ready(Ok(None))
+            }
+            else {
+                incoming_data.extend_from_slice(recv_buf.filled());
 
-            // println!("want = {}, have = {}", want, incoming_data.len());
-            cx.waker().wake_by_ref();
-            Poll::Pending
+                // println!("want = {}, have = {}", want, incoming_data.len());
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
         }
         Poll::Pending => {
             println!("ReceiveRecord::poll(): inner is not ready");

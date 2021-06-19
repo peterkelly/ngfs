@@ -70,6 +70,7 @@ use super::super::types::record::{
 };
 use super::super::types::alert::{
     Alert,
+    AlertDescription,
 };
 use super::super::error::{
     TLSError,
@@ -684,11 +685,23 @@ async fn do_phase_two(
     })
 }
 
+enum ReadState {
+    Active,
+    Eof,
+    Error(TLSError),
+}
+
+enum WriteState {
+    Active,
+    Eof,
+    Error(TLSError),
+}
+
 pub struct EstablishedConnection {
     stream: EncryptedStream,
     incoming_decrypted: BytesMut,
-    read_closed: bool,
-    write_closed: bool,
+    read_state: ReadState,
+    write_state: WriteState,
 }
 
 impl EstablishedConnection {
@@ -696,8 +709,8 @@ impl EstablishedConnection {
         EstablishedConnection {
             stream: stream,
             incoming_decrypted: BytesMut::new(),
-            read_closed: false,
-            write_closed: false,
+            read_state: ReadState::Active,
+            write_state: WriteState::Active,
         }
     }
 
@@ -723,16 +736,23 @@ impl EstablishedConnection {
                     return Poll::Ready(Ok(()));
                 }
                 Poll::Ready(Ok(Some(Message::Alert(alert)))) => {
-                    self.read_closed = true;
-                    return Poll::Ready(Err(TLSError::UnexpectedAlert(alert)));
+                    if alert.description == AlertDescription::CloseNotify {
+                        self.read_state = ReadState::Eof;
+                        return Poll::Ready(Ok(()));
+                    }
+                    let e = TLSError::UnexpectedAlert(alert);
+                    self.read_state = ReadState::Error(e.clone());
+                    return Poll::Ready(Err(e));
                 }
                 Poll::Ready(Ok(Some(message))) => {
-                    self.read_closed = true;
-                    return Poll::Ready(Err(TLSError::UnexpectedMessage(message.name())));
+                    let e = TLSError::UnexpectedMessage(message.name());
+                    self.read_state = ReadState::Error(e.clone());
+                    return Poll::Ready(Err(e));
                 }
                 Poll::Ready(Ok(None)) => {
-                    self.read_closed = true;
-                    return Poll::Ready(Err(TLSError::UnexpectedEOF));
+                    let e = TLSError::UnexpectedEOF;
+                    self.read_state = ReadState::Error(e.clone());
+                    return Poll::Ready(Err(e));
                 }
             }
         }
@@ -745,21 +765,15 @@ impl AsyncRead for EstablishedConnection {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>
     ) -> Poll<Result<(), std::io::Error>> {
-        if self.read_closed {
-            return Poll::Ready(
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    error!("Read end is closed"))));
+        match &self.read_state {
+            ReadState::Eof => return Poll::Ready(Ok(())),
+            ReadState::Error(e) => return Poll::Ready(Err(e.clone().into())),
+            ReadState::Active => (),
         }
         let direct = Pin::into_inner(self);
         match direct.poll_fill_incoming(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        error!("{}", e))))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
             Poll::Ready(Ok(())) => {
                 let amt = std::cmp::min(direct.incoming_decrypted.remaining(), buf.remaining());
                 buf.put_slice(&direct.incoming_decrypted[0..amt]);

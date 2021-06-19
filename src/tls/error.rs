@@ -40,6 +40,7 @@ impl Into<std::io::Error> for TLSError {
     fn into(self) -> std::io::Error {
         match self {
             TLSError::IOError(kind) => std::io::Error::from(kind),
+            TLSError::UnexpectedEOF => std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
             _ => std::io::Error::new(std::io::ErrorKind::Other, self),
         }
     }

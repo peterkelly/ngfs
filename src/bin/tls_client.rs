@@ -187,13 +187,19 @@ async fn test_http(
     aconn: &mut EstablishedConnection,
 ) -> Result<(), Box<dyn Error>>
 {
-    aconn.write_normal(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await?;
+    aconn.write_normal(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await?;
     loop {
         let mut buf = vec_with_len(65536);
         let r = aconn.read(&mut buf).await?;
+        if r == 0 {
+            println!("received EOF");
+            break;
+        }
+        println!("r = {}", r);
         println!("receive application data =");
         println!("{:#?}", Indent(&DebugHexDump(&buf[0..r])));
     }
+    Ok(())
 }
 
 async fn test_client() -> Result<(), Box<dyn Error>> {
