@@ -730,7 +730,12 @@ impl EstablishedConnection {
                 }
             }
         }
-        return Poll::Ready(Ok(()));
+
+        match AsyncWrite::poll_flush(Pin::new(&mut self.stream.plaintext.inner), cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(TLSError::IOError(e.kind()))),
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
