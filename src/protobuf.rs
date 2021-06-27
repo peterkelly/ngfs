@@ -11,10 +11,10 @@ use std::error::Error;
 use std::convert::TryInto;
 use super::error;
 
-pub struct VarInt<'a>(&'a [u8]);
-pub struct Bits32([u8; 4]);
-pub struct Bits64([u8; 8]);
-pub struct Bytes<'a>(&'a [u8]);
+pub struct VarInt<'a>(pub &'a [u8]);
+pub struct Bits32(pub [u8; 4]);
+pub struct Bits64(pub [u8; 8]);
+pub struct Bytes<'a>(pub &'a [u8]);
 
 impl<'a> VarInt<'a> {
     pub fn to_u64(&self) -> u64 {

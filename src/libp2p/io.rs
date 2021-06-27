@@ -12,22 +12,24 @@ use crate::protobuf::VarInt;
 pub async fn read_varint<T>(reader: &mut T) -> Result<u64, io::Error>
     where T : AsyncRead + Unpin
 {
-    let mut buf: [u8; 1] = [0; 1];
-    let mut value: u64 = 0;
+    let mut parts: Vec<u8> = Vec::new();
     loop {
-        match reader.read(&mut buf).await {
-            Err(e) => return Err(e),
-            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(_) => {
-                let b = buf[0];
-                value = (value << 7) | ((b & 0x7f) as u64);
-                if b & 0x80 == 0 {
-                    break;
-                }
-            }
-        };
+        let b = reader.read_u8().await?;
+        parts.push(b);
+        if b & 0x80 == 0 {
+            break;
+        }
     }
-    Ok(value)
+
+    Ok(VarInt(&parts).to_u64())
+}
+
+pub async fn write_varint<T>(writer: &mut T, value: u64) -> Result<(), io::Error>
+    where T : AsyncWrite + Unpin
+{
+    let value_bytes = VarInt::encode_u64(value);
+    writer.write_all(&value_bytes).await?;
+    Ok(())
 }
 
 pub async fn read_length_prefixed_data<T>(reader: &mut T) -> Result<Vec<u8>, io::Error>
