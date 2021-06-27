@@ -7,17 +7,36 @@
 
 // https://github.com/libp2p/specs/blob/master/connections/README.md#connection-upgrade
 
+const ID_PROTOCOL: &[u8] = b"/ipfs/id/1.0.0\n";
+const ID_PROTOCOL_STR: &str = "/ipfs/id/1.0.0";
+
+use std::fmt;
 use std::error::Error;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use bytes::{Bytes, BytesMut, Buf, BufMut};
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
-use torrent::util::{escape_string, vec_with_len, DebugHexDump};
+use torrent::protobuf::PBufReader;
+use torrent::p2p::{PublicKey, KeyType};
+use torrent::util::{escape_string, vec_with_len, from_hex, Indent, DebugHexDump, BinaryData};
+use torrent::libp2p::multiaddr::{MultiAddr, Addr};
+use torrent::libp2p::identify::{Identify, SignedPeerRecord};
 use torrent::libp2p::tls::generate_certificate;
-use torrent::libp2p::io::{read_length_prefixed_data, write_length_prefixed_data};
+use torrent::libp2p::io::{
+    read_length_prefixed_data,
+    write_length_prefixed_data,
+};
 use torrent::libp2p::multistream::{
     multistream_handshake,
     multistream_list,
     multistream_select,
     SelectResponse,
+};
+use torrent::libp2p::mplex::{
+    MplexAcceptor,
+    MplexConnector,
+    Mplex,
 };
 use torrent::tls::protocol::client::{
     ServerAuth,
@@ -25,18 +44,85 @@ use torrent::tls::protocol::client::{
     ClientConfig,
     establish_connection,
 };
+use torrent::io::AsyncStream;
 use torrent::error;
+use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
+use torrent::ipfs::identify::identify_handler;
 
+async fn connection_handler2(
+    node: Arc<IPFSNode>,
+    services: Arc<ServiceRegistry>,
+    mut stream: Box<dyn AsyncStream>) -> Result<(), Box<dyn Error>> {
+
+
+    multistream_handshake(&mut stream).await?;
+    println!("After multistream_handshake");
+
+    loop {
+        let data = read_length_prefixed_data(&mut stream).await?;
+        println!("read {}", escape_string(&String::from_utf8_lossy(&data).to_string()));
+        match services.lookup(&data) {
+            Some(handler) => {
+                write_length_prefixed_data(&mut stream, ID_PROTOCOL).await?;
+                stream.flush().await?;
+                handler(node, stream);
+                return Ok(())
+            }
+            None => {
+                write_length_prefixed_data(&mut stream, b"na\n").await?;
+                stream.flush().await?;
+            }
+        }
+    }
+}
+
+async fn connection_handler(
+    node: Arc<IPFSNode>,
+    services: Arc<ServiceRegistry>,
+    stream: Box<dyn AsyncStream>)
+{
+    match connection_handler2(node, services, stream).await {
+        Ok(()) => {},
+        Err(e) => {
+            eprintln!("Handler error: {}", e);
+        }
+    }
+}
+
+async fn accept_loop(
+    node: Arc<IPFSNode>,
+    services: Arc<ServiceRegistry>,
+    mut acceptor: MplexAcceptor) {
+    loop {
+        // println!("Before accept");
+        let mut stream = match acceptor.accept().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Acceptor: {}", e);
+                return;
+            }
+        };
+        // println!("After accept");
+        tokio::spawn(connection_handler(
+            node.clone(),
+            services.clone(),
+            Box::new(stream)));
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut rng = rand::rngs::OsRng {};
     let dalek_keypair: ed25519_dalek::Keypair = ed25519_dalek::Keypair::generate(&mut rng);
+    let node = Arc::new(IPFSNode::new(dalek_keypair));
+    let mut registry = ServiceRegistry::new();
+    registry.add(ID_PROTOCOL_STR, Box::new(&identify_handler));
+    let registry = Arc::new(registry);
 
     let client_key = openssl::rsa::Rsa::generate(2048)?.private_key_to_der()?;
     let rsa_key_pair = ring::signature::RsaKeyPair::from_der(&client_key)?;
-    let certificate = generate_certificate(&rsa_key_pair, &dalek_keypair)?;
+    let certificate = generate_certificate(&rsa_key_pair, &node.dalek_keypair)?;
 
     println!("Generated certificate");
 
@@ -88,5 +174,50 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Negotiated /mplex/6.7.0");
 
-    Ok(())
+    let mut mplex = Mplex::new(conn);
+    mplex.set_logging_enabled(true);
+
+    let (mut acceptor, mut connector) = mplex.split();
+    tokio::spawn(accept_loop(node.clone(), registry.clone(), acceptor));
+
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+
+    let mut id_stream = connector.connect(Some("id-test")).await?;
+    write_length_prefixed_data(&mut id_stream, b"/multistream/1.0.0\n").await?;
+    id_stream.flush().await?;
+    write_length_prefixed_data(&mut id_stream, ID_PROTOCOL).await?;
+    id_stream.flush().await?;
+    loop {
+        let mut buf: [u8; 1024] = [0; 1024];
+        let r = id_stream.read(&mut buf).await?;
+        if r == 0 {
+            println!("Finished reading");
+            break;
+        }
+        println!("Received data:");
+        println!("{:#?}", BinaryData(&buf[0..r]));
+    }
+
+    // println!("Before id");
+    // id_stream.write_all(&[0x81]).await?;
+    // id_stream.flush().await?;
+    // id_stream.write_all(&[0x82]).await?;
+    // id_stream.flush().await?;
+    // id_stream.write_all(&[0x83]).await?;
+    // id_stream.flush().await?;
+    // id_stream.write_all(&[0x84]).await?;
+    // id_stream.flush().await?;
+    // // let data = read_length_prefixed_data(&mut id_stream).await?;
+    // // println!("Read {:#?}", BinaryData(&data));
+    // multistream_handshake(&mut id_stream).await?;
+    // multistream_select(&mut id_stream, b"/ipfs/id/1.0.0\n").await?;
+    // println!("Started id");
+
+
+    loop {
+        // keep the process alive
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+    }
+    // Ok(())
+
 }

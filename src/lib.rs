@@ -13,6 +13,7 @@ pub mod asn1;
 pub mod x509;
 pub mod crypt;
 pub mod libp2p;
+pub mod ipfs;
 pub mod io;
 
 use std::fmt;
