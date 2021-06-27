@@ -5,6 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
+use std::fmt;
 use std::error::Error;
 use tokio::net::{lookup_host};
 use std::net::SocketAddr;
@@ -48,6 +49,15 @@ pub enum KeyType {
 pub struct PublicKey {
     pub key_type: KeyType,
     pub data: Vec<u8>,
+}
+
+impl fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PublicKey")
+            .field("key_type", &self.key_type)
+            .field("data", &BinaryData(&self.data))
+            .finish()
+    }
 }
 
 impl PublicKey {
