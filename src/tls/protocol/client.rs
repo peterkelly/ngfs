@@ -21,7 +21,6 @@ use super::stream::{
     encrypt_record,
     PlaintextStream,
     EncryptedStream,
-    AsyncReadWrite,
 };
 use super::super::helpers::{
     EncryptionKey,
@@ -422,7 +421,7 @@ pub async fn establish_connection<T: 'static>(
     transport: T,
     config: ClientConfig,
 ) -> Result<EstablishedConnection, TLSError>
-    where T : AsyncRead + AsyncWrite + Unpin
+    where T : AsyncRead + AsyncWrite + Unpin + Send
 {
     let transport = Box::new(transport);
     let private_key = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
