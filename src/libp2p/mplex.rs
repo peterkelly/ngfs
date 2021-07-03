@@ -28,17 +28,120 @@ use crate::protobuf::VarInt;
 
 const MAX_OUTSTANDING_DATA: usize = 65536;
 
+struct InternalReader {
+    waker: Option<Waker>,
+}
+
+struct InternalWriter {
+}
+
+impl InternalReader {
+    fn new() -> Self {
+        InternalReader {
+            waker: None,
+        }
+    }
+}
+
+impl InternalWriter {
+    fn new() -> Self {
+        InternalWriter {
+        }
+    }
+}
+
+struct MplexStreams {
+    accept_waker: Option<Waker>,
+    readers: HashMap<StreamId, InternalReader>,
+    writers: HashMap<StreamId, InternalWriter>,
+}
+
+impl MplexStreams {
+    fn new() -> Self {
+        MplexStreams {
+            accept_waker: None,
+            readers: HashMap::new(),
+            writers: HashMap::new(),
+        }
+    }
+
+    fn wake_accept(&mut self) {
+        self.accept_waker.take().map(|w| w.wake());
+    }
+
+    fn set_accept_waker(&mut self, waker: Waker) {
+        self.accept_waker = Some(waker);
+    }
+
+    fn wake_reader(&mut self, stream_id: &StreamId) {
+        if let Some(reader) = self.readers.get_mut(stream_id) {
+            reader.waker.take().map(|w| w.wake());
+        }
+    }
+
+    fn set_read_waker(&mut self, stream_id: &StreamId, waker: Waker) {
+        if let Some(reader) = self.readers.get_mut(stream_id) {
+            reader.waker = Some(waker);
+        }
+    }
+
+    fn wake_all_readers(&mut self) {
+        self.wake_accept();
+        for (_, reader) in self.readers.iter_mut() {
+            reader.waker.take().map(|w| w.wake());
+        }
+    }
+
+    fn add(&mut self, stream_id: &StreamId) {
+        let reader = InternalReader::new();
+        let writer = InternalWriter::new();
+        self.readers.insert(stream_id.clone(), reader);
+        self.writers.insert(stream_id.clone(), writer);
+        self.print_readers_writers();
+    }
+
+    fn remove_reader(&mut self, stream_id: &StreamId) {
+        self.readers.remove(stream_id);
+        self.wake_all_readers();
+        self.print_readers_writers();
+    }
+
+    fn remove_writer(&mut self, stream_id: &StreamId) {
+        self.writers.remove(stream_id);
+        self.print_readers_writers();
+    }
+
+    fn have_reader(&self, stream_id: &StreamId) -> bool {
+        self.readers.contains_key(stream_id)
+    }
+
+    fn have_writer(&self, stream_id: &StreamId) -> bool {
+        self.writers.contains_key(stream_id)
+    }
+
+    fn print_readers_writers(&self) {
+        print!("**** stream readers:");
+        for (sid, _) in self.readers.iter() {
+            print!(" {:?}", sid);
+        }
+        println!();
+        print!("**** stream writers:");
+        for (sid, _) in self.readers.iter() {
+            print!(" {:?}", sid);
+        }
+        println!();
+    }
+}
+
 struct MplexShared {
     transport: Box<dyn AsyncStream>,
-    accept_waker: Option<Waker>,
-    read_wakers: HashMap<StreamId, Waker>,
     incoming_data: BytesMut,
     outgoing_data: BytesMut,
     incoming_frame: Option<Frame>,
     next_stream_num: u64,
     closed: bool,
     logging_enabled: bool,
-    active_streams: HashSet<StreamId>,
+    streams: MplexStreams,
 }
 
 fn extract_varint_u64(p_incoming_data: &mut BytesMut, p_offset: &mut usize) -> Option<u64> {
@@ -61,60 +164,25 @@ impl MplexShared {
         where T : AsyncRead + AsyncWrite + Unpin + Send {
         MplexShared {
             transport: Box::new(transport),
-            accept_waker: None,
-            read_wakers: HashMap::new(),
             incoming_data: BytesMut::new(),
             outgoing_data: BytesMut::new(),
             incoming_frame: None,
             next_stream_num: 33,
             closed: false,
             logging_enabled: false,
-            active_streams: HashSet::new(),
+            streams: MplexStreams::new(),
         }
     }
 
-    fn wake_accept(&mut self) {
-        self.accept_waker.take().map(|w| w.wake());
-    }
-
-    fn wake_reader(&mut self, stream_id: &StreamId) {
-        self.read_wakers.remove(stream_id).map(|w| w.wake());
-    }
-
-    fn wake_all_readers(&mut self) {
-        self.wake_accept();
-        for (_, v) in self.read_wakers.drain() {
-            v.wake();
-        }
-    }
     fn want_another_frame(&mut self) {
         self.incoming_frame = None;
-        self.wake_all_readers();
-    }
-
-    fn add_active_stream(&mut self, stream_id: &StreamId) {
-        self.active_streams.insert(stream_id.clone());
-        self.print_active_streams();
-    }
-
-    fn remove_active_stream(&mut self, stream_id: &StreamId) {
-        self.active_streams.remove(stream_id);
-        self.print_active_streams();
-        self.wake_all_readers();
-    }
-
-    fn print_active_streams(&self) {
-        print!("**** active streams:");
-        for sid in self.active_streams.iter() {
-            print!(" {:?}", sid);
-        }
-        println!();
+        self.streams.wake_all_readers();
     }
 
     fn poll_accept_id(&mut self, cx: &mut Context<'_>) -> Poll<Result<StreamId, io::Error>> {
         match self.poll_fill_incoming(cx) {
             Poll::Pending => {
-                self.accept_waker = Some(cx.waker().clone());
+                self.streams.set_accept_waker(cx.waker().clone());
                 return Poll::Pending;
             }
             Poll::Ready(Err(e)) => {
@@ -128,12 +196,12 @@ impl MplexShared {
         match &self.incoming_frame {
             Some(frame) if frame.op == FrameOp::New => {
                 let stream_id = frame.stream_id.clone();
-                self.add_active_stream(&stream_id);
+                self.streams.add(&stream_id);
                 self.want_another_frame();
                 Poll::Ready(Ok(stream_id))
             }
             _ => {
-                self.accept_waker = Some(cx.waker().clone());
+                self.streams.set_accept_waker(cx.waker().clone());
                 Poll::Pending
             }
         }
@@ -152,7 +220,7 @@ impl MplexShared {
                 // recently called with. To cater for the possibility that another poll_read()
                 // or poll_accept() for a different stream may occur before data is ready, store a
                 // waker for this specific stream id.
-                self.read_wakers.insert(stream_id.clone(), cx.waker().clone());
+                self.streams.set_read_waker(stream_id, cx.waker().clone());
                 return Poll::Pending;
             }
             Poll::Ready(Err(e)) => {
@@ -179,7 +247,7 @@ impl MplexShared {
                 Poll::Ready(Ok(()))
             }
             _ => {
-                self.read_wakers.insert(stream_id.clone(), cx.waker().clone());
+                self.streams.set_read_waker(stream_id, cx.waker().clone());
                 Poll::Pending
             }
         }
@@ -195,7 +263,7 @@ impl MplexShared {
                 Some(frame) if frame.op == FrameOp::New => {
                     return Poll::Ready(Ok(()));
                 }
-                Some(frame) if self.active_streams.contains(&frame.stream_id) => {
+                Some(frame) if self.streams.have_reader(&frame.stream_id) => {
                     return Poll::Ready(Ok(()));
                 }
                 _ => {
@@ -208,8 +276,8 @@ impl MplexShared {
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Ready(Ok(frame)) => {
                     match frame.op {
-                        FrameOp::New => self.wake_accept(),
-                        _ => self.wake_reader(&frame.stream_id),
+                        FrameOp::New => self.streams.wake_accept(),
+                        _ => self.streams.wake_reader(&frame.stream_id),
                     }
                     self.log_incoming_frame(&frame);
                     self.incoming_frame = Some(frame);
@@ -315,7 +383,7 @@ impl MplexShared {
         };
         self.outgoing_data.extend_from_slice(&VarInt::encode_usize(name_bytes.len()));
         self.outgoing_data.extend_from_slice(&name_bytes);
-        self.add_active_stream(&stream_id);
+        self.streams.add(&stream_id);
         stream_id
     }
 
@@ -604,7 +672,8 @@ impl Drop for Stream {
     fn drop(&mut self) {
         // TODO: send shutdown if it hasn't already been sent?
         println!("drop stream {:?}", self.stream_id);
-        self.shared.lock().unwrap().remove_active_stream(&self.stream_id);
+        self.shared.lock().unwrap().streams.remove_reader(&self.stream_id);
+        self.shared.lock().unwrap().streams.remove_writer(&self.stream_id);
     }
 }
 
