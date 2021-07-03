@@ -220,7 +220,7 @@ impl MplexShared {
         }
     }
 
-    fn poll_drain_outgoing_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_drain(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         while self.outgoing_data.len() > 0 {
             // match AsyncWrite::poll_write(Pin::new(&mut self.transport), cx, &self.outgoing_data) {
             match Pin::new(&mut self.transport).poll_write(cx, &self.outgoing_data) {
@@ -329,7 +329,7 @@ impl<'a> Future for Connect<'a> {
             }
         };
 
-        match iself.connector.shared.lock().unwrap().poll_drain_outgoing_data(cx) {
+        match iself.connector.shared.lock().unwrap().poll_drain(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             Poll::Ready(Ok(())) => {}, // continue
@@ -506,16 +506,10 @@ impl Flag {
     }
 }
 
-enum WriteState {
-    Active,
-    InShutdown,
-    Error(io::ErrorKind),
-}
-
 pub struct Stream {
     stream_id: StreamId,
     shared: Arc<Mutex<MplexShared>>,
-    write_state: WriteState,
+    write_error: Option<io::ErrorKind>,
 }
 
 impl Stream {
@@ -523,7 +517,27 @@ impl Stream {
         Stream {
             stream_id,
             shared,
-            write_state: WriteState::Active,
+            write_error: None,
+        }
+    }
+
+    fn poll_drain(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        if let Some(e) = self.write_error {
+            return Poll::Ready(Err(io::Error::from(e)));
+        }
+
+        let mut shared = self.shared.lock().unwrap();
+        match shared.poll_drain(cx) {
+            Poll::Pending => {
+                Poll::Pending
+            }
+            Poll::Ready(Ok(())) => {
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(e)) => {
+                self.write_error = Some(e.kind());
+                Poll::Ready(Err(e))
+            }
         }
     }
 }
@@ -545,22 +559,14 @@ impl AsyncWrite for Stream {
         cx: &mut Context<'_>,
         buf: &[u8]
     ) -> Poll<Result<usize, io::Error>> {
-        match &self.write_state {
-            WriteState::Error(e) => return Poll::Ready(Err(io::Error::from(*e))),
-            WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
-            WriteState::Active => (), // ok, continue
-        }
-
         let mut iself = Pin::into_inner(self);
-        let mut shared = iself.shared.lock().unwrap();
-
-        match shared.poll_drain_outgoing_data(cx) {
+        match iself.poll_drain(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             Poll::Ready(Ok(())) => {}, // continue
         }
 
-        shared.append_message(&iself.stream_id.inverse(), buf);
+        iself.shared.lock().unwrap().append_message(&iself.stream_id.inverse(), buf);
         Poll::Ready(Ok(buf.len()))
     }
 
@@ -568,15 +574,8 @@ impl AsyncWrite for Stream {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>
     ) -> Poll<Result<(), io::Error>> {
-        match &self.write_state {
-            WriteState::Error(e) => return Poll::Ready(Err(io::Error::from(*e))),
-            WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
-            WriteState::Active => (), // ok, continue
-        }
-
         let mut iself = Pin::into_inner(self);
-        let mut shared = iself.shared.lock().unwrap();
-        shared.poll_drain_outgoing_data(cx)
+        iself.poll_drain(cx)
     }
 
     fn poll_shutdown(
@@ -584,24 +583,14 @@ impl AsyncWrite for Stream {
         cx: &mut Context<'_>
     ) -> Poll<Result<(), io::Error>> {
         let mut iself = Pin::into_inner(self);
-        let mut shared = iself.shared.lock().unwrap();
-
-        match &iself.write_state {
-            WriteState::Error(e) => return Poll::Ready(Err(io::Error::from(*e))),
-            WriteState::InShutdown => (), // ok, continue
-            WriteState::Active => {
-                shared.append_close(&iself.stream_id.inverse());
-                // Record the fact that shutdown() has been requested. This will cause
-                // future calls to write() or flush() will fail.
-                iself.write_state = WriteState::InShutdown;
-            }
+        match iself.poll_drain(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Ready(Ok(())) => {}, // continue
         }
 
-        // In constrast to the poll_shutdown() implementation in our TLS streams, we don't need
-        // to transition to the error state here, because we don't need to shutdown the underlying
-        // transport (it could be in used by other streams) and we already check for the InShutdown
-        // state in write() and flush(). There's nothing wrong with poll_shutdown() being called
-        // more times than necessary here.
-        shared.poll_drain_outgoing_data(cx)
+        iself.shared.lock().unwrap().append_close(&iself.stream_id.inverse());
+        iself.write_error = Some(io::ErrorKind::BrokenPipe);
+        Poll::Ready(Ok(()))
     }
 }
