@@ -632,21 +632,50 @@ impl Flag {
     }
 }
 
-pub struct Stream {
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                //
+//                                          StreamReader                                          //
+//                                                                                                //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+pub struct StreamReader {
+    stream_id: StreamId,
+    shared: Arc<Mutex<MplexShared>>,
+}
+
+impl Drop for StreamReader {
+    fn drop(&mut self) {
+        println!("drop stream reader {:?}", self.stream_id);
+        self.shared.lock().unwrap().streams.remove_reader(&self.stream_id);
+    }
+}
+
+impl AsyncRead for StreamReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>
+    ) -> Poll<Result<(), io::Error>> {
+        let mut iself = Pin::into_inner(self);
+        iself.shared.lock().unwrap().poll_read(&iself.stream_id, cx, buf)
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                //
+//                                          StreamWriter                                          //
+//                                                                                                //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+pub struct StreamWriter {
     stream_id: StreamId,
     shared: Arc<Mutex<MplexShared>>,
     write_error: Option<io::ErrorKind>,
 }
 
-impl Stream {
-    fn new(stream_id: StreamId, shared: Arc<Mutex<MplexShared>>) -> Self {
-        Stream {
-            stream_id,
-            shared,
-            write_error: None,
-        }
-    }
-
+impl StreamWriter {
     fn poll_drain(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         if let Some(e) = self.write_error {
             return Poll::Ready(Err(io::Error::from(e)));
@@ -668,27 +697,14 @@ impl Stream {
     }
 }
 
-impl Drop for Stream {
+impl Drop for StreamWriter {
     fn drop(&mut self) {
-        // TODO: send shutdown if it hasn't already been sent?
-        println!("drop stream {:?}", self.stream_id);
-        self.shared.lock().unwrap().streams.remove_reader(&self.stream_id);
+        println!("drop stream writer {:?}", self.stream_id);
         self.shared.lock().unwrap().streams.remove_writer(&self.stream_id);
     }
 }
 
-impl AsyncRead for Stream {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>
-    ) -> Poll<Result<(), io::Error>> {
-        let mut iself = Pin::into_inner(self);
-        iself.shared.lock().unwrap().poll_read(&iself.stream_id, cx, buf)
-    }
-}
-
-impl AsyncWrite for Stream {
+impl AsyncWrite for StreamWriter {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -727,5 +743,70 @@ impl AsyncWrite for Stream {
         iself.shared.lock().unwrap().append_close(&iself.stream_id.inverse());
         iself.write_error = Some(io::ErrorKind::BrokenPipe);
         Poll::Ready(Ok(()))
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                //
+//                                             Stream                                             //
+//                                                                                                //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+pub struct Stream {
+    reader: StreamReader,
+    writer: StreamWriter,
+}
+
+impl Stream {
+    fn new(stream_id: StreamId, shared: Arc<Mutex<MplexShared>>) -> Self {
+        Stream {
+            reader: StreamReader {
+                stream_id: stream_id.clone(),
+                shared: shared.clone(),
+            },
+            writer: StreamWriter {
+                stream_id: stream_id.clone(),
+                shared: shared.clone(),
+                write_error: None,
+            }
+        }
+    }
+}
+
+impl AsyncRead for Stream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>
+    ) -> Poll<Result<(), io::Error>> {
+        let mut iself = Pin::into_inner(self);
+        Pin::new(&mut iself.reader).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for Stream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8]
+    ) -> Poll<Result<usize, io::Error>> {
+        let mut iself = Pin::into_inner(self);
+        Pin::new(&mut iself.writer).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<Result<(), io::Error>> {
+        let mut iself = Pin::into_inner(self);
+        Pin::new(&mut iself.writer).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<Result<(), io::Error>> {
+        let mut iself = Pin::into_inner(self);
+        Pin::new(&mut iself.writer).poll_shutdown(cx)
     }
 }
