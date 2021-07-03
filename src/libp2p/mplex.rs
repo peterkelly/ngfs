@@ -91,9 +91,16 @@ impl MplexShared {
 
     fn poll_accept_id(&mut self, cx: &mut Context<'_>) -> Poll<Result<StreamId, io::Error>> {
         match self.poll_fill_incoming(cx) {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Ready(Ok(())) => (), // continue
+            Poll::Pending => {
+                self.accept_waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            Poll::Ready(Err(e)) => {
+                return Poll::Ready(Err(e));
+            }
+            Poll::Ready(Ok(())) => {
+                // continue
+            }
         }
 
         match &self.incoming_frame {
@@ -116,9 +123,21 @@ impl MplexShared {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<(), io::Error>> {
         match self.poll_fill_incoming(cx) {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Ready(Ok(())) => {}, // continue
+            Poll::Pending => {
+                // There may be multiple read futures waiting for incoming data, and we can only
+                // rely on poll_fill_incoming() to store the waker from the context it was most
+                // recently called with. To cater for the possibility that another poll_read()
+                // or poll_accept() for a different stream may occur before data is ready, store a
+                // waker for this specific stream id.
+                self.read_wakers.insert(stream_id.clone(), cx.waker().clone());
+                return Poll::Pending;
+            }
+            Poll::Ready(Err(e)) => {
+                return Poll::Ready(Err(e));
+            }
+            Poll::Ready(Ok(())) => {
+                // continue
+            },
         }
 
         match &mut self.incoming_frame {
