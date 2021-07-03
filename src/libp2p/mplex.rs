@@ -10,6 +10,7 @@ use std::io;
 use std::error::Error;
 use std::pin::Pin;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::task::{Context, Poll, Waker};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -37,6 +38,7 @@ struct MplexShared {
     next_stream_num: u64,
     closed: bool,
     logging_enabled: bool,
+    active_streams: HashSet<StreamId>,
 }
 
 fn extract_varint_u64(p_incoming_data: &mut BytesMut, p_offset: &mut usize) -> Option<u64> {
@@ -67,6 +69,7 @@ impl MplexShared {
             next_stream_num: 33,
             closed: false,
             logging_enabled: false,
+            active_streams: HashSet::new(),
         }
     }
 
@@ -89,6 +92,25 @@ impl MplexShared {
         self.wake_all_readers();
     }
 
+    fn add_active_stream(&mut self, stream_id: &StreamId) {
+        self.active_streams.insert(stream_id.clone());
+        self.print_active_streams();
+    }
+
+    fn remove_active_stream(&mut self, stream_id: &StreamId) {
+        self.active_streams.remove(stream_id);
+        self.print_active_streams();
+        self.wake_all_readers();
+    }
+
+    fn print_active_streams(&self) {
+        print!("**** active streams:");
+        for sid in self.active_streams.iter() {
+            print!(" {:?}", sid);
+        }
+        println!();
+    }
+
     fn poll_accept_id(&mut self, cx: &mut Context<'_>) -> Poll<Result<StreamId, io::Error>> {
         match self.poll_fill_incoming(cx) {
             Poll::Pending => {
@@ -106,6 +128,7 @@ impl MplexShared {
         match &self.incoming_frame {
             Some(frame) if frame.op == FrameOp::New => {
                 let stream_id = frame.stream_id.clone();
+                self.add_active_stream(&stream_id);
                 self.want_another_frame();
                 Poll::Ready(Ok(stream_id))
             }
@@ -142,6 +165,11 @@ impl MplexShared {
 
         match &mut self.incoming_frame {
             Some(frame) if frame.stream_id == *stream_id => {
+                if frame.op == FrameOp::Close {
+                    // println!("poll_read; have close frame {:?}", stream_id);
+                    return Poll::Ready(Ok(()));
+                }
+
                 let amt = std::cmp::min(frame.data.remaining(), buf.remaining());
                 buf.put_slice(&frame.data[0..amt]);
                 frame.data.advance(amt);
@@ -158,25 +186,35 @@ impl MplexShared {
     }
 
     fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        if self.closed {
-            return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
-        }
+        loop {
+            if self.closed {
+                return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+            }
 
-        if self.incoming_frame.is_some() {
-            return Poll::Ready(Ok(()));
-        }
-
-        match self.poll_read_frame(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            Poll::Ready(Ok(frame)) => {
-                match frame.op {
-                    FrameOp::New => self.wake_accept(),
-                    _ => self.wake_reader(&frame.stream_id),
+            match &self.incoming_frame {
+                Some(frame) if frame.op == FrameOp::New => {
+                    return Poll::Ready(Ok(()));
                 }
-                self.log_incoming_frame(&frame);
-                self.incoming_frame = Some(frame);
-                Poll::Ready(Ok(()))
+                Some(frame) if self.active_streams.contains(&frame.stream_id) => {
+                    return Poll::Ready(Ok(()));
+                }
+                _ => {
+                    // continue
+                }
+            }
+
+            match self.poll_read_frame(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Ready(Ok(frame)) => {
+                    match frame.op {
+                        FrameOp::New => self.wake_accept(),
+                        _ => self.wake_reader(&frame.stream_id),
+                    }
+                    self.log_incoming_frame(&frame);
+                    self.incoming_frame = Some(frame);
+                    // Poll::Ready(Ok(()))
+                }
             }
         }
     }
@@ -277,6 +315,7 @@ impl MplexShared {
         };
         self.outgoing_data.extend_from_slice(&VarInt::encode_usize(name_bytes.len()));
         self.outgoing_data.extend_from_slice(&name_bytes);
+        self.add_active_stream(&stream_id);
         stream_id
     }
 
@@ -558,6 +597,14 @@ impl Stream {
                 Poll::Ready(Err(e))
             }
         }
+    }
+}
+
+impl Drop for Stream {
+    fn drop(&mut self) {
+        // TODO: send shutdown if it hasn't already been sent?
+        println!("drop stream {:?}", self.stream_id);
+        self.shared.lock().unwrap().remove_active_stream(&self.stream_id);
     }
 }
 

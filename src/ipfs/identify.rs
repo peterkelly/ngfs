@@ -40,18 +40,18 @@ async fn identify_handler_inner(
             Addr::TCP(4004),
         ]),
         protocols: vec![
-            String::from("/p2p/id/delta/1.0.0"),
-            String::from("/ipfs/id/1.0.0"),
-            String::from("/ipfs/id/push/1.0.0"),
-            String::from("/ipfs/ping/1.0.0"),
-            String::from("/libp2p/circuit/relay/0.1.0"),
-            String::from("/ipfs/lan/kad/1.0.0"),
-            String::from("/libp2p/autonat/1.0.0"),
-            String::from("/ipfs/bitswap/1.2.0"),
-            String::from("/ipfs/bitswap/1.1.0"),
-            String::from("/ipfs/bitswap/1.0.0"),
-            String::from("/ipfs/bitswap"),
-            String::from("/x/"),
+            // String::from("/p2p/id/delta/1.0.0"),
+            // String::from("/ipfs/id/1.0.0"),
+            // String::from("/ipfs/id/push/1.0.0"),
+            // String::from("/ipfs/ping/1.0.0"),
+            // String::from("/libp2p/circuit/relay/0.1.0"),
+            // String::from("/ipfs/lan/kad/1.0.0"),
+            // String::from("/libp2p/autonat/1.0.0"),
+            // String::from("/ipfs/bitswap/1.2.0"),
+            // String::from("/ipfs/bitswap/1.1.0"),
+            // String::from("/ipfs/bitswap/1.0.0"),
+            // String::from("/ipfs/bitswap"),
+            // String::from("/x/"),
         ],
         signed_peer_record: None,
     };
@@ -59,19 +59,6 @@ async fn identify_handler_inner(
 
     write_length_prefixed_data(&mut stream, &identify.to_pb()).await?;
     stream.flush().await?;
-
-    // Skip remaining data; otherwise the close will hold up all remaining connections
-    // FIXME: Find a more reliable solution to this problem - that if ignoring frames for
-    // which the streams have been dropped
-    loop {
-        let mut buf: [u8; 1024] = [0; 1024];
-        let r = stream.read(&mut buf).await?;
-        if r == 0 {
-            break;
-        }
-    }
-
-
     stream.shutdown().await?;
     Ok(())
 }
