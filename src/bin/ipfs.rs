@@ -55,12 +55,15 @@ async fn connection_handler2(
     mut stream: Box<dyn AsyncStream>) -> Result<(), Box<dyn Error>> {
 
 
+    println!("connection_handler2 1");
     multistream_handshake(&mut stream).await?;
-    println!("After multistream_handshake");
+    println!("connection_handler2 2");
+    // println!("After multistream_handshake");
 
     loop {
         let data = read_length_prefixed_data(&mut stream).await?;
         println!("read {}", escape_string(&String::from_utf8_lossy(&data).to_string()));
+        println!("connection_handler2 3");
         match services.lookup(&data) {
             Some(handler) => {
                 write_length_prefixed_data(&mut stream, ID_PROTOCOL).await?;
@@ -175,43 +178,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Negotiated /mplex/6.7.0");
 
     let mut mplex = Mplex::new(conn);
-    mplex.set_logging_enabled(true);
+    // mplex.set_logging_enabled(true);
 
     let (mut acceptor, mut connector) = mplex.split();
     tokio::spawn(accept_loop(node.clone(), registry.clone(), acceptor));
 
-    tokio::time::sleep(Duration::from_millis(3000)).await;
+    println!("-------- Before sleep");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    println!("-------- After sleep");
+    println!();
+    println!();
+    println!();
 
     let mut id_stream = connector.connect(Some("id-test")).await?;
-    write_length_prefixed_data(&mut id_stream, b"/multistream/1.0.0\n").await?;
-    id_stream.flush().await?;
-    write_length_prefixed_data(&mut id_stream, ID_PROTOCOL).await?;
-    id_stream.flush().await?;
-    loop {
-        let mut buf: [u8; 1024] = [0; 1024];
-        let r = id_stream.read(&mut buf).await?;
-        if r == 0 {
-            println!("Finished reading");
-            break;
+    multistream_handshake(&mut id_stream).await?;
+    match multistream_select(&mut id_stream, ID_PROTOCOL).await {
+        Ok(SelectResponse::Accepted) => {
+            println!("id protocol accepted");
+        },
+        Ok(SelectResponse::Unsupported) => {
+            return Err(error!("id protocol accepted").into());
         }
-        println!("Received data:");
-        println!("{:#?}", BinaryData(&buf[0..r]));
+        Err(e) => {
+            return Err(e.into());
+        }
     }
 
-    // println!("Before id");
-    // id_stream.write_all(&[0x81]).await?;
-    // id_stream.flush().await?;
-    // id_stream.write_all(&[0x82]).await?;
-    // id_stream.flush().await?;
-    // id_stream.write_all(&[0x83]).await?;
-    // id_stream.flush().await?;
-    // id_stream.write_all(&[0x84]).await?;
-    // id_stream.flush().await?;
-    // // let data = read_length_prefixed_data(&mut id_stream).await?;
-    // // println!("Read {:#?}", BinaryData(&data));
-    // multistream_handshake(&mut id_stream).await?;
-    // multistream_select(&mut id_stream, b"/ipfs/id/1.0.0\n").await?;
-    // println!("Started id");
+    let identify_data = read_length_prefixed_data(&mut id_stream).await?;
+    match Identify::from_pb(&identify_data) {
+        Ok(identify) => {
+            println!("Parse identify:");
+            println!("{:#?}", identify);
+        }
+        Err(e) => {
+            println!("Parse identify failed");
+            return Err(e);
+        }
+    }
 
 
     loop {

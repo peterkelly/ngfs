@@ -36,18 +36,14 @@ pub async fn read_length_prefixed_data<T>(reader: &mut T) -> Result<Vec<u8>, io:
     where T : AsyncRead + Unpin
 {
     let expected_len = read_varint(reader).await? as usize;
+    let mut reader = reader.take(expected_len as u64);
     let mut incoming_data: Vec<u8> = Vec::new();
-
-    let mut got_len: usize = 0;
-    while got_len < expected_len {
-        let mut buf: [u8; 1] = [0; 1];
+    while incoming_data.len() < expected_len {
+        let mut buf: [u8; 1024] = [0; 1024];
         match reader.read(&mut buf).await {
             Err(e) => return Err(e.into()),
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(_) => {
-                incoming_data.push(buf[0]);
-                got_len += 1;
-            }
+            Ok(r) => incoming_data.extend_from_slice(&buf[0..r]),
         };
     }
     Ok(incoming_data)

@@ -89,11 +89,9 @@ impl Addr {
                     let port = u16::from_be_bytes(be_bytes);
                     let end_offset = data_offset + 2;
 
-                    println!("tcp: ok: port = {}", port);
                     (Addr::TCP(port), end_offset)
                 }
                 else {
-                    println!("tcp: insufficient data");
                     (Addr::Invalid(Vec::from(bytes)), bytes.len())
                 }
             }
