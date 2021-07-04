@@ -12,22 +12,6 @@ use std::iter::FromIterator;
 use std::error::Error;
 use std::fmt;
 
-fn base_for_name(name: &str) -> Option<Base> {
-    match name {
-        "base16" => Some(Base::Base16),
-        "base16upper" => Some(Base::Base16Upper),
-        "base32" => Some(Base::Base32),
-        "base32pad" => Some(Base::Base32Pad),
-        "base58flickr" => Some(Base::Base58Flickr),
-        "base58btc" => Some(Base::Base58BTC),
-        "base64" => Some(Base::Base64),
-        "base64pad" => Some(Base::Base64Pad),
-        "base64url" => Some(Base::Base64URL),
-        "base64urlpad" => Some(Base::Base64URLPad),
-        _ => None,
-    }
-}
-
 fn main_result() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
 
@@ -47,7 +31,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let base = match base_for_name(&base_name) {
+    let base = match Base::for_name(&base_name) {
         Some(v) => v,
         None => {
             eprintln!("Unknown base: {}", base_name);

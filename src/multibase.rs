@@ -13,14 +13,18 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum DecodeError {
+    EmptyString,
     InvalidLength(usize),
     InvalidChar(usize, u8),
-    UnsupportedEncoding(u8),
+    UnsupportedEncoding(char),
 }
 
 impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            DecodeError::EmptyString => {
+                write!(f, "Empty string")
+            }
             DecodeError::InvalidLength(len) => {
                 write!(f, "Invalid length: {}", len)
             }
@@ -28,7 +32,19 @@ impl fmt::Display for DecodeError {
                 write!(f, "Invalid character at offset {}: '{}'", offset, c)
             }
             DecodeError::UnsupportedEncoding(c) => {
-                write!(f, "Unknown encoding format: {}", c)
+                match c {
+                    '1' => {
+                        write!(f, "Unknown encoding format: {} (looks like a base58-encoded \
+                                   identity multihash from a peer id)", c)
+                    }
+                    'Q' => {
+                        write!(f, "Unknown encoding format: {} (looks like a base58-encoded \
+                                   sha2-256 multihash from a peer id or CIDv0)", c)
+                    }
+                    _ => {
+                        write!(f, "Unknown encoding format: {}", c)
+                    }
+                }
             }
         }
     }
@@ -79,7 +95,7 @@ const BASE64_URL_ALPHABET: [char; 64] = [
     'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '_'];
 
 // https://github.com/multiformats/multibase
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Base {
     // Identity,          // 0x00, 8-bit binary (encoder and decoder keeps data unmodified), default
     // Base2,             // 0,    binary (01010101),                                        candidate
@@ -104,23 +120,96 @@ pub enum Base {
     Base64URLPad,      // U,    rfc4648 with padding,                                     default
 }
 
-fn code_for_base(base: Base) -> char {
-    match base {
-        Base::Base16         => 'f',
-        Base::Base16Upper    => 'F',
-        Base::Base32         => 'b',
-        Base::Base32Upper    => 'B',
-        Base::Base32Pad      => 'c',
-        Base::Base32PadUpper => 'C',
-        Base::Base58Flickr   => 'Z',
-        Base::Base58BTC      => 'z',
-        Base::Base64         => 'm',
-        Base::Base64Pad      => 'M',
-        Base::Base64URL      => 'u',
-        Base::Base64URLPad   => 'U',
+const AVAILABLE_BASES: &[Base] = &[
+    Base::Base16,
+    Base::Base16Upper,
+    Base::Base32,
+    Base::Base32Upper,
+    Base::Base32Pad,
+    Base::Base32PadUpper,
+    Base::Base58Flickr,
+    Base::Base58BTC,
+    Base::Base64,
+    Base::Base64Pad,
+    Base::Base64URL,
+    Base::Base64URLPad,
+];
+
+impl Base {
+    pub fn available() -> &'static [Base] {
+        AVAILABLE_BASES
+    }
+
+    pub fn for_code(code: char) -> Option<Base> {
+        match code {
+            'f' => Some(Base::Base16),
+            'F' => Some(Base::Base16Upper),
+            'b' => Some(Base::Base32),
+            'B' => Some(Base::Base32Upper),
+            'c' => Some(Base::Base32Pad),
+            'C' => Some(Base::Base32PadUpper),
+            'Z' => Some(Base::Base58Flickr),
+            'z' => Some(Base::Base58BTC),
+            'm' => Some(Base::Base64),
+            'M' => Some(Base::Base64Pad),
+            'u' => Some(Base::Base64URL),
+            'U' => Some(Base::Base64URLPad),
+            _    => None,
+        }
+    }
+
+    pub fn for_name(name: &str) -> Option<Base> {
+        match name {
+            "base16"         => Some(Base::Base16),
+            "base16upper"    => Some(Base::Base16Upper),
+            "base32"         => Some(Base::Base32),
+            "base32upper"    => Some(Base::Base32Upper),
+            "base32pad"      => Some(Base::Base32Pad),
+            "base32padupper" => Some(Base::Base32PadUpper),
+            "base58flickr"   => Some(Base::Base58Flickr),
+            "base58btc"      => Some(Base::Base58BTC),
+            "base64"         => Some(Base::Base64),
+            "base64pad"      => Some(Base::Base64Pad),
+            "base64url"      => Some(Base::Base64URL),
+            "base64urlpad"   => Some(Base::Base64URLPad),
+            _                => None,
+        }
+    }
+
+    pub fn code(&self) -> char {
+        match self {
+            Base::Base16         => 'f',
+            Base::Base16Upper    => 'F',
+            Base::Base32         => 'b',
+            Base::Base32Upper    => 'B',
+            Base::Base32Pad      => 'c',
+            Base::Base32PadUpper => 'C',
+            Base::Base58Flickr   => 'Z',
+            Base::Base58BTC      => 'z',
+            Base::Base64         => 'm',
+            Base::Base64Pad      => 'M',
+            Base::Base64URL      => 'u',
+            Base::Base64URLPad   => 'U',
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Base::Base16         => "base16",
+            Base::Base16Upper    => "base16upper",
+            Base::Base32         => "base32",
+            Base::Base32Upper    => "base32upper",
+            Base::Base32Pad      => "base32pad",
+            Base::Base32PadUpper => "base32padupper",
+            Base::Base58Flickr   => "base58flickr",
+            Base::Base58BTC      => "base58btc",
+            Base::Base64         => "base64",
+            Base::Base64Pad      => "base64pad",
+            Base::Base64URL      => "base64url",
+            Base::Base64URLPad   => "base64urlpad",
+        }
     }
 }
-
 
 enum Case {
     Upper,
@@ -129,7 +218,16 @@ enum Case {
 
 pub fn encode(data: &[u8], base: Base) -> String {
     let mut chars_vec: Vec<char> = Vec::new();
-    chars_vec.push(code_for_base(base));
+    chars_vec.push(base.code());
+    return encode_inner(data, base, chars_vec);
+}
+
+pub fn encode_noprefix(data: &[u8], base: Base) -> String {
+    let chars_vec: Vec<char> = Vec::new();
+    return encode_inner(data, base, chars_vec);
+}
+
+fn encode_inner(data: &[u8], base: Base, mut chars_vec: Vec<char>) -> String {
     match base {
         Base::Base16         => encode_base16(&mut chars_vec, data, &BASE16_LOWER),
         Base::Base16Upper    => encode_base16(&mut chars_vec, data, &BASE16_UPPER),
@@ -148,25 +246,28 @@ pub fn encode(data: &[u8], base: Base) -> String {
 }
 
 pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
-    let encoded_bytes = s.as_bytes();
-    if encoded_bytes.len() == 0 {
-        return Err(DecodeError::InvalidLength(0));
+    let code = s.chars().nth(0).ok_or_else(|| DecodeError::EmptyString)?;
+    let base = Base::for_code(code).ok_or_else(|| DecodeError::UnsupportedEncoding(code))?;
+    match s.char_indices().nth(1) {
+        Some((data_index, _)) => decode_noprefix(&s[data_index..], base),
+        None => return Ok(Vec::new()),
     }
-    let encoding_char = encoded_bytes[0];
-    match encoding_char {
-        b'f' => decode_basen(&encoded_bytes[1..], 4, &BASE16_LOWER_INV, false),
-        b'F' => decode_basen(&encoded_bytes[1..], 4, &BASE16_UPPER_INV, false),
-        b'b' => decode_basen(&encoded_bytes[1..], 5, &BASE32_LOWER_INV, false),
-        b'B' => decode_basen(&encoded_bytes[1..], 5, &BASE32_UPPER_INV, false),
-        b'c' => decode_basen(&encoded_bytes[1..], 5, &BASE32_LOWER_INV, true),
-        b'C' => decode_basen(&encoded_bytes[1..], 5, &BASE32_UPPER_INV, true),
-        b'm' => decode_basen(&encoded_bytes[1..], 6, &BASE64_ALPHABET_INV, false),
-        b'M' => decode_basen(&encoded_bytes[1..], 6, &BASE64_ALPHABET_INV, true),
-        b'u' => decode_basen(&encoded_bytes[1..], 6, &BASE64_URL_ALPHABET_INV, false),
-        b'U' => decode_basen(&encoded_bytes[1..], 6, &BASE64_URL_ALPHABET_INV, true),
-        b'Z' => decode_base58(&encoded_bytes[1..], &BASE58_FLICKR_INV),
-        b'z' => decode_base58(&encoded_bytes[1..], &BASE58_BTC_INV),
-        _ => return Err(DecodeError::UnsupportedEncoding(encoding_char)),
+}
+
+pub fn decode_noprefix(s: &str, base: Base) -> Result<Vec<u8>, DecodeError> {
+    match base {
+        Base::Base16         => decode_basen(s.as_bytes(), 4, &BASE16_LOWER_INV, false),
+        Base::Base16Upper    => decode_basen(s.as_bytes(), 4, &BASE16_UPPER_INV, false),
+        Base::Base32         => decode_basen(s.as_bytes(), 5, &BASE32_LOWER_INV, false),
+        Base::Base32Upper    => decode_basen(s.as_bytes(), 5, &BASE32_UPPER_INV, false),
+        Base::Base32Pad      => decode_basen(s.as_bytes(), 5, &BASE32_LOWER_INV, true),
+        Base::Base32PadUpper => decode_basen(s.as_bytes(), 5, &BASE32_UPPER_INV, true),
+        Base::Base64         => decode_basen(s.as_bytes(), 6, &BASE64_ALPHABET_INV, false),
+        Base::Base64Pad      => decode_basen(s.as_bytes(), 6, &BASE64_ALPHABET_INV, true),
+        Base::Base64URL      => decode_basen(s.as_bytes(), 6, &BASE64_URL_ALPHABET_INV, false),
+        Base::Base64URLPad   => decode_basen(s.as_bytes(), 6, &BASE64_URL_ALPHABET_INV, true),
+        Base::Base58Flickr   => decode_base58(s.as_bytes(), &BASE58_FLICKR_INV),
+        Base::Base58BTC      => decode_base58(s.as_bytes(), &BASE58_BTC_INV),
     }
 }
 

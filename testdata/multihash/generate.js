@@ -34,7 +34,7 @@ function writeNumberHashes(numbers, code, outFilename) {
     for (const bytes of numbers) {
         const hex = bytes.toString("hex");
         const encoded = multibase.encode(code, bytes);
-        lines.push(hex.padEnd(maxLineLength) + " " + encoded.toString("utf-8"));
+        lines.push(hex.padEnd(maxLineLength) + " " + Buffer.from(encoded).toString("utf-8"));
     }
     fs.writeFileSync(outFilename, lines.join("\n") + "\n");
     console.log("Wrote " + outFilename);
@@ -51,7 +51,7 @@ function main() {
 
     writeNumbers(numbers, path.join(outDir, "numbers.txt"));
 
-    for (const name of multibase.names) {
+    for (const name of Object.keys(multibase.names)) {
         if (name === "base1")
             continue;
         writeNumberHashes(numbers, name, path.join(outDir, name + ".txt"));
