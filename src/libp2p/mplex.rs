@@ -139,6 +139,7 @@ struct MplexShared {
     outgoing_data: BytesMut,
     incoming_frame: Option<Frame>,
     next_stream_num: u64,
+    read_eof: bool,
     closed: bool,
     logging_enabled: bool,
     streams: MplexStreams,
@@ -168,6 +169,7 @@ impl MplexShared {
             outgoing_data: BytesMut::new(),
             incoming_frame: None,
             next_stream_num: 33,
+            read_eof: false,
             closed: false,
             logging_enabled: false,
             streams: MplexStreams::new(),
@@ -274,7 +276,8 @@ impl MplexShared {
             match self.poll_read_frame(cx) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-                Poll::Ready(Ok(frame)) => {
+                Poll::Ready(Ok(None)) => return Poll::Ready(Ok(())),
+                Poll::Ready(Ok(Some(frame))) => {
                     match frame.op {
                         FrameOp::New => self.streams.wake_accept(),
                         _ => self.streams.wake_reader(&frame.stream_id),
@@ -313,8 +316,11 @@ impl MplexShared {
         }
     }
 
-    fn poll_read_frame(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame, io::Error>> {
+    fn poll_read_frame(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Frame>, io::Error>> {
         loop {
+            // Check if we already have all the data comprising a frame in incoming_data. If so,
+            // return the frame and don't attempt to read any more data from the underlying
+            // transport.
             let mut offset = 0;
             if let Some(header) = extract_varint_u64(&mut self.incoming_data, &mut offset) {
                 let num = (header as u64) >> 3;
@@ -325,12 +331,28 @@ impl MplexShared {
                         let payload = self.incoming_data.split_to(payload_len as usize);
 
                         let data = Bytes::from(payload);
-                        return Poll::Ready(Ok(Frame::from_message_parts(num, flag, data)));
+                        return Poll::Ready(Ok(Some(Frame::from_message_parts(num, flag, data))));
                     }
                 }
             }
 
+            // If we've encountered EOF on a previous read, this means there are no more frames
+            // avaialble (otherwise the above check would have succeeded). If incoming_data is
+            // empty, this suggests the transport was closed cleanly, and we indicate an end of
+            // stream. If incoming_data is not empty, this suggests the transport was not closed
+            // cleanly, which we consider an error condition (albeit not a serious one; it could
+            // be safely ignored).
+            if self.read_eof {
+                if self.incoming_data.len() > 0 {
+                    return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
+                }
+                else {
+                    return Poll::Ready(Ok(None));
+                }
+            }
 
+            // Try to read more data for the next frame. We may get only a partial frame, in which
+            // case we loop again.
             let mut recv_data: Vec<u8> = vec![0; 1024];
             let mut recv_buf = ReadBuf::new(&mut recv_data);
             let old_filled = recv_buf.filled().len();
@@ -338,7 +360,13 @@ impl MplexShared {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Ready(Ok(())) => {
-                    self.incoming_data.extend_from_slice(recv_buf.filled());
+                    if recv_buf.filled().len() == 0 {
+                        self.read_eof = true; // will be picked up on next loop iteration
+                        self.streams.wake_all_readers();
+                    }
+                    else {
+                        self.incoming_data.extend_from_slice(recv_buf.filled());
+                    }
                     // repeat loop
                 }
             }
