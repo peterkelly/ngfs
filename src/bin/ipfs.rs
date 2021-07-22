@@ -95,21 +95,26 @@ async fn connection_handler(
 async fn accept_loop(
     node: Arc<IPFSNode>,
     services: Arc<ServiceRegistry>,
-    mut acceptor: MplexAcceptor) {
+    mut acceptor: MplexAcceptor,
+) {
     loop {
-        // println!("Before accept");
-        let mut stream = match acceptor.accept().await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("Acceptor: {}", e);
+        match acceptor.accept().await {
+            Ok(Some(stream)) => {
+                println!("accept_loop(): new connection");
+                tokio::spawn(connection_handler(
+                    node.clone(),
+                    services.clone(),
+                    Box::new(stream)));
+            }
+            Ok(None) => {
+                println!("accept_loop(): no more connections (underlying transport closed)");
                 return;
             }
-        };
-        // println!("After accept");
-        tokio::spawn(connection_handler(
-            node.clone(),
-            services.clone(),
-            Box::new(stream)));
+            Err(e) => {
+                eprintln!("accept_loop(): {}", e);
+                return;
+            }
+        }
     }
 }
 

@@ -181,7 +181,7 @@ impl MplexShared {
         self.streams.wake_all_readers();
     }
 
-    fn poll_accept_id(&mut self, cx: &mut Context<'_>) -> Poll<Result<StreamId, io::Error>> {
+    fn poll_accept_id(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<StreamId>, io::Error>> {
         match self.poll_fill_incoming(cx) {
             Poll::Pending => {
                 self.streams.set_accept_waker(cx.waker().clone());
@@ -200,11 +200,14 @@ impl MplexShared {
                 let stream_id = frame.stream_id.clone();
                 self.streams.add(&stream_id);
                 self.want_another_frame();
-                Poll::Ready(Ok(stream_id))
+                Poll::Ready(Ok(Some(stream_id)))
             }
-            _ => {
+            Some(frame) => {
                 self.streams.set_accept_waker(cx.waker().clone());
                 Poll::Pending
+            }
+            None => {
+                Poll::Ready(Ok(None))
             }
         }
     }
@@ -236,7 +239,7 @@ impl MplexShared {
         match &mut self.incoming_frame {
             Some(frame) if frame.stream_id == *stream_id => {
                 if frame.op == FrameOp::Close {
-                    // println!("poll_read; have close frame {:?}", stream_id);
+                    self.want_another_frame();
                     return Poll::Ready(Ok(()));
                 }
 
@@ -248,9 +251,12 @@ impl MplexShared {
                 }
                 Poll::Ready(Ok(()))
             }
-            _ => {
+            Some(frame) => {
                 self.streams.set_read_waker(stream_id, cx.waker().clone());
                 Poll::Pending
+            }
+            None => {
+                Poll::Ready(Ok(()))
             }
         }
     }
@@ -268,7 +274,11 @@ impl MplexShared {
                 Some(frame) if self.streams.have_reader(&frame.stream_id) => {
                     return Poll::Ready(Ok(()));
                 }
-                _ => {
+                Some(frame) => {
+                    self.incoming_frame = None;
+                    // continue
+                }
+                None => {
                     // continue
                 }
             }
@@ -280,11 +290,12 @@ impl MplexShared {
                 Poll::Ready(Ok(Some(frame))) => {
                     match frame.op {
                         FrameOp::New => self.streams.wake_accept(),
-                        _ => self.streams.wake_reader(&frame.stream_id),
+                        _ => {
+                            self.streams.wake_reader(&frame.stream_id);
+                        }
                     }
                     self.log_incoming_frame(&frame);
                     self.incoming_frame = Some(frame);
-                    // Poll::Ready(Ok(()))
                 }
             }
         }
@@ -292,7 +303,9 @@ impl MplexShared {
 
     fn log_incoming_frame(&self, frame: &Frame) {
         if self.logging_enabled {
-            println!("[mplex] <<<< {:?} {:?} <{} bytes>", frame.stream_id, frame.op, frame.data.len());
+            println!("[mplex] <<<< {:?} {:?} <{} bytes>; have reader? {}",
+                frame.stream_id, frame.op, frame.data.len(),
+                self.streams.readers.contains_key(&frame.stream_id));
             println!("{:#?}", Indent(&DebugHexDump(&frame.data)));
         }
     }
@@ -316,6 +329,7 @@ impl MplexShared {
         }
     }
 
+    // Returns Ok(None) on EOF (i.e. when the underlying transport is closed)
     fn poll_read_frame(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Frame>, io::Error>> {
         loop {
             // Check if we already have all the data comprising a frame in incoming_data. If so,
@@ -449,7 +463,7 @@ pub struct Accept<'a> {
 }
 
 impl<'a> Future for Accept<'a> {
-    type Output = Result<Stream, io::Error>;
+    type Output = Result<Option<Stream>, io::Error>;
     fn poll(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>
@@ -501,13 +515,14 @@ impl MplexAcceptor {
         Accept { acceptor: self }
     }
 
-    fn poll_accept_stream(&mut self, cx: &mut Context<'_>) -> Poll<Result<Stream, io::Error>> {
+    fn poll_accept_stream(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Stream>, io::Error>> {
         match self.shared.lock().unwrap().poll_accept_id(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            Poll::Ready(Ok(stream_id)) => Poll::Ready(Ok(Stream::new(
+            Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
+            Poll::Ready(Ok(Some(stream_id))) => Poll::Ready(Ok(Some(Stream::new(
                 stream_id,
-                self.shared.clone()))),
+                self.shared.clone())))),
         }
     }
 }
