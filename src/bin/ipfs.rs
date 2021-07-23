@@ -33,11 +33,7 @@ use torrent::libp2p::multistream::{
     multistream_select,
     SelectResponse,
 };
-use torrent::libp2p::mplex::{
-    MplexAcceptor,
-    MplexConnector,
-    Mplex,
-};
+use torrent::libp2p::mplex::{Mplex, Acceptor};
 use torrent::tls::protocol::client::{
     ServerAuth,
     ClientAuth,
@@ -95,7 +91,7 @@ async fn connection_handler(
 async fn accept_loop(
     node: Arc<IPFSNode>,
     services: Arc<ServiceRegistry>,
-    mut acceptor: MplexAcceptor,
+    mut acceptor: Acceptor,
 ) {
     loop {
         match acceptor.accept().await {
