@@ -5,9 +5,11 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
+use std::fmt;
+use super::util::BinaryData;
 use super::error;
 use super::protobuf::VarInt;
-use super::multibase::decode;
+use super::multibase::{decode, encode, encode_noprefix, Base};
 use std::error::Error;
 
 // https://github.com/multiformats/multicodec/blob/master/table.csv
@@ -39,6 +41,7 @@ pub enum MultiHash {
     Blake2b256,
     Blake3,
     Unknown(u64),
+    CID, // v0
 }
 
 impl MultiHash {
@@ -48,27 +51,78 @@ impl MultiHash {
             0x12 => MultiHash::Sha2256,
             0xb220 => MultiHash::Blake2b256,
             0x1e => MultiHash::Blake3, // default 32 byte output length
-            _ => MultiHash::Unknown(0x1e),
+            _ => MultiHash::Unknown(value),
         }
     }
 }
 
-#[derive(Debug)]
+pub struct RawCID(pub Vec<u8>);
+
+impl fmt::Debug for RawCID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", &BinaryData(&self.0))
+    }
+}
+
 pub struct CID {
-    pub raw: Vec<u8>,
+    pub raw: RawCID,
     pub version: u8,
     pub codec: MultiCodec,
     pub hash_type: MultiHash,
     pub hash: Vec<u8>,
 }
 
+impl fmt::Debug for CID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CID")
+            .field("raw", &BinaryData(&self.raw.0))
+            .field("version", &self.version)
+            .field("codec", &self.codec)
+            .field("hash_type", &self.hash_type)
+            .field("hash", &BinaryData(&self.hash))
+            .finish()
+    }
+}
+
+impl fmt::Display for CID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
 impl CID {
+    pub fn to_string(&self) -> String {
+        match self.hash_type {
+            MultiHash::CID => {
+                encode_noprefix(&self.raw.0, Base::Base58BTC)
+            }
+            _ => {
+                encode(&self.raw.0, Base::Base32)
+            }
+        }
+    }
+
     pub fn from_string(cid_str: &str) -> Result<CID, Box<dyn Error>> {
         let cid_bytes = decode(cid_str)?;
-        return CID::from_bytes(&cid_bytes);
+        return CID::from_bytes_v1(&cid_bytes);
     }
 
     pub fn from_bytes(cid_bytes: &[u8]) -> Result<CID, Box<dyn Error>> {
+        if cid_bytes.len() == 34 && cid_bytes[0] == 0x12 && cid_bytes[1] == 0x20 {
+            Ok(CID {
+                raw: RawCID(Vec::from(cid_bytes)),
+                version: 0,
+                codec: MultiCodec::DagPB,
+                hash_type: MultiHash::CID,
+                hash: Vec::from(&cid_bytes[2..]),
+            })
+        }
+        else {
+            return CID::from_bytes_v1(cid_bytes);
+        }
+    }
+
+    pub fn from_bytes_v1(cid_bytes: &[u8]) -> Result<CID, Box<dyn Error>> {
 
         // println!("cid_bytes = (len {}) {}", cid_bytes.len(), BinaryData(&cid_bytes));
         let version = match cid_bytes.get(0) {
@@ -117,7 +171,7 @@ impl CID {
         }
 
         Ok(CID {
-            raw: Vec::from(cid_bytes),
+            raw: RawCID(Vec::from(cid_bytes)),
             version: *version,
             codec: codec,
             hash_type: hash_type,

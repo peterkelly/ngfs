@@ -7,15 +7,18 @@
 
 use std::sync::{Arc, Mutex};
 use crate::io::AsyncStream;
+use crate::ipfs::bitswap::bitswap::Bitswap;
 
 pub struct IPFSNode {
     pub dalek_keypair: ed25519_dalek::Keypair,
+    pub bitswap: Bitswap,
 }
 
 impl IPFSNode {
     pub fn new(dalek_keypair: ed25519_dalek::Keypair) -> Self {
         IPFSNode {
-            dalek_keypair,
+            dalek_keypair: dalek_keypair,
+            bitswap: Bitswap::new(),
         }
     }
 }

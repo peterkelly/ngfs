@@ -9,6 +9,7 @@
 
 const ID_PROTOCOL: &[u8] = b"/ipfs/id/1.0.0\n";
 const ID_PROTOCOL_STR: &str = "/ipfs/id/1.0.0";
+const BITSWAP_PROTOCOL_STR: &str = "/ipfs/bitswap/1.2.0";
 
 use std::fmt;
 use std::error::Error;
@@ -45,6 +46,7 @@ use torrent::io::AsyncStream;
 use torrent::error;
 use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
 use torrent::ipfs::identify::identify_handler;
+use torrent::ipfs::bitswap::handler::bitswap_handler;
 
 async fn connection_handler2(
     node: Arc<IPFSNode>,
@@ -136,6 +138,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let node = Arc::new(IPFSNode::new(dalek_keypair));
     let mut registry = ServiceRegistry::new();
     registry.add(ID_PROTOCOL_STR, Box::new(&identify_handler));
+    registry.add(BITSWAP_PROTOCOL_STR, Box::new(&bitswap_handler));
     let registry = Arc::new(registry);
 
     let client_key = openssl::rsa::Rsa::generate(2048)?.private_key_to_der()?;
