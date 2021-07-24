@@ -24,6 +24,7 @@ use torrent::libp2p::multiaddr::{MultiAddr, Addr};
 use torrent::libp2p::identify::{Identify, SignedPeerRecord};
 use torrent::libp2p::tls::generate_certificate;
 use torrent::libp2p::io::{
+    read_opt_length_prefixed_data,
     read_length_prefixed_data,
     write_length_prefixed_data,
 };
@@ -48,18 +49,25 @@ use torrent::ipfs::identify::identify_handler;
 async fn connection_handler2(
     node: Arc<IPFSNode>,
     services: Arc<ServiceRegistry>,
-    mut stream: Box<dyn AsyncStream>) -> Result<(), Box<dyn Error>> {
-
-
-    // println!("connection_handler2 1");
+    mut stream: Box<dyn AsyncStream>,
+    accept_count: usize,
+) -> Result<(), Box<dyn Error>> {
     multistream_handshake(&mut stream).await?;
-    // println!("connection_handler2 2");
-    // println!("After multistream_handshake");
 
+    let mut count = 0;
     loop {
-        let data = read_length_prefixed_data(&mut stream).await?;
-        // println!("read {}", escape_string(&String::from_utf8_lossy(&data).to_string()));
-        // println!("connection_handler2 3");
+        let data = match read_opt_length_prefixed_data(&mut stream).await? {
+            Some(data) => data,
+            None => {
+                println!("{}: peer terminated stream normally", accept_count);
+                return Ok(());
+            }
+        };
+        // if count == 0 {
+            println!("{}: peer requested service: {}",
+                accept_count, escape_string(&String::from_utf8_lossy(&data).to_string()));
+        // }
+        // count += 1;
         match services.lookup(&data) {
             Some(handler) => {
                 write_length_prefixed_data(&mut stream, ID_PROTOCOL).await?;
@@ -78,12 +86,14 @@ async fn connection_handler2(
 async fn connection_handler(
     node: Arc<IPFSNode>,
     services: Arc<ServiceRegistry>,
-    stream: Box<dyn AsyncStream>)
+    stream: Box<dyn AsyncStream>,
+    accept_count: usize,
+)
 {
-    match connection_handler2(node, services, stream).await {
+    match connection_handler2(node, services, stream, accept_count).await {
         Ok(()) => {},
         Err(e) => {
-            eprintln!("Handler error: {}", e);
+            eprintln!("{}: Handler error: {}", accept_count, e);
         }
     }
 }
@@ -93,21 +103,25 @@ async fn accept_loop(
     services: Arc<ServiceRegistry>,
     mut acceptor: Acceptor,
 ) {
+    let mut accept_count: usize = 0;
     loop {
         match acceptor.accept().await {
             Ok(Some(stream)) => {
-                println!("accept_loop(): new connection");
+                println!("{}: accept_loop(): new connection", accept_count);
                 tokio::spawn(connection_handler(
                     node.clone(),
                     services.clone(),
-                    Box::new(stream)));
+                    Box::new(stream),
+                    accept_count));
+                accept_count += 1;
             }
             Ok(None) => {
-                println!("accept_loop(): no more connections (underlying transport closed)");
+                println!("{}: accept_loop(): no more connections (underlying transport closed)",
+                    accept_count);
                 return;
             }
             Err(e) => {
-                eprintln!("accept_loop(): {}", e);
+                eprintln!("{}: accept_loop(): {}", accept_count, e);
                 return;
             }
         }
