@@ -24,6 +24,7 @@ use super::message::{Message, WantList, Entry, WantType};
 use super::block::get_block_cid;
 use crate::ipfs::dagpb::{PBNode, PBLink};
 use crate::ipfs::unixfs::{Data as UnixFsData};
+use crate::ipfs::fs::{Node, Directory};
 
 async fn bitswap_handler_inner(
     node: Arc<IPFSNode>,
@@ -31,7 +32,11 @@ async fn bitswap_handler_inner(
 ) -> Result<(), Box<dyn Error>> {
     // let test_cid_str = "QmQPeNsJPyVWPFDVHb77w8G42Fvo15z4bG2X8D2GhfbSXc"; // directory
     // let test_cid_str = "QmQy6xmJhrcC5QLboAcGFcAE1tC8CrwDVkrHdEYJkLscrQ"; // about.txt
-    let test_cid_str = "bafykbzacedwpv7rrtq2rrdxyz6nsqqxzqvq3rqglnp2h426nbqisl3juwzezy"; // /etc/services
+    // let test_cid_str = "bafykbzacedwpv7rrtq2rrdxyz6nsqqxzqvq3rqglnp2h426nbqisl3juwzezy"; // /etc/services
+
+
+    let test_cid_str = "bafykbzaceaaqsv2wjwuhtzscq3ox2oryl3lqnui2plbutxlbhv4fcfol6i6ke"; // Python-3.8.1/
+
     let test_cid = CID::from_string(test_cid_str)?;
     let request_message = Message {
         wantlist: Some(WantList {
@@ -102,6 +107,19 @@ async fn bitswap_handler_inner(
                 Some(bytes) => {
                     let data = UnixFsData::from_pb(bytes)?;
                     println!("data =\n{:#?}", data);
+                }
+            }
+
+            let fsnode = Node::from_dagpb_data(&block.data)?;
+            match fsnode {
+                Node::Directory(directory) => {
+                    println!("directory fs node");
+                    for entry in directory.entries {
+                        println!("{:64} {:<12} {}", entry.cid.to_string(), entry.tsize, entry.name);
+                    }
+                }
+                _ => {
+                    println!("Other type of fs node");
                 }
             }
         }
