@@ -9,17 +9,17 @@ use std::fmt;
 use super::util::BinaryData;
 use super::error;
 use super::protobuf::VarInt;
-use super::multibase::{decode, encode, encode_noprefix, Base, DecodeError};
+use super::multibase::{decode, decode_noprefix, encode, encode_noprefix, Base, DecodeError};
 use std::error::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum CIDVersion {
     CIDv0,
     CIDv1,
 }
 
 // https://github.com/multiformats/multicodec/blob/master/table.csv
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum MultiCodec {
     Raw,
     DagPB,
@@ -50,7 +50,7 @@ impl MultiCodec {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum MultiHash {
     Sha1,
     Sha2256,
@@ -174,9 +174,16 @@ impl CID {
         }
     }
 
-    pub fn from_string(cid_str: &str) -> Result<CID, Box<dyn Error>> {
-        let cid_bytes = decode(cid_str)?;
-        return Ok(CID::from_bytes_v1(&cid_bytes)?);
+    pub fn from_string(cid_str: &str) -> Result<CID, CIDParseError> {
+        if cid_str.len() == 46 && cid_str.starts_with("Qm") {
+            let cid_bytes = decode_noprefix(cid_str, Base::Base58BTC)
+                .map_err(|e| CIDParseError::DecodeError(e))?;
+            Self::from_bytes(&cid_bytes)
+        }
+        else {
+            let cid_bytes = decode(cid_str).map_err(|e| CIDParseError::DecodeError(e))?;
+            return Ok(CID::from_bytes_v1(&cid_bytes)?);
+        }
     }
 
     pub fn from_bytes(cid_bytes: &[u8]) -> Result<CID, CIDParseError> {
@@ -264,6 +271,55 @@ impl CID {
             codec: codec,
             hash_type: hash_type,
             hash: Vec::from(&cid_bytes[hash_start..hash_end]),
+        })
+    }
+}
+
+// Used in Bitswap block objects
+#[derive(Debug, Clone)]
+pub struct CIDPrefix {
+    pub version: CIDVersion,
+    pub codec: MultiCodec,
+    pub hash_type: MultiHash,
+    pub hash_size: usize,
+}
+
+impl CIDPrefix {
+    pub fn from_bytes(cid_bytes: &[u8]) -> Result<CIDPrefix, CIDParseError> {
+        // CID version
+        let version = match cid_bytes.get(0) {
+            Some(0) => CIDVersion::CIDv0,
+            Some(1) => CIDVersion::CIDv1,
+            Some(_) => return Err(CIDParseError::UnsupportedVersion),
+            None => return Err(CIDParseError::Empty),
+        };
+
+        // Codec
+        let mut offset: usize = 1;
+        let codec_num = match VarInt::read_from(&cid_bytes, &mut offset) {
+            Some(v) => v.to_u64(),
+            None => return Err(CIDParseError::InvalidCodec),
+        };
+        let codec = MultiCodec::from_u64(codec_num);
+
+        // Hash type
+        let hash_num = match VarInt::read_from(&cid_bytes, &mut offset) {
+            Some(v) => v.to_u64(),
+            None => return Err(CIDParseError::InvalidHashType),
+        };
+        let hash_type = MultiHash::from_u64(hash_num);
+
+        // Hash size
+        let hash_size = match VarInt::read_from(&cid_bytes, &mut offset) {
+            Some(v) => v.to_usize(),
+            None => return Err(CIDParseError::InvalidHashSize),
+        };
+
+        Ok(CIDPrefix {
+            version: version,
+            codec: codec,
+            hash_type: hash_type,
+            hash_size: hash_size,
         })
     }
 }

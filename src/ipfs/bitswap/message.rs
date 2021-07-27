@@ -28,6 +28,23 @@ pub struct Entry {
 }
 
 impl Entry {
+    pub fn to_pb(&self) -> Vec<u8> {
+        let mut writer = PBufWriter::new();
+        writer.write_bytes(1, &self.block.0);
+        writer.write_int32(2, self.priority);
+        if self.cancel {
+            writer.write_bool(3, self.cancel);
+        }
+        match self.want_type {
+            WantType::Block => writer.write_int32(4, 0),
+            WantType::Have => writer.write_int32(4, 1),
+        }
+        if self.send_dont_have {
+            writer.write_bool(5, self.send_dont_have);
+        }
+        writer.data
+    }
+
     pub fn from_pb(raw_data: &[u8]) -> Result<Entry, Box<dyn Error>> {
 
         let mut opt_block: Option<Vec<u8>> = None;
@@ -94,6 +111,17 @@ pub struct WantList {
 }
 
 impl WantList {
+    pub fn to_pb(&self) -> Vec<u8> {
+        let mut writer = PBufWriter::new();
+        for entry in self.entries.iter() {
+            writer.write_bytes(1, &entry.to_pb());
+        }
+        if self.full {
+            writer.write_bool(2, self.full);
+        }
+        writer.data
+    }
+
     pub fn from_pb(raw_data: &[u8]) -> Result<WantList, Box<dyn Error>> {
         let mut entries: Vec<Entry> = Vec::new();
         let mut full: bool = false;
@@ -121,15 +149,56 @@ impl WantList {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Block {
     pub prefix: Vec<u8>,
     pub data: Vec<u8>,
 }
 
 impl Block {
+    pub fn to_pb(&self) -> Vec<u8> {
+        let mut writer = PBufWriter::new();
+        writer.write_bytes(1, &self.prefix);
+        writer.write_bytes(2, &self.data);
+        writer.data
+    }
+
     pub fn from_pb(raw_data: &[u8]) -> Result<Block, Box<dyn Error>> {
-        unimplemented!()
+        let mut prefix: Option<Vec<u8>> = None;
+        let mut data: Option<Vec<u8>> = None;
+
+        let mut reader = PBufReader::new(&raw_data);
+        while let Some(field) = reader.read_field()? {
+            println!("    Block: field {} wire_type {}", field.field_number, field.wire_type);
+            match field.field_number {
+                1 => match &prefix {
+                    Some(_) => return Err(error!("duplicate prefix")),
+                    None => prefix = Some(Vec::from(field.data.to_bytes()?)),
+                },
+                2 => match &data {
+                    Some(_) => return Err(error!("duplicate data")),
+                    None => data = Some(Vec::from(field.data.to_bytes()?)),
+                },
+                _ => (),
+            }
+        }
+
+        let prefix = prefix.ok_or_else(|| error!("Missing field: prefix"))?;
+        let data = data.ok_or_else(|| error!("Missing field: data"))?;
+
+        Ok(Block {
+            prefix,
+            data,
+        })
+    }
+}
+
+impl fmt::Debug for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Block")
+            .field("prefix", &BinaryData(&self.prefix))
+            .field("data", &BinaryData(&self.data))
+            .finish()
     }
 }
 
@@ -161,6 +230,17 @@ pub struct Message {
 }
 
 impl Message {
+    pub fn to_pb(&self) -> Vec<u8> {
+        let mut writer = PBufWriter::new();
+        if let Some(wantlist) = &self.wantlist {
+            writer.write_bytes(1, &wantlist.to_pb());
+        }
+        for block in self.blocks.iter() {
+            writer.write_bytes(3, &block.to_pb());
+        }
+        writer.data
+    }
+
     pub fn from_pb(raw_data: &[u8]) -> Result<Message, Box<dyn Error>> {
         let mut wantlist: Option<WantList> = None;
         let mut blocks: Vec<Block> = Vec::new();
@@ -176,6 +256,7 @@ impl Message {
                     Some(_) => return Err(error!("duplicate wantlist")),
                     None => wantlist = Some(WantList::from_pb(&field.data.to_bytes()?)?),
                 },
+                3 => blocks.push(Block::from_pb(&field.data.to_bytes()?)?),
                 _ => (),
             }
         }
@@ -187,6 +268,5 @@ impl Message {
             block_presence,
             pending_bytes,
         })
-
     }
 }

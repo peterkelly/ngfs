@@ -100,16 +100,16 @@ impl MplexStreams {
     // }
 
     fn print_readers_writers(&self) {
-        print!("**** stream readers:");
-        for (sid, _) in self.readers.iter() {
-            print!(" {:?}", sid);
-        }
-        println!();
-        print!("**** stream writers:");
-        for (sid, _) in self.readers.iter() {
-            print!(" {:?}", sid);
-        }
-        println!();
+        // print!("**** stream readers:");
+        // for (sid, _) in self.readers.iter() {
+        //     print!(" {:?}", sid);
+        // }
+        // println!();
+        // print!("**** stream writers:");
+        // for (sid, _) in self.readers.iter() {
+        //     print!(" {:?}", sid);
+        // }
+        // println!();
     }
 }
 
@@ -396,7 +396,7 @@ pub struct StreamReader {
 
 impl Drop for StreamReader {
     fn drop(&mut self) {
-        println!("drop stream reader {:?}", self.stream_id);
+        // println!("drop stream reader {:?}", self.stream_id);
         self.shared.lock().unwrap().streams.remove_reader(&self.stream_id);
     }
 }
@@ -448,7 +448,7 @@ impl StreamWriter {
 
 impl Drop for StreamWriter {
     fn drop(&mut self) {
-        println!("drop stream writer {:?}", self.stream_id);
+        // println!("drop stream writer {:?}", self.stream_id);
         self.shared.lock().unwrap().streams.remove_writer(&self.stream_id);
     }
 }

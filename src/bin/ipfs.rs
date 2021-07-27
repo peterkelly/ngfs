@@ -10,6 +10,7 @@
 const ID_PROTOCOL: &[u8] = b"/ipfs/id/1.0.0\n";
 const ID_PROTOCOL_STR: &str = "/ipfs/id/1.0.0";
 const BITSWAP_PROTOCOL_STR: &str = "/ipfs/bitswap/1.2.0";
+const BITSWAP_PROTOCOL: &[u8] = b"/ipfs/bitswap/1.2.0\n";
 
 use std::fmt;
 use std::error::Error;
@@ -201,41 +202,60 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (mut acceptor, mut connector) = mplex.split();
     tokio::spawn(accept_loop(node.clone(), registry.clone(), acceptor));
 
-    println!("-------- Before sleep");
-    tokio::time::sleep(Duration::from_millis(3000)).await;
-    println!("-------- After sleep");
+    // println!("-------- Before sleep");
+    // tokio::time::sleep(Duration::from_millis(3000)).await;
+    // println!("-------- After sleep");
     // println!();
     // println!();
     // println!();
 
+    // {
+    //     let mut id_stream = connector.connect(Some("id-test")).await?;
+    //     multistream_handshake(&mut id_stream).await?;
+    //     match multistream_select(&mut id_stream, ID_PROTOCOL).await {
+    //         Ok(SelectResponse::Accepted) => {
+    //             println!("id protocol accepted");
+    //         },
+    //         Ok(SelectResponse::Unsupported) => {
+    //             return Err(error!("id protocol accepted").into());
+    //         }
+    //         Err(e) => {
+    //             return Err(e.into());
+    //         }
+    //     }
+
+    //     let identify_data = read_length_prefixed_data(&mut id_stream).await?;
+    //     match Identify::from_pb(&identify_data) {
+    //         Ok(identify) => {
+    //             println!("Parse identify:");
+    //             println!("{:#?}", identify);
+    //         }
+    //         Err(e) => {
+    //             println!("Parse identify failed");
+    //             return Err(e);
+    //         }
+    //     }
+    // }
+
+
+
     {
-        let mut id_stream = connector.connect(Some("id-test")).await?;
-        multistream_handshake(&mut id_stream).await?;
-        match multistream_select(&mut id_stream, ID_PROTOCOL).await {
+        let mut stream = connector.connect(None).await?;
+        multistream_handshake(&mut stream).await?;
+        match multistream_select(&mut stream, BITSWAP_PROTOCOL).await {
             Ok(SelectResponse::Accepted) => {
-                println!("id protocol accepted");
+                println!("bitswap protocol accepted");
             },
             Ok(SelectResponse::Unsupported) => {
-                return Err(error!("id protocol accepted").into());
+                return Err(error!("bitswap protocol accepted").into());
             }
             Err(e) => {
                 return Err(e.into());
             }
         }
 
-        let identify_data = read_length_prefixed_data(&mut id_stream).await?;
-        match Identify::from_pb(&identify_data) {
-            Ok(identify) => {
-                println!("Parse identify:");
-                println!("{:#?}", identify);
-            }
-            Err(e) => {
-                println!("Parse identify failed");
-                return Err(e);
-            }
-        }
+        bitswap_handler(node.clone(), Box::new(stream));
     }
-
 
     loop {
         // keep the process alive
