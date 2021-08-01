@@ -18,7 +18,8 @@ use super::super::types::record::{
     TLSPlaintext,
     TLSOutputPlaintext,
     TLSPlaintextError,
-    TLS_RECORD_SIZE,
+    MAX_PLAINTEXT_RECORD_SIZE,
+    MAX_CIPHERTEXT_RECORD_SIZE,
 };
 use super::super::types::handshake::{
     Handshake,
@@ -48,7 +49,7 @@ pub fn encrypt_record(
     client_sequence_no: u64,
     transcript: Option<&mut Vec<u8>>,
 ) -> Result<(), TLSError> {
-    if data_ref.len() > TLS_RECORD_SIZE {
+    if data_ref.len() > MAX_PLAINTEXT_RECORD_SIZE {
         return Err(TLSError::InvalidPlaintextRecord);
     }
 
@@ -91,7 +92,7 @@ fn poll_receive_record(
         length_bytes.copy_from_slice(&incoming_data[3..5]);
         let length = u16::from_be_bytes(length_bytes) as usize;
 
-        if length > TLS_RECORD_SIZE {
+        if length > MAX_CIPHERTEXT_RECORD_SIZE {
             return Poll::Ready(Err(TLSError::InvalidPlaintextRecord));
         }
 

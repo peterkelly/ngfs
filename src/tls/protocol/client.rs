@@ -66,7 +66,7 @@ use super::super::types::record::{
     TLSPlaintext,
     TLSOutputPlaintext,
     TLSPlaintextError,
-    TLS_RECORD_SIZE,
+    MAX_PLAINTEXT_RECORD_SIZE,
 };
 use super::super::types::alert::{
     Alert,
@@ -824,7 +824,7 @@ impl AsyncWrite for EstablishedConnection {
             Poll::Ready(Ok(())) => (),
         }
 
-        let max_write: usize = TLS_RECORD_SIZE;
+        let max_write: usize = MAX_PLAINTEXT_RECORD_SIZE;
         let amt = std::cmp::min(buf.len(), max_write);
 
         match direct.append_application_data(&buf[0..amt]) {

@@ -14,7 +14,8 @@ use super::handshake::Handshake;
 use super::super::super::binary::BinaryReader;
 
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
-pub const TLS_RECORD_SIZE: usize = 16384;
+pub const MAX_PLAINTEXT_RECORD_SIZE: usize = 16384;  // 2^14
+pub const MAX_CIPHERTEXT_RECORD_SIZE: usize = 16640; // 2^14 + 256
 
 const TLS_MAX_ENCRYPTED_RECORD_LEN: usize = (1 << 14) + 256;
 
@@ -199,7 +200,7 @@ impl TLSPlaintext<'_> {
         length_bytes.copy_from_slice(&data[3..5]);
         let length = u16::from_be_bytes(length_bytes) as usize;
 
-        if length > TLS_RECORD_SIZE {
+        if length > MAX_PLAINTEXT_RECORD_SIZE {
             return Err(TLSPlaintextError::InvalidLength);
         }
 
