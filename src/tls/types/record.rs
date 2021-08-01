@@ -176,50 +176,6 @@ pub struct TLSOwnedPlaintext {
     pub raw: Vec<u8>,
 }
 
-pub struct TLSPlaintext<'a> {
-    pub content_type: ContentType,
-    pub legacy_record_version: u16,
-    pub fragment: &'a [u8],
-    pub raw: &'a [u8],
-}
-
-impl TLSPlaintext<'_> {
-    pub fn from_raw_data<'x>(data: &'x [u8]) -> Result<TLSPlaintext<'x>, TLSPlaintextError> {
-        if data.len() < 5 {
-            return Err(TLSPlaintextError::InsufficientData);
-        }
-
-        let content_type = ContentType::from_raw(data[0]);
-
-        let mut legacy_record_version_bytes: [u8; 2] = Default::default();
-        legacy_record_version_bytes.copy_from_slice(&data[1..3]);
-        let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
-
-
-        let mut length_bytes: [u8; 2] = Default::default();
-        length_bytes.copy_from_slice(&data[3..5]);
-        let length = u16::from_be_bytes(length_bytes) as usize;
-
-        if length > MAX_PLAINTEXT_RECORD_SIZE {
-            return Err(TLSPlaintextError::InvalidLength);
-        }
-
-        if 5 + length > data.len() {
-            return Err(TLSPlaintextError::InsufficientData);
-        }
-
-        let consumed = 5 + length;
-
-        let record = TLSPlaintext {
-            content_type,
-            legacy_record_version,
-            fragment: &data[5..5 + length],
-            raw: &data[0..5 + length],
-        };
-        Ok(record)
-    }
-}
-
 pub struct TLSOutputPlaintext<'a> {
     pub content_type: ContentType,
     pub legacy_record_version: u16,

@@ -63,7 +63,6 @@ use super::super::types::record::{
     Message,
     ContentType,
     TLSOwnedPlaintext,
-    TLSPlaintext,
     TLSOutputPlaintext,
     TLSPlaintextError,
     MAX_PLAINTEXT_RECORD_SIZE,

@@ -38,7 +38,6 @@ use torrent::tls::types::extension::{
 use torrent::tls::types::record::{
     ContentType,
     Message,
-    TLSPlaintext,
     TLSPlaintextError,
     TLSCiphertext,
 };
