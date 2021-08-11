@@ -16,6 +16,7 @@ use std::fmt;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use clap::{Clap, ArgSettings};
 use bytes::{Bytes, BytesMut, Buf, BufMut};
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
@@ -47,7 +48,32 @@ use torrent::io::AsyncStream;
 use torrent::error;
 use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
 use torrent::ipfs::identify::identify_handler;
-use torrent::ipfs::bitswap::handler::bitswap_handler;
+use torrent::ipfs::bitswap::handler::{bitswap_handler, bitswap_handler_show};
+
+
+#[derive(Clap)]
+#[clap(name="ipfs")]
+struct Opt {
+    #[clap(subcommand)]
+    subcmd: SubCommand,
+}
+
+#[derive(Clap)]
+enum SubCommand {
+    Test,
+    Show(Show),
+}
+
+#[derive(Clap)]
+struct Show {
+    #[clap()]
+    cid: String,
+}
+
+
+
+
+
 
 async fn connection_handler2(
     node: Arc<IPFSNode>,
@@ -237,24 +263,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //     }
     // }
 
-
-
-    {
-        let mut stream = connector.connect(None).await?;
-        multistream_handshake(&mut stream).await?;
-        match multistream_select(&mut stream, BITSWAP_PROTOCOL).await {
-            Ok(SelectResponse::Accepted) => {
-                println!("bitswap protocol accepted");
-            },
-            Ok(SelectResponse::Unsupported) => {
-                return Err(error!("bitswap protocol accepted").into());
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
+    let opt = Opt::parse();
+    match opt.subcmd {
+        SubCommand::Test => {
+            println!("Test: sitting passively, waiting for connections");
         }
+        SubCommand::Show(args) => {
+            let mut stream = connector.connect(None).await?;
+            multistream_handshake(&mut stream).await?;
+            match multistream_select(&mut stream, BITSWAP_PROTOCOL).await {
+                Ok(SelectResponse::Accepted) => {
+                    println!("bitswap protocol accepted");
+                },
+                Ok(SelectResponse::Unsupported) => {
+                    return Err(error!("bitswap protocol accepted").into());
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
 
-        bitswap_handler(node.clone(), Box::new(stream));
+            bitswap_handler_show(node.clone(), Box::new(stream), args.cid.clone());
+        }
     }
 
     loop {

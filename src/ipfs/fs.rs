@@ -52,6 +52,7 @@ pub enum DecodeError {
     EntryMissingFilename(usize),
     EntryMissingSize(usize),
     EntryDuplicateFilename(String), // Directory has duplicate filenames
+    FileDataAndLinks,
     Other(String),
     Unimplemented(String),
 }
@@ -67,6 +68,8 @@ impl fmt::Display for DecodeError {
                 write!(f, "Directory entry {} has no size", index),
             DecodeError::EntryDuplicateFilename(filename) =>
                 write!(f, "Directory has duplicate filename: {:?}", filename),
+            DecodeError::FileDataAndLinks =>
+                write!(f, "Node marked as type File, but has data and links present"),
             DecodeError::Other(msg) =>
                 write!(f, "{}", msg),
             DecodeError::Unimplemented(op) =>

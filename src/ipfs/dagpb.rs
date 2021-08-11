@@ -12,6 +12,7 @@ use std::error::Error;
 use crate::error;
 use crate::protobuf::{PBufReader, PBufWriter};
 use crate::cid::CID;
+use crate::util::{BinaryDataLen, OptBinaryDataLen};
 
 pub struct PBLink {
     pub hash: CID,
@@ -78,10 +79,18 @@ impl PBLink {
     }
 }
 
-#[derive(Debug)]
 pub struct PBNode {
     pub links: Vec<PBLink>,
     pub bytes: Option<Vec<u8>>,
+}
+
+impl fmt::Debug for PBNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PBNode")
+            .field("links", &self.links)
+            .field("bytes", &OptBinaryDataLen(&self.bytes))
+            .finish()
+    }
 }
 
 impl PBNode {

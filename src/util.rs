@@ -17,6 +17,25 @@ impl<'a> fmt::Debug for BinaryData<'a> {
     }
 }
 
+pub struct BinaryDataLen<'a, T : AsRef<[u8]>>(pub &'a T);
+
+impl<'a, T : AsRef<[u8]>> fmt::Debug for BinaryDataLen<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<{} bytes>", self.0.as_ref().len())
+    }
+}
+
+pub struct OptBinaryDataLen<'a, T : AsRef<[u8]>>(pub &'a Option<T>);
+
+impl<'a, T : AsRef<[u8]>> fmt::Debug for OptBinaryDataLen<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.0 {
+            Some(b) => write!(f, "<{} bytes>", b.as_ref().len()),
+            None => write!(f, "None")
+        }
+    }
+}
+
 pub fn from_hex(s: &str) -> Option<Vec<u8>> {
     let raw = s.as_bytes();
     if raw.len() % 2 != 0 {
