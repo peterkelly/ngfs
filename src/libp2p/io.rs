@@ -8,6 +8,7 @@
 use std::io;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use crate::protobuf::VarInt;
+use crate::varint::{varint_encode_u64, varint_encode_usize};
 
 pub async fn read_opt_varint<T>(reader: &mut T) -> Result<Option<u64>, io::Error>
     where T : AsyncRead + Unpin
@@ -45,7 +46,8 @@ pub async fn read_varint<T>(reader: &mut T) -> Result<u64, io::Error>
 pub async fn write_varint<T>(writer: &mut T, value: u64) -> Result<(), io::Error>
     where T : AsyncWrite + Unpin
 {
-    let value_bytes = VarInt::encode_u64(value);
+    let mut value_bytes: Vec<u8> = Vec::new();
+    varint_encode_u64(value, &mut value_bytes);
     writer.write_all(&value_bytes).await?;
     Ok(())
 }
@@ -81,7 +83,8 @@ pub async fn read_length_prefixed_data<T>(reader: &mut T) -> Result<Vec<u8>, io:
 pub async fn write_length_prefixed_data<T>(writer: &mut T, data: &[u8]) -> Result<(), io::Error>
     where T : AsyncWrite + Unpin
 {
-    let len_bytes = VarInt::encode_usize(data.len());
+    let mut len_bytes: Vec<u8> = Vec::new();
+    varint_encode_usize(data.len(), &mut len_bytes);
     writer.write_all(&len_bytes).await?;
     writer.write_all(&data).await?;
     Ok(())

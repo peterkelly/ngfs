@@ -13,6 +13,7 @@ use torrent::error;
 use torrent::multibase::decode;
 use torrent::util::{BinaryData};
 use torrent::protobuf::{PBufReader, PBufWriter, VarInt};
+use torrent::varint::varint_encode_u64;
 use torrent::cid::CID;
 use torrent::p2p::{p2p_test, PrivateKey, print_fields};
 use rand::prelude::Rng;
@@ -60,7 +61,8 @@ async fn varint_command(args: &[String]) -> Result<(), Box<dyn Error>> {
         let raw: u64 = generator.next().unwrap();
         let bits: u64 = generator.next().unwrap() % 64;
         let value = raw >> bits;
-        let varint_bytes = VarInt::encode_u64(value);
+        let mut varint_bytes: Vec<u8> = Vec::new();
+        varint_encode_u64(value, &mut varint_bytes);
 
         let mut offset = 0;
         match VarInt::read_from(&varint_bytes, &mut offset) {

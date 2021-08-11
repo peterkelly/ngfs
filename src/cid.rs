@@ -9,6 +9,7 @@ use std::fmt;
 use super::util::BinaryData;
 use super::error;
 use super::protobuf::VarInt;
+use super::varint::{varint_encode_u64, varint_encode_usize};
 use super::multibase::{decode, decode_noprefix, encode, encode_noprefix, Base, DecodeError};
 use std::error::Error;
 
@@ -218,9 +219,9 @@ impl CID {
     pub fn to_bytes_v1(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         result.push(1);
-        result.extend_from_slice(&VarInt::encode_u64(self.codec.to_u64()));
-        result.extend_from_slice(&VarInt::encode_u64(self.hash_type.to_u64()));
-        result.extend_from_slice(&VarInt::encode_usize(self.hash.len()));
+        varint_encode_u64(self.codec.to_u64(), &mut result);
+        varint_encode_u64(self.hash_type.to_u64(), &mut result);
+        varint_encode_usize(self.hash.len(), &mut result);
         result.extend_from_slice(&self.hash);
         return result;
     }

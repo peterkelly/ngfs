@@ -19,6 +19,7 @@ use super::error;
 use super::util::{BinaryData, escape_string};
 use super::protobuf::{PBufReader, PBufWriter, VarInt};
 use super::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
+use super::varint::varint_encode_usize;
 
 use openssl::bn::{BigNum, BigNumRef, BigNumContext};
 use openssl::ec::*;
@@ -246,7 +247,7 @@ async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), Box
 
 async fn send_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), Box<dyn Error>> {
     let mut tosend: Vec<u8> = Vec::new();
-    tosend.append(&mut VarInt::encode_usize(tosend_bytes.len()));
+    varint_encode_usize(tosend_bytes.len(), &mut tosend);
     tosend.append(&mut Vec::from(tosend_bytes));
     let w = stream.write(&tosend).await?;
     // println!("Sent {} bytes", w);

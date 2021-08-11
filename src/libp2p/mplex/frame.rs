@@ -5,6 +5,7 @@ use crate::io::AsyncStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use std::task::{Context, Poll};
 use crate::protobuf::VarInt;
+use crate::varint::{varint_encode_u64, varint_encode_usize};
 use crate::util::{Indent, DebugHexDump};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -264,8 +265,8 @@ impl FrameStream {
     }
 
     fn append_frame(&mut self, header: u64, data: &[u8]) {
-        self.outgoing_data.extend_from_slice(&VarInt::encode_u64(header));
-        self.outgoing_data.extend_from_slice(&VarInt::encode_usize(data.len()));
+        varint_encode_u64(header, &mut self.outgoing_data);
+        varint_encode_usize(data.len(), &mut self.outgoing_data);
         self.outgoing_data.extend_from_slice(&data);
     }
 

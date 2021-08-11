@@ -96,14 +96,6 @@ impl<'a> VarInt<'a> {
         let end: usize = *offset;
         Some(VarInt(&data[start..end]))
     }
-
-    pub fn encode_usize(value: usize) -> Vec<u8> {
-        VarInt::encode_u64(value as u64)
-    }
-
-    pub fn encode_u64(value: u64) -> Vec<u8> {
-        varint::encode_u64(value)
-    }
 }
 
 impl<'a> Bytes<'a> {
@@ -407,7 +399,7 @@ impl PBufWriter {
     fn write_tag(&mut self, field_number: u32, field_type: u64) {
         assert!(field_type & !3 == 0);
         let tag = (field_number as u64) << 3 | field_type;
-        self.data.append(&mut VarInt::encode_u64(tag));
+        varint::varint_encode_u64(tag, &mut self.data);
     }
 
 
@@ -425,7 +417,7 @@ impl PBufWriter {
 
     pub fn write_uint64(&mut self, field_number: u32, value: u64) {
         self.write_tag(field_number, VARINT_TYPE);
-        self.data.append(&mut VarInt::encode_u64(value));
+        varint::varint_encode_u64(value, &mut self.data);
     }
 
     // pub fn write_sint32(&mut self, field_number: u32, value: i32) {
@@ -473,27 +465,13 @@ impl PBufWriter {
     }
 
 
-
-
-
-
-
-
-    // pub fn write_uint64(&mut self, field_number: u32, value: u64) {
-    //     let tag = (field_number as u64) << 3 | 0;
-    //     self.data.append(&mut VarInt::encode_u64(tag));
-    //     self.data.append(&mut VarInt::encode_u64(value));
-    // }
-
     pub fn write_usize(&mut self, field_number: u32, value: usize) {
         self.write_uint64(field_number, value as u64);
     }
 
     pub fn write_bytes(&mut self, field_number: u32, bytes: &[u8]) {
-        // let tag = (field_number as u64) << 3 | 0;
-        // self.data.append(&mut VarInt::encode_u64(tag));
         self.write_tag(field_number, LENGTH_TYPE);
-        self.data.append(&mut VarInt::encode_usize(bytes.len()));
+        varint::varint_encode_usize(bytes.len(), &mut self.data);
         self.data.append(&mut Vec::from(bytes));
     }
 
