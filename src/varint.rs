@@ -1,6 +1,42 @@
 use std::fmt;
 use bytes::BufMut;
 
+pub enum DecoderResult<T> {
+    Finished(T),
+    Overflow,
+    Pending,
+}
+
+pub struct U64Decoder {
+    res: u64,
+    shift: u32,
+}
+
+impl U64Decoder {
+    pub fn new() -> U64Decoder {
+        U64Decoder {
+            res: 0,
+            shift: 0,
+        }
+    }
+
+    pub fn input(&mut self, b: u8) -> DecoderResult<u64> {
+        match ((b & 0x7f) as u64).checked_shl(self.shift) {
+            None => DecoderResult::Overflow,
+            Some(x) => {
+                self.res |= x;
+                self.shift += 7;
+                if (b & 0x80) == 0 {
+                    DecoderResult::Finished(self.res)
+                }
+                else {
+                    DecoderResult::Pending
+                }
+            }
+        }
+    }
+}
+
 pub fn encode_usize<T>(value: usize, out: &mut T) where T : BufMut {
     encode_u64(value as u64, out);
 }

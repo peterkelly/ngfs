@@ -1,39 +1,83 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_mut)]
-// #![allow(unused_assignments)]
-// #![allow(unused_imports)]
-// #![allow(unused_macros)]
+#![allow(unused_variables)]
+#![allow(dead_code)]
+#![allow(unused_mut)]
+#![allow(unused_assignments)]
+#![allow(unused_imports)]
+#![allow(unused_macros)]
 
 use std::io;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use std::pin::Pin;
+use std::task::{Context, Poll, Waker};
+use std::future::Future;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use crate::protobuf::VarInt;
 use crate::varint;
+use crate::varint::{U64Decoder, DecoderResult};
 
-pub async fn read_opt_varint<T>(reader: &mut T) -> Result<Option<u64>, io::Error>
+
+#[doc(hidden)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub struct ReadOptVarInt<'a, T> where T : AsyncRead + Unpin {
+    reader: &'a mut T,
+    decoder: U64Decoder,
+    num_bytes: usize,
+}
+
+impl<'a, T> Future for ReadOptVarInt<'a, T>
     where T : AsyncRead + Unpin
 {
-    let mut parts: Vec<u8> = Vec::new();
-    loop {
-        let b = match reader.read_u8().await {
-            Ok(b) => b,
-            Err(e) => {
-                if parts.len() == 0 && e.kind() == io::ErrorKind::UnexpectedEof {
-                    return Ok(None);
+    type Output = Result<Option<u64>, io::Error>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut iself = Pin::into_inner(self);
+
+        loop {
+            let mut raw_buf: [u8; 1] = [0; 1];
+            let mut buf = ReadBuf::new(&mut raw_buf);
+            match Pin::new(&mut iself.reader).poll_read(cx, &mut buf) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(e)) => {
+                    if iself.num_bytes == 0 && e.kind() == io::ErrorKind::UnexpectedEof {
+                        return Poll::Ready(Ok(None));
+                    }
+                    else {
+                        return Poll::Ready(Err(e));
+                    }
                 }
-                else {
-                    return Err(e);
+                Poll::Ready(Ok(())) => {
+                    if buf.filled().len() == 0 {
+                        if iself.num_bytes == 0 {
+                            return Poll::Ready(Ok(None));
+                        }
+                        else {
+                            return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
+                        }
+                    }
+                    iself.num_bytes += 1;
+                    match iself.decoder.input(raw_buf[0]) {
+                        DecoderResult::Finished(value) => {
+                            return Poll::Ready(Ok(Some(value)));
+                        }
+                        DecoderResult::Overflow => {
+                            return Poll::Ready(Err(io::ErrorKind::InvalidData.into()));
+                        }
+                        DecoderResult::Pending => {
+                            // continue with another loop iteration, reading the next byte
+                        }
+                    }
                 }
             }
-        };
-
-        parts.push(b);
-        if b & 0x80 == 0 {
-            break;
         }
     }
+}
 
-    Ok(Some(VarInt(&parts).to_u64().map_err(|_| io::ErrorKind::InvalidData)?))
+pub fn read_opt_varint<'a, T>(reader: &'a mut T) -> ReadOptVarInt<'a, T>
+    where T : AsyncRead + Unpin
+{
+    ReadOptVarInt {
+        reader: reader,
+        decoder: U64Decoder::new(),
+        num_bytes: 0,
+    }
 }
 
 pub async fn read_varint<T>(reader: &mut T) -> Result<u64, io::Error>
