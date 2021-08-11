@@ -18,15 +18,11 @@ pub struct Bits64(pub [u8; 8]);
 pub struct Bytes<'a>(pub &'a [u8]);
 
 impl<'a> VarInt<'a> {
-    pub fn to_u64(&self) -> u64 {
-        let mut value: u64 = 0;
-        for b in self.0.iter().rev() {
-            value = (value << 7) | ((b & 0x7f) as u64);
-        }
-        value
+    pub fn to_u64(&self) -> Result<u64, varint::DecodeError> {
+        varint::decode_u64(&self.0)
     }
 
-    pub fn to_u32(&self) -> u32 {
+    pub fn to_u32_unchecked(&self) -> u32 {
         let mut value: u32 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as u32);
@@ -34,7 +30,7 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    pub fn to_i64(&self) -> i64 {
+    pub fn to_i64_unchecked(&self) -> i64 {
         let mut value: i64 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i64);
@@ -42,7 +38,7 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    pub fn to_i32(&self) -> i32 {
+    pub fn to_i32_unchecked(&self) -> i32 {
         let mut value: i32 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i32);
@@ -50,7 +46,7 @@ impl<'a> VarInt<'a> {
         value
     }
 
-    pub fn to_i64_zigzag(&self) -> i64 {
+    pub fn to_i64_zigzag_unchecked(&self) -> i64 {
         let mut value: i64 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i64);
@@ -58,7 +54,7 @@ impl<'a> VarInt<'a> {
         (value << 63) ^ (value >> 1)
     }
 
-    pub fn to_i32_zigzag(&self) -> i32 {
+    pub fn to_i32_zigzag_unchecked(&self) -> i32 {
         let mut value: i32 = 0;
         for b in self.0.iter().rev() {
             value = (value << 7) | ((b & 0x7f) as i32);
@@ -66,16 +62,12 @@ impl<'a> VarInt<'a> {
         (value << 31) ^ (value >> 1)
     }
 
-    pub fn to_usize(&self) -> usize {
-        let mut value: usize = 0;
-        for b in self.0.iter().rev() {
-            value = (value << 7) | ((b & 0x7f) as usize);
-        }
-        value
+    pub fn to_usize(&self) -> Result<usize, varint::DecodeError> {
+        varint::decode_u64(&self.0).map(|value| value as usize)
     }
 
-    pub fn to_bool(&self) -> bool {
-        self.to_u64() != 0
+    pub fn to_bool(&self) -> Result<bool, varint::DecodeError> {
+        Ok(self.to_u64()? != 0)
     }
 
     pub fn read_from<'x, 'y>(data: &'x [u8], offset: &'y mut usize) -> Option<VarInt<'x>> {
@@ -189,7 +181,7 @@ impl<'a> FieldData<'a> {
     pub fn to_u64(&self) -> Result<u64, Box<dyn Error>> {
         match self {
             FieldData::Bits64(v) => Ok(v.bits64_to_u64()),
-            FieldData::VarInt(v) => Ok(v.to_u64()),
+            FieldData::VarInt(v) => Ok(v.to_u64()?),
             _ => Err(error!("Not a bits64 or varint")),
         }
     }
@@ -197,14 +189,14 @@ impl<'a> FieldData<'a> {
     pub fn to_i64(&self) -> Result<i64, Box<dyn Error>> {
         match self {
             FieldData::Bits64(v) => Ok(v.bits64_to_i64()),
-            FieldData::VarInt(v) => Ok(v.to_i64()),
+            FieldData::VarInt(v) => Ok(v.to_i64_unchecked()),
             _ => Err(error!("Not a bits64 or varint")),
         }
     }
 
     pub fn to_i64_zigzag(&self) -> Result<i64, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_i64_zigzag()),
+            FieldData::VarInt(v) => Ok(v.to_i64_zigzag_unchecked()),
             _ => Err(error!("Not a varint")),
         }
     }
@@ -216,7 +208,7 @@ impl<'a> FieldData<'a> {
     pub fn to_u32(&self) -> Result<u32, Box<dyn Error>> {
         match self {
             FieldData::Bits32(v) => Ok(v.bits32_to_u32()),
-            FieldData::VarInt(v) => Ok(v.to_u32()),
+            FieldData::VarInt(v) => Ok(v.to_u32_unchecked()),
             _ => Err(error!("Not a bits32 or varint")),
         }
     }
@@ -224,14 +216,14 @@ impl<'a> FieldData<'a> {
     pub fn to_i32(&self) -> Result<i32, Box<dyn Error>> {
         match self {
             FieldData::Bits32(v) => Ok(v.bits32_to_i32()),
-            FieldData::VarInt(v) => Ok(v.to_i32()),
+            FieldData::VarInt(v) => Ok(v.to_i32_unchecked()),
             _ => Err(error!("Not a bits32 or varint")),
         }
     }
 
     pub fn to_i32_zigzag(&self) -> Result<i32, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_i32_zigzag()),
+            FieldData::VarInt(v) => Ok(v.to_i32_zigzag_unchecked()),
             _ => Err(error!("Not a varint")),
         }
     }
@@ -242,7 +234,7 @@ impl<'a> FieldData<'a> {
 
     pub fn to_bool(&self) -> Result<bool, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_bool()),
+            FieldData::VarInt(v) => Ok(v.to_bool()?),
             _ => Err(error!("Not a varint")),
         }
     }
@@ -366,6 +358,8 @@ pub struct FieldRef<'a> {
 #[derive(Debug)]
 pub enum ReadError {
     EndOfFile(usize, ReadCase),
+    InvalidTag,
+    InvalidLength,
     LengthOverflow(usize),
     UnknownWireType(usize, u8),
 }
@@ -399,7 +393,7 @@ impl PBufWriter {
     fn write_tag(&mut self, field_number: u32, field_type: u64) {
         assert!(field_type & !3 == 0);
         let tag = (field_number as u64) << 3 | field_type;
-        varint::varint_encode_u64(tag, &mut self.data);
+        varint::encode_u64(tag, &mut self.data);
     }
 
 
@@ -417,7 +411,7 @@ impl PBufWriter {
 
     pub fn write_uint64(&mut self, field_number: u32, value: u64) {
         self.write_tag(field_number, VARINT_TYPE);
-        varint::varint_encode_u64(value, &mut self.data);
+        varint::encode_u64(value, &mut self.data);
     }
 
     // pub fn write_sint32(&mut self, field_number: u32, value: i32) {
@@ -471,7 +465,7 @@ impl PBufWriter {
 
     pub fn write_bytes(&mut self, field_number: u32, bytes: &[u8]) {
         self.write_tag(field_number, LENGTH_TYPE);
-        varint::varint_encode_usize(bytes.len(), &mut self.data);
+        varint::encode_usize(bytes.len(), &mut self.data);
         self.data.append(&mut Vec::from(bytes));
     }
 
@@ -496,7 +490,8 @@ impl<'a> PBufReader<'a> {
         }
 
         let start = self.offset;
-        let tag = self.read_varint(ReadCase::FieldTag)?.to_u64();
+        let tag = self.read_varint(ReadCase::FieldTag)?.to_u64()
+                      .map_err(|_| ReadError::InvalidTag)?;
         let field_number = tag >> 3;
         let wire_type = tag & 0x7;
 
@@ -536,7 +531,8 @@ impl<'a> PBufReader<'a> {
     }
 
     pub fn read_length_delimited(&mut self) -> Result<Bytes<'a>, ReadError> {
-        let nbytes = self.read_varint(ReadCase::BytesLength)?.to_usize();
+        let nbytes = self.read_varint(ReadCase::BytesLength)?.to_usize()
+                         .map_err(|_| ReadError::InvalidLength)?;
         let slice = self.read(nbytes, ReadCase::Bytes)?;
         Ok(Bytes(slice))
     }

@@ -4,10 +4,11 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::{BufMut};
 use crate::util::BinaryData;
 use crate::protobuf::VarInt;
-use crate::varint::varint_encode_u64;
+use crate::varint;
 
 enum DecodeVarintError {
     UnexpectedEof,
+    Other(varint::DecodeError),
 }
 
 fn decode_varint_u64(data: &[u8]) -> Result<(u64, usize), DecodeVarintError>
@@ -27,7 +28,7 @@ fn decode_varint_u64(data: &[u8]) -> Result<(u64, usize), DecodeVarintError>
         }
     }
 
-    Ok((VarInt(&parts).to_u64(), offset))
+    Ok((VarInt(&parts).to_u64().map_err(|e| DecodeVarintError::Other(e))?, offset))
 }
 
 #[derive(Clone)]
@@ -123,26 +124,26 @@ impl Addr {
     fn encode<T>(&self, out: &mut T) where T : BufMut {
         match self {
             Addr::IP4(ip) => {
-                varint_encode_u64(PROTOCOL_IP4, out);
+                varint::encode_u64(PROTOCOL_IP4, out);
                 out.put_slice(&ip.octets());
             }
             Addr::IP6(ip) => {
-                varint_encode_u64(PROTOCOL_IP6, out);
+                varint::encode_u64(PROTOCOL_IP6, out);
                 out.put_slice(&ip.octets());
             }
             Addr::TCP(port) => {
-                varint_encode_u64(PROTOCOL_TCP, out);
+                varint::encode_u64(PROTOCOL_TCP, out);
                 out.put_slice(&port.to_be_bytes());
             }
             Addr::UDP(port) => {
-                varint_encode_u64(PROTOCOL_UDP, out);
+                varint::encode_u64(PROTOCOL_UDP, out);
                 out.put_slice(&port.to_be_bytes());
             }
             Addr::QUIC => {
-                varint_encode_u64(PROTOCOL_QUIC, out);
+                varint::encode_u64(PROTOCOL_QUIC, out);
             }
             Addr::Unknown(proto, data) => {
-                varint_encode_u64(*proto, out);
+                varint::encode_u64(*proto, out);
                 out.put_slice(data);
             }
             Addr::Invalid(data) => {

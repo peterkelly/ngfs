@@ -1,11 +1,11 @@
 use std::fmt;
 use bytes::BufMut;
 
-pub fn varint_encode_usize<T>(value: usize, out: &mut T) where T : BufMut {
-    varint_encode_u64(value as u64, out);
+pub fn encode_usize<T>(value: usize, out: &mut T) where T : BufMut {
+    encode_u64(value as u64, out);
 }
 
-pub fn varint_encode_u64<T>(mut value: u64, out: &mut T) where T : BufMut {
+pub fn encode_u64<T>(mut value: u64, out: &mut T) where T : BufMut {
     loop {
         let seven = value & 0x7f;
         value = value >> 7;
@@ -69,7 +69,7 @@ mod tests {
     use super::super::util::BinaryData;
     use rand::rngs::StdRng;
     use rand::{SeedableRng, RngCore};
-    use super::{varint_encode_u64, decode_u64, DecodeError};
+    use super::{encode_u64, decode_u64, DecodeError};
     // use super::super::protobuf::VarInt;
     #[test]
     fn decode_empty() {
@@ -116,7 +116,7 @@ mod tests {
             value |= 1 << bits;
 
             let mut encoded: Vec<u8> = Vec::new();
-            varint_encode_u64(value, &mut encoded);
+            encode_u64(value, &mut encoded);
 
             println!("{:0>64b} {:0>16x} {:>20}",
                 value,
@@ -142,7 +142,7 @@ mod tests {
                 let value = rng.next_u64() & mask;
 
                 let mut encoded: Vec<u8> = Vec::new();
-                varint_encode_u64(value, &mut encoded);
+                encode_u64(value, &mut encoded);
                 println!("{:0>64b} {:0>16x} {:>20}",
                     value,
                     value,

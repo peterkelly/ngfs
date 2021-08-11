@@ -5,7 +5,7 @@ use crate::io::AsyncStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use std::task::{Context, Poll};
 use crate::protobuf::VarInt;
-use crate::varint::{varint_encode_u64, varint_encode_usize};
+use crate::varint;
 use crate::util::{Indent, DebugHexDump};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -150,10 +150,10 @@ impl FrameStream {
             // return the frame and don't attempt to read any more data from the underlying
             // transport.
             let mut offset = 0;
-            if let Some(header) = extract_varint_u64(&mut self.incoming_data, &mut offset) {
+            if let Some(header) = extract_varint_u64(&mut self.incoming_data, &mut offset)? {
                 let num = (header as u64) >> 3;
                 let flag = Flag::from_raw((header as u8) & 0x7)?;
-                if let Some(payload_len) = extract_varint_u64(&mut self.incoming_data, &mut offset) {
+                if let Some(payload_len) = extract_varint_u64(&mut self.incoming_data, &mut offset)? {
                     if self.incoming_data.len() >= offset + (payload_len as usize) {
                         self.incoming_data.advance(offset);
                         let payload = self.incoming_data.split_to(payload_len as usize);
@@ -265,8 +265,8 @@ impl FrameStream {
     }
 
     fn append_frame(&mut self, header: u64, data: &[u8]) {
-        varint_encode_u64(header, &mut self.outgoing_data);
-        varint_encode_usize(data.len(), &mut self.outgoing_data);
+        varint::encode_u64(header, &mut self.outgoing_data);
+        varint::encode_usize(data.len(), &mut self.outgoing_data);
         self.outgoing_data.extend_from_slice(&data);
     }
 
@@ -298,16 +298,20 @@ impl FrameStream {
     }
 }
 
-fn extract_varint_u64(p_incoming_data: &mut BytesMut, p_offset: &mut usize) -> Option<u64> {
+fn extract_varint_u64(
+    p_incoming_data: &mut BytesMut,
+    p_offset: &mut usize,
+) -> Result<Option<u64>, io::Error> {
     let start_offset = *p_offset;
     loop {
         if *p_offset >= p_incoming_data.len() {
-            return None;
+            return Ok(None);
         }
         if p_incoming_data[*p_offset] & 0x80 == 0 {
-            let res = Some(VarInt(&p_incoming_data[start_offset..*p_offset + 1]).to_u64());
+            let res = VarInt(&p_incoming_data[start_offset..*p_offset + 1]).to_u64()
+                        .map_err(|_| io::ErrorKind::InvalidData)?;
             *p_offset += 1;
-            return res;
+            return Ok(Some(res));
         }
         *p_offset += 1;
     }
