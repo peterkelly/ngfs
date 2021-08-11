@@ -10,6 +10,7 @@ use std::error::Error;
 // use std::collections::BTreeMap;
 use std::convert::TryInto;
 use super::error;
+use super::varint;
 
 pub struct VarInt<'a>(pub &'a [u8]);
 pub struct Bits32(pub [u8; 4]);
@@ -100,20 +101,8 @@ impl<'a> VarInt<'a> {
         VarInt::encode_u64(value as u64)
     }
 
-    pub fn encode_u64(mut value: u64) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::with_capacity(10);
-        loop {
-            let seven = value & 0x7f;
-            value = value >> 7;
-            if value != 0 {
-                bytes.push((seven | 0x80) as u8);
-            }
-            else {
-                bytes.push(seven as u8);
-                break;
-            }
-        }
-        return bytes;
+    pub fn encode_u64(value: u64) -> Vec<u8> {
+        varint::encode_u64(value)
     }
 }
 

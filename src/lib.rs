@@ -1,6 +1,7 @@
 pub mod bencoding;
 pub mod util;
 pub mod torrent;
+pub mod varint;
 pub mod protobuf;
 pub mod detrand;
 pub mod multibase;
