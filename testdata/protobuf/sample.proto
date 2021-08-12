@@ -1,0 +1,114 @@
+syntax = "proto2";
+
+package sample;
+
+
+// varint
+//     int32   OK
+//     int64   OK
+//     uint32  OK
+//     uint64  OK
+//     sint32  OK
+//     sint64  OK
+//     bool    OK
+//     enum    OK
+//
+// fixed 64-bit
+//     fixed64  OK
+//     sfixed64 OK
+//     double   OK
+//
+// fixed 32-bit
+//     fixed32  OK
+//     sfixed32 OK
+//     float    OK
+//
+// length delimited
+//     string
+//     bytes
+
+message FieldTypes {
+  optional string   test_string_empty
+  optional string   test_string_nonempty
+  optional bytes    test_bytes_empty
+  optional bytes    test_bytes_nonempty
+  optional bool     test_bool_true
+  optional bool     test_bool_false
+
+  optional fixed32  test_fixed32_positive
+  optional fixed32  test_fixed32_min
+  optional fixed32  test_fixed32_max
+  optional fixed64  test_fixed64_positive
+  optional fixed64  test_fixed64_min
+  optional fixed64  test_fixed64_max
+
+  optional sfixed32 test_sfixed32_positive
+  optional sfixed32 test_sfixed32_negative
+  optional sfixed32 test_sfixed32_zero
+  optional sfixed32 test_sfixed32_min
+  optional sfixed32 test_sfixed32_max
+  optional sfixed64 test_sfixed64_positive
+  optional sfixed64 test_sfixed64_negative
+  optional sfixed64 test_sfixed64_zero
+  optional sfixed64 test_sfixed64_min
+  optional sfixed64 test_sfixed64_max
+
+  optional double   test_double_positive
+  optional double   test_double_negative
+  optional double   test_double_zero
+  optional double   test_double_min
+  optional double   test_double_max
+  optional double   test_double_posinf
+  optional double   test_double_neginf
+  optional double   test_double_nan
+  optional float    test_float_positive
+  optional float    test_float_negative
+  optional float    test_float_zero
+  optional float    test_float_min
+  optional float    test_float_max
+  optional float    test_float_posinf
+  optional float    test_float_neginf
+  optional float    test_float_nan
+
+  optional uint32   test_uint32_positive
+  optional uint32   test_uint32_min
+  optional uint32   test_uint32_max
+  optional uint64   test_uint64_positive
+  optional uint64   test_uint64_min
+  optional uint64   test_uint64_max
+
+  optional int32    test_int32_positive
+  optional int32    test_int32_negative
+  optional int32    test_int32_zero
+  optional int32    test_int32_min
+  optional int32    test_int32_max
+  optional int64    test_int64_positive
+  optional int64    test_int64_negative
+  optional int64    test_int64_zero
+  optional int64    test_int64_min
+  optional int64    test_int64_max
+  optional sint32   test_sint32_positive
+  optional sint32   test_sint32_negative
+  optional sint32   test_sint32_zero
+  optional sint32   test_sint32_min
+  optional sint32   test_sint32_max
+  optional sint64   test_sint64_positive
+  optional sint64   test_sint64_negative
+  optional sint64   test_sint64_zero
+  optional sint64   test_sint64_min
+  optional sint64   test_sint64_max
+
+
+
+
+  repeated sint32   rep_sint32
+  repeated sint64   rep_sint64
+
+  enum TestEnum {
+    ZERO = 0;
+    ONE = 1;
+    TWO = 2;
+  }
+
+  optional TestEnum test_enum = 21;
+}
