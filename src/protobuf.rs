@@ -7,8 +7,6 @@
 
 use std::fmt;
 use std::error::Error;
-// use std::collections::BTreeMap;
-use std::convert::TryInto;
 use super::error;
 use super::varint;
 
@@ -22,64 +20,34 @@ impl<'a> VarInt<'a> {
         varint::decode_u64(&self.0)
     }
 
-    pub fn to_u64_unchecked(&self) -> u64 {
-        let mut value: u64 = 0;
-        for b in self.0.iter().rev() {
-            value = (value << 7) | ((b & 0x7f) as u64);
+    pub fn to_u32(&self) -> Result<u32, varint::DecodeError> {
+        let v = varint::decode_u64(&self.0)?;
+        if v > u32::MAX as u64 {
+            return Err(varint::DecodeError::Overflow);
         }
-        value
-    }
-
-    pub fn to_u32_unchecked(&self) -> u32 {
-        let mut value: u32 = 0;
-        for b in self.0.iter().rev() {
-            value = (value << 7) | ((b & 0x7f) as u32);
+        else {
+            return Ok(v as u32);
         }
-        value
     }
 
-    pub fn to_i64_unchecked(&self) -> i64 {
-        let mut value: i64 = 0;
-        for b in self.0.iter().rev() {
-            value = (value << 7) | ((b & 0x7f) as i64);
-        }
-        value
+    pub fn to_i64(&self) -> Result<i64, varint::DecodeError> {
+        let value_u64 = varint::decode_u64(&self.0)?;
+        Ok(value_u64 as i64)
     }
 
-    pub fn to_i32_unchecked(&self) -> i32 {
-        let mut value: i32 = 0;
-        for b in self.0.iter().rev() {
-            value = (value << 7) | ((b & 0x7f) as i32);
-        }
-        value
+    pub fn to_i32(&self) -> Result<i32, varint::DecodeError> {
+        let value_u64 = varint::decode_u64(&self.0)?;
+        Ok(value_u64 as i32)
     }
 
-    pub fn to_i64_zigzag_unchecked(&self) -> i64 {
-        let value_u64: u64 = self.to_u64_unchecked();
-        ((value_u64 >> 1) as i64) ^ -((value_u64 & 1) as i64)
-
-        // let mut value: i64 = 0;
-        // for b in self.0.iter().rev() {
-        //     value = (value << 7) | ((b & 0x7f) as i64);
-        // }
-        // (value << 63) ^ (value >> 1)
+    pub fn to_i64_zigzag(&self) -> Result<i64, varint::DecodeError> {
+        let value_u64: u64 = self.to_u64()?;
+        Ok(((value_u64 >> 1) as i64) ^ -((value_u64 & 1) as i64))
     }
 
-    pub fn to_i32_zigzag_unchecked(&self) -> i32 {
-        let value_u32: u32 = self.to_u32_unchecked();
-        ((value_u32 >> 1) as i32) ^ -((value_u32 & 1) as i32)
-
-
-        // let value_u64 = self.to_u64_unchecked();
-        // let value_i32 = value_u64 as i32;
-        // let decoded = (value_i32 >> 1) ^ -(value_i32 & 1);
-        // decoded
-
-        // let mut value: i32 = 0;
-        // for b in self.0.iter().rev() {
-        //     value = (value << 7) | ((b & 0x7f) as i32);
-        // }
-        // (value << 31) ^ (value >> 1)
+    pub fn to_i32_zigzag(&self) -> Result<i32, varint::DecodeError> {
+        let value_u32: u32 = self.to_u32()?;
+        Ok(((value_u32 >> 1) as i32) ^ -((value_u32 & 1) as i32))
     }
 
     pub fn to_usize(&self) -> Result<usize, varint::DecodeError> {
@@ -162,13 +130,6 @@ pub enum FieldData<'a> {
 }
 
 impl<'a> FieldData<'a> {
-    // fn as_varint(&self) -> Result<&VarInt<'a>, Box<dyn Error>> {
-    //     match self {
-    //         FieldData::VarInt(v) => Ok(v),
-    //         _ => Err(error!("Not a varint")),
-    //     }
-    // }
-
     fn as_bytes(&self) -> Result<&Bytes<'a>, Box<dyn Error>> {
         match self {
             FieldData::Bytes(v) => Ok(v),
@@ -190,235 +151,97 @@ impl<'a> FieldData<'a> {
         }
     }
 
-    pub fn to_string(&self) -> Result<String, Box<dyn Error>> {
-        // done
-        Ok(self.as_bytes()?.to_string()?)
+    pub fn to_bool(&self) -> Result<bool, Box<dyn Error>> {
+        match self {
+            FieldData::VarInt(v) => Ok(v.to_bool()?),
+            _ => Err(error!("Not a varint")),
+        }
     }
 
     pub fn to_bytes(&self) -> Result<&'a [u8], Box<dyn Error>> {
-        // done
         Ok(self.as_bytes()?.0)
-    }
-
-    pub fn to_u64(&self) -> Result<u64, Box<dyn Error>> {
-        match self {
-            FieldData::Bits64(v) => Ok(v.bits64_to_u64()),
-            FieldData::VarInt(v) => Ok(v.to_u64()?),
-            _ => Err(error!("Not a bits64 or varint")),
-        }
-    }
-
-    pub fn to_i64(&self) -> Result<i64, Box<dyn Error>> {
-        match self {
-            FieldData::Bits64(v) => Ok(v.bits64_to_i64()),
-            FieldData::VarInt(v) => Ok(v.to_i64_unchecked()),
-            _ => Err(error!("Not a bits64 or varint")),
-        }
-    }
-
-    pub fn to_i64_zigzag(&self) -> Result<i64, Box<dyn Error>> {
-        match self {
-            FieldData::VarInt(v) => Ok(v.to_i64_zigzag_unchecked()),
-            _ => Err(error!("Not a varint")),
-        }
-    }
-
-    pub fn to_double(&self) -> Result<f64, Box<dyn Error>> {
-        // done
-        Ok(self.as_bits64()?.bits64_to_double())
-    }
-
-    pub fn to_u32(&self) -> Result<u32, Box<dyn Error>> {
-        match self {
-            FieldData::Bits32(v) => Ok(v.bits32_to_u32()),
-            FieldData::VarInt(v) => Ok(v.to_u32_unchecked()),
-            _ => Err(error!("Not a bits32 or varint")),
-        }
-    }
-
-    pub fn to_i32(&self) -> Result<i32, Box<dyn Error>> {
-        match self {
-            FieldData::Bits32(v) => Ok(v.bits32_to_i32()),
-            FieldData::VarInt(v) => Ok(v.to_i32_unchecked()),
-            _ => Err(error!("Not a bits32 or varint")),
-        }
-    }
-
-    pub fn to_i32_zigzag(&self) -> Result<i32, Box<dyn Error>> {
-        match self {
-            FieldData::VarInt(v) => Ok(v.to_i32_zigzag_unchecked()),
-            _ => Err(error!("Not a varint")),
-        }
     }
 
     pub fn to_float(&self) -> Result<f32, Box<dyn Error>> {
-        // done
         Ok(self.as_bits32()?.bits32_to_float())
     }
 
-    pub fn to_bool(&self) -> Result<bool, Box<dyn Error>> {
-        // done
-        match self {
-            FieldData::VarInt(v) => Ok(v.to_bool()?),
-            _ => Err(error!("Not a varint")),
-        }
-    }
-
-
-
-    // ----------------- new implementations -----------------
-
-    pub fn to_pb_bool(&self) -> Result<bool, Box<dyn Error>> {
-        match self {
-            FieldData::VarInt(v) => Ok(v.to_bool()?),
-            _ => Err(error!("Not a varint")),
-        }
-    }
-
-    pub fn to_pb_bytes(&self) -> Result<&'a [u8], Box<dyn Error>> {
-        Ok(self.as_bytes()?.0)
-    }
-
-    pub fn to_pb_float(&self) -> Result<f32, Box<dyn Error>> {
-        Ok(self.as_bits32()?.bits32_to_float())
-    }
-
-    pub fn to_pb_double(&self) -> Result<f64, Box<dyn Error>> {
+    pub fn to_double(&self) -> Result<f64, Box<dyn Error>> {
         Ok(self.as_bits64()?.bits64_to_double())
     }
 
-    pub fn to_pb_fixed32(&self) -> Result<u32, Box<dyn Error>> {
+    pub fn to_fixed32(&self) -> Result<u32, Box<dyn Error>> {
         match self {
             FieldData::Bits32(v) => Ok(v.bits32_to_u32()),
             _ => Err(error!("Not a bits32")),
         }
     }
 
-    pub fn to_pb_fixed64(&self) -> Result<u64, Box<dyn Error>> {
+    pub fn to_fixed64(&self) -> Result<u64, Box<dyn Error>> {
         match self {
             FieldData::Bits64(v) => Ok(v.bits64_to_u64()),
             _ => Err(error!("Not a bits64")),
         }
     }
 
-    pub fn to_pb_int32(&self) -> Result<i32, Box<dyn Error>> {
+    pub fn to_int32(&self) -> Result<i32, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_i32_unchecked()),
+            FieldData::VarInt(v) => Ok(v.to_i32()?),
             _ => Err(error!("Not a varint")),
         }
     }
 
-    pub fn to_pb_int64(&self) -> Result<i64, Box<dyn Error>> {
+    pub fn to_int64(&self) -> Result<i64, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_i64_unchecked()),
+            FieldData::VarInt(v) => Ok(v.to_i64()?),
             _ => Err(error!("Not a varint")),
         }
     }
 
-    pub fn to_pb_sfixed32(&self) -> Result<i32, Box<dyn Error>> {
+    pub fn to_sfixed32(&self) -> Result<i32, Box<dyn Error>> {
         match self {
             FieldData::Bits32(v) => Ok(v.bits32_to_i32()),
             _ => Err(error!("Not a bits32")),
         }
     }
 
-    pub fn to_pb_sfixed64(&self) -> Result<i64, Box<dyn Error>> {
+    pub fn to_sfixed64(&self) -> Result<i64, Box<dyn Error>> {
         match self {
             FieldData::Bits64(v) => Ok(v.bits64_to_i64()),
             _ => Err(error!("Not a bits64")),
         }
     }
 
-    pub fn to_pb_sint32(&self) -> Result<i32, Box<dyn Error>> {
+    pub fn to_sint32(&self) -> Result<i32, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_i32_zigzag_unchecked()),
+            FieldData::VarInt(v) => Ok(v.to_i32_zigzag()?),
             _ => Err(error!("Not a varint")),
         }
     }
 
-    pub fn to_pb_sint64(&self) -> Result<i64, Box<dyn Error>> {
+    pub fn to_sint64(&self) -> Result<i64, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_i64_zigzag_unchecked()),
+            FieldData::VarInt(v) => Ok(v.to_i64_zigzag()?),
             _ => Err(error!("Not a varint")),
         }
     }
 
-    pub fn to_pb_string(&self) -> Result<String, Box<dyn Error>> {
+    pub fn to_string(&self) -> Result<String, Box<dyn Error>> {
         Ok(self.as_bytes()?.to_string()?)
     }
 
-    pub fn to_pb_uint32(&self) -> Result<u32, Box<dyn Error>> {
+    pub fn to_uint32(&self) -> Result<u32, Box<dyn Error>> {
         match self {
-            FieldData::VarInt(v) => Ok(v.to_u32_unchecked()),
+            FieldData::VarInt(v) => Ok(v.to_u32()?),
             _ => Err(error!("Not a varint")),
         }
     }
 
-    pub fn to_pb_uint64(&self) -> Result<u64, Box<dyn Error>> {
+    pub fn to_uint64(&self) -> Result<u64, Box<dyn Error>> {
         match self {
             FieldData::VarInt(v) => Ok(v.to_u64()?),
             _ => Err(error!("Not a varint")),
         }
-    }
-
-
-
-}
-
-
-impl<'a> TryInto<String> for FieldData<'a> {
-    type Error = Box<dyn Error>;
-
-    fn try_into(self) -> Result<String, Self::Error> {
-        self.to_string()
-    }
-}
-
-impl<'a> TryInto<u64> for FieldData<'a> {
-    type Error = Box<dyn Error>;
-
-    fn try_into(self) -> Result<u64, Self::Error> {
-        self.to_u64()
-    }
-}
-
-impl<'a> TryInto<i64> for FieldData<'a> {
-    type Error = Box<dyn Error>;
-
-    fn try_into(self) -> Result<i64, Self::Error> {
-        self.to_i64()
-    }
-}
-
-impl<'a> TryInto<f64> for FieldData<'a> {
-    type Error = Box<dyn Error>;
-
-    fn try_into(self) -> Result<f64, Self::Error> {
-        self.to_double()
-    }
-}
-
-impl<'a> TryInto<u32> for FieldData<'a> {
-    type Error = Box<dyn Error>;
-
-    fn try_into(self) -> Result<u32, Self::Error> {
-        self.to_u32()
-    }
-}
-
-impl<'a> TryInto<i32> for FieldData<'a> {
-    type Error = Box<dyn Error>;
-
-    fn try_into(self) -> Result<i32, Self::Error> {
-        self.to_i32()
-    }
-}
-
-impl<'a> TryInto<f32> for FieldData<'a> {
-    type Error = Box<dyn Error>;
-
-    fn try_into(self) -> Result<f32, Self::Error> {
-        self.to_float()
     }
 }
 
@@ -694,13 +517,6 @@ impl<'a> PBufReader<'a> {
     }
 }
 
-// impl<'a> PBufReader<'a> {
-//     pub fn new<'x>(data: &'x [u8]) -> PBufReader<'x> {
-//         PBufReader { offset: 0, data: data }
-//     }
-
-//     pub fn read_field(&mut self) -> Result<Option<FieldRef<'a>>, ReadError> {
-
 #[cfg(test)]
 mod tests {
     use crate::util::from_hex;
@@ -712,7 +528,7 @@ mod tests {
         let data = from_hex("e5010000c07f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert!(f32::is_nan(field.data.to_pb_float()?));
+        assert!(f32::is_nan(field.data.to_float()?));
         Ok(())
     }
 
@@ -721,7 +537,7 @@ mod tests {
         let data = from_hex("9102000000000000f87f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert!(f64::is_nan(field.data.to_pb_double()?));
+        assert!(f64::is_nan(field.data.to_double()?));
         Ok(())
     }
 
@@ -731,7 +547,7 @@ mod tests {
         let data = from_hex("0a00").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_string()?, "");
+        assert_eq!(field.data.to_string()?, "");
         Ok(())
     }
 
@@ -740,7 +556,7 @@ mod tests {
         let data = from_hex("120568656c6c6f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_string()?, "hello");
+        assert_eq!(field.data.to_string()?, "hello");
         Ok(())
     }
 
@@ -749,7 +565,7 @@ mod tests {
         let data = from_hex("1a00").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_bytes()?, vec![]);
+        assert_eq!(field.data.to_bytes()?, vec![]);
         Ok(())
     }
 
@@ -758,7 +574,7 @@ mod tests {
         let data = from_hex("2204cafebabe").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_bytes()?, vec![0xca, 0xfe, 0xba, 0xbe]);
+        assert_eq!(field.data.to_bytes()?, vec![0xca, 0xfe, 0xba, 0xbe]);
         Ok(())
     }
 
@@ -767,7 +583,7 @@ mod tests {
         let data = from_hex("2801").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_bool()?, true);
+        assert_eq!(field.data.to_bool()?, true);
         Ok(())
     }
 
@@ -776,7 +592,7 @@ mod tests {
         let data = from_hex("3000").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_bool()?, false);
+        assert_eq!(field.data.to_bool()?, false);
         Ok(())
     }
 
@@ -785,7 +601,7 @@ mod tests {
         let data = from_hex("3dd2029649").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_fixed32()?, 1234567890);
+        assert_eq!(field.data.to_fixed32()?, 1234567890);
         Ok(())
     }
 
@@ -794,7 +610,7 @@ mod tests {
         let data = from_hex("4500000000").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_fixed32()?, u32::MIN);
+        assert_eq!(field.data.to_fixed32()?, u32::MIN);
         Ok(())
     }
 
@@ -803,7 +619,7 @@ mod tests {
         let data = from_hex("4dffffffff").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_fixed32()?, u32::MAX);
+        assert_eq!(field.data.to_fixed32()?, u32::MAX);
         Ok(())
     }
 
@@ -812,7 +628,7 @@ mod tests {
         let data = from_hex("51cb44f2b09582cf4e").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_fixed64()?, 5678901234567890123);
+        assert_eq!(field.data.to_fixed64()?, 5678901234567890123);
         Ok(())
     }
 
@@ -821,7 +637,7 @@ mod tests {
         let data = from_hex("590000000000000000").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_fixed64()?, u64::MIN);
+        assert_eq!(field.data.to_fixed64()?, u64::MIN);
         Ok(())
     }
 
@@ -830,7 +646,7 @@ mod tests {
         let data = from_hex("61ffffffffffffffff").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_fixed64()?, u64::MAX);
+        assert_eq!(field.data.to_fixed64()?, u64::MAX);
         Ok(())
     }
 
@@ -839,7 +655,7 @@ mod tests {
         let data = from_hex("6dd2029649").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed32()?, 1234567890);
+        assert_eq!(field.data.to_sfixed32()?, 1234567890);
         Ok(())
     }
 
@@ -848,7 +664,7 @@ mod tests {
         let data = from_hex("752efd69b6").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed32()?, -1234567890);
+        assert_eq!(field.data.to_sfixed32()?, -1234567890);
         Ok(())
     }
 
@@ -857,7 +673,7 @@ mod tests {
         let data = from_hex("7d00000000").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed32()?, 0);
+        assert_eq!(field.data.to_sfixed32()?, 0);
         Ok(())
     }
 
@@ -866,7 +682,7 @@ mod tests {
         let data = from_hex("850100000080").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed32()?, i32::MIN);
+        assert_eq!(field.data.to_sfixed32()?, i32::MIN);
         Ok(())
     }
 
@@ -875,7 +691,7 @@ mod tests {
         let data = from_hex("8d01ffffff7f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed32()?, i32::MAX);
+        assert_eq!(field.data.to_sfixed32()?, i32::MAX);
         Ok(())
     }
 
@@ -884,7 +700,7 @@ mod tests {
         let data = from_hex("9101cb44f2b09582cf4e").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed64()?, 5678901234567890123);
+        assert_eq!(field.data.to_sfixed64()?, 5678901234567890123);
         Ok(())
     }
 
@@ -893,7 +709,7 @@ mod tests {
         let data = from_hex("990135bb0d4f6a7d30b1").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed64()?, -5678901234567890123);
+        assert_eq!(field.data.to_sfixed64()?, -5678901234567890123);
         Ok(())
     }
 
@@ -902,7 +718,7 @@ mod tests {
         let data = from_hex("a1010000000000000000").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed64()?, 0);
+        assert_eq!(field.data.to_sfixed64()?, 0);
         Ok(())
     }
 
@@ -911,7 +727,7 @@ mod tests {
         let data = from_hex("a9010000000000000080").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed64()?, i64::MIN);
+        assert_eq!(field.data.to_sfixed64()?, i64::MIN);
         Ok(())
     }
 
@@ -920,7 +736,7 @@ mod tests {
         let data = from_hex("b101ffffffffffffff7f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sfixed64()?, i64::MAX);
+        assert_eq!(field.data.to_sfixed64()?, i64::MAX);
         Ok(())
     }
 
@@ -929,7 +745,7 @@ mod tests {
         let data = from_hex("bd01db0f4940").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_float()?, 3.141592653589793);
+        assert_eq!(field.data.to_float()?, 3.141592653589793);
         Ok(())
     }
 
@@ -938,7 +754,7 @@ mod tests {
         let data = from_hex("c501db0f49c0").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_float()?, -3.141592653589793);
+        assert_eq!(field.data.to_float()?, -3.141592653589793);
         Ok(())
     }
 
@@ -947,7 +763,7 @@ mod tests {
         let data = from_hex("cd0100000000").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_float()?, 0.0);
+        assert_eq!(field.data.to_float()?, 0.0);
         Ok(())
     }
 
@@ -956,7 +772,7 @@ mod tests {
         let data = from_hex("d5010000807f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_float()?, f32::INFINITY);
+        assert_eq!(field.data.to_float()?, f32::INFINITY);
         Ok(())
     }
 
@@ -965,7 +781,7 @@ mod tests {
         let data = from_hex("dd01000080ff").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_float()?, f32::NEG_INFINITY);
+        assert_eq!(field.data.to_float()?, f32::NEG_INFINITY);
         Ok(())
     }
 
@@ -974,7 +790,7 @@ mod tests {
         let data = from_hex("e101182d4454fb210940").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_double()?, 3.141592653589793);
+        assert_eq!(field.data.to_double()?, 3.141592653589793);
         Ok(())
     }
 
@@ -983,7 +799,7 @@ mod tests {
         let data = from_hex("e901182d4454fb2109c0").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_double()?, -3.141592653589793);
+        assert_eq!(field.data.to_double()?, -3.141592653589793);
         Ok(())
     }
 
@@ -992,7 +808,7 @@ mod tests {
         let data = from_hex("f1010000000000000000").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_double()?, 0.0);
+        assert_eq!(field.data.to_double()?, 0.0);
         Ok(())
     }
 
@@ -1001,7 +817,7 @@ mod tests {
         let data = from_hex("f901000000000000f07f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_double()?, f64::INFINITY);
+        assert_eq!(field.data.to_double()?, f64::INFINITY);
         Ok(())
     }
 
@@ -1010,7 +826,7 @@ mod tests {
         let data = from_hex("8102000000000000f0ff").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_double()?, f64::NEG_INFINITY);
+        assert_eq!(field.data.to_double()?, f64::NEG_INFINITY);
         Ok(())
     }
 
@@ -1019,7 +835,7 @@ mod tests {
         let data = from_hex("8802d285d8cc04").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_uint32()?, 1234567890);
+        assert_eq!(field.data.to_uint32()?, 1234567890);
         Ok(())
     }
 
@@ -1028,7 +844,7 @@ mod tests {
         let data = from_hex("900200").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_uint32()?, u32::MIN);
+        assert_eq!(field.data.to_uint32()?, u32::MIN);
         Ok(())
     }
 
@@ -1037,7 +853,7 @@ mod tests {
         let data = from_hex("9802ffffffff0f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_uint32()?, u32::MAX);
+        assert_eq!(field.data.to_uint32()?, u32::MAX);
         Ok(())
     }
 
@@ -1046,7 +862,7 @@ mod tests {
         let data = from_hex("a002cb89c987dbd2e0e74e").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_uint64()?, 5678901234567890123);
+        assert_eq!(field.data.to_uint64()?, 5678901234567890123);
         Ok(())
     }
 
@@ -1055,7 +871,7 @@ mod tests {
         let data = from_hex("a80200").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_uint64()?, u64::MIN);
+        assert_eq!(field.data.to_uint64()?, u64::MIN);
         Ok(())
     }
 
@@ -1064,7 +880,7 @@ mod tests {
         let data = from_hex("b002ffffffffffffffffff01").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_uint64()?, u64::MAX);
+        assert_eq!(field.data.to_uint64()?, u64::MAX);
         Ok(())
     }
 
@@ -1073,7 +889,7 @@ mod tests {
         let data = from_hex("b802d285d8cc04").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int32()?, 1234567890);
+        assert_eq!(field.data.to_int32()?, 1234567890);
         Ok(())
     }
 
@@ -1082,7 +898,7 @@ mod tests {
         let data = from_hex("c002aefaa7b3fbffffffff01").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int32()?, -1234567890);
+        assert_eq!(field.data.to_int32()?, -1234567890);
         Ok(())
     }
 
@@ -1091,7 +907,7 @@ mod tests {
         let data = from_hex("c80200").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int32()?, 0);
+        assert_eq!(field.data.to_int32()?, 0);
         Ok(())
     }
 
@@ -1100,7 +916,7 @@ mod tests {
         let data = from_hex("d00280808080f8ffffffff01").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int32()?, i32::MIN);
+        assert_eq!(field.data.to_int32()?, i32::MIN);
         Ok(())
     }
 
@@ -1109,7 +925,7 @@ mod tests {
         let data = from_hex("d802ffffffff07").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int32()?, i32::MAX);
+        assert_eq!(field.data.to_int32()?, i32::MAX);
         Ok(())
     }
 
@@ -1118,7 +934,7 @@ mod tests {
         let data = from_hex("e002cb89c987dbd2e0e74e").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int64()?, 5678901234567890123);
+        assert_eq!(field.data.to_int64()?, 5678901234567890123);
         Ok(())
     }
 
@@ -1127,7 +943,7 @@ mod tests {
         let data = from_hex("e802b5f6b6f8a4ad9f98b101").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int64()?, -5678901234567890123);
+        assert_eq!(field.data.to_int64()?, -5678901234567890123);
         Ok(())
     }
 
@@ -1136,7 +952,7 @@ mod tests {
         let data = from_hex("f00200").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int64()?, 0);
+        assert_eq!(field.data.to_int64()?, 0);
         Ok(())
     }
 
@@ -1145,7 +961,7 @@ mod tests {
         let data = from_hex("f80280808080808080808001").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int64()?, i64::MIN);
+        assert_eq!(field.data.to_int64()?, i64::MIN);
         Ok(())
     }
 
@@ -1154,7 +970,7 @@ mod tests {
         let data = from_hex("8003ffffffffffffffff7f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_int64()?, i64::MAX);
+        assert_eq!(field.data.to_int64()?, i64::MAX);
         Ok(())
     }
 
@@ -1163,7 +979,7 @@ mod tests {
         let data = from_hex("8803a48bb09909").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint32()?, 1234567890);
+        assert_eq!(field.data.to_sint32()?, 1234567890);
         Ok(())
     }
 
@@ -1172,7 +988,7 @@ mod tests {
         let data = from_hex("9003a38bb09909").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint32()?, -1234567890);
+        assert_eq!(field.data.to_sint32()?, -1234567890);
         Ok(())
     }
 
@@ -1181,7 +997,7 @@ mod tests {
         let data = from_hex("980300").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint32()?, 0);
+        assert_eq!(field.data.to_sint32()?, 0);
         Ok(())
     }
 
@@ -1190,7 +1006,7 @@ mod tests {
         let data = from_hex("a003ffffffff0f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint32()?, i32::MIN);
+        assert_eq!(field.data.to_sint32()?, i32::MIN);
         Ok(())
     }
 
@@ -1199,7 +1015,7 @@ mod tests {
         let data = from_hex("a803feffffff0f").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint32()?, i32::MAX);
+        assert_eq!(field.data.to_sint32()?, i32::MAX);
         Ok(())
     }
 
@@ -1208,7 +1024,7 @@ mod tests {
         let data = from_hex("b0039693928fb6a5c1cf9d01").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint64()?, 5678901234567890123);
+        assert_eq!(field.data.to_sint64()?, 5678901234567890123);
         Ok(())
     }
 
@@ -1217,7 +1033,7 @@ mod tests {
         let data = from_hex("b8039593928fb6a5c1cf9d01").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint64()?, -5678901234567890123);
+        assert_eq!(field.data.to_sint64()?, -5678901234567890123);
         Ok(())
     }
 
@@ -1226,7 +1042,7 @@ mod tests {
         let data = from_hex("c00300").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint64()?, 0);
+        assert_eq!(field.data.to_sint64()?, 0);
         Ok(())
     }
 
@@ -1235,7 +1051,7 @@ mod tests {
         let data = from_hex("c803ffffffffffffffffff01").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint64()?, i64::MIN);
+        assert_eq!(field.data.to_sint64()?, i64::MIN);
         Ok(())
     }
 
@@ -1244,7 +1060,7 @@ mod tests {
         let data = from_hex("d003feffffffffffffffff01").unwrap();
         let mut reader = PBufReader::new(&data);
         let field = reader.read_field().unwrap().unwrap();
-        assert_eq!(field.data.to_pb_sint64()?, i64::MAX);
+        assert_eq!(field.data.to_sint64()?, i64::MAX);
         Ok(())
     }
 }

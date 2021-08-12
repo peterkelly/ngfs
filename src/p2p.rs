@@ -1,3 +1,4 @@
+
 #![allow(unused_variables)]
 #![allow(dead_code)]
 #![allow(unused_mut)]
@@ -72,7 +73,7 @@ impl PublicKey {
             //     field.offset, field.field_number, field.data);
             match field.field_number {
                 1 => {
-                    let key_type_int = field.data.to_u64()?;
+                    let key_type_int = field.data.to_uint64()?;
                     key_type = match key_type_int {
                         0 => Some(KeyType::RSA),
                         1 => Some(KeyType::Ed25519),

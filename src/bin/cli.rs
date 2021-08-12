@@ -110,7 +110,7 @@ async fn write_pbuf_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     while let Some(field) = reader.read_field()? {
         println!("offset 0x{:04x}, field_number {:2}, data {:?}",
             field.offset, field.field_number, field.data);
-        println!("value = {}", field.data.to_i64()?);
+        println!("value = {}", field.data.to_int64()?);
         // println!("value = {}", field.data.to_string()?);
         // println!("value = {}", BinaryData(&field.data.to_bytes()?));
         // println!("value = {}", field.data.to_i64_zigzag()?);

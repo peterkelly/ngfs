@@ -62,13 +62,13 @@ impl Entry {
                     opt_block = Some(Vec::from(field.data.to_bytes()?));
                 },
                 2 => {
-                    priority = field.data.to_i32()?;
+                    priority = field.data.to_int32()?;
                 }
                 3 => {
                     cancel = field.data.to_bool()?;
                 }
                 4 => {
-                    let v = field.data.to_i32()?;
+                    let v = field.data.to_uint64()?;
                     match v {
                         0 => want_type = WantType::Block,
                         1 => want_type = WantType::Have,

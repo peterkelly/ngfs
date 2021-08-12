@@ -65,7 +65,7 @@ class Fields:
                               "' % (msg.SerializeToString().hex()), file=f)\n")
         self.python_out.write("    print('        let mut reader = PBufReader::new(&data);', file=f)\n")
         self.python_out.write("    print('        let field = reader.read_field().unwrap().unwrap();', file=f)\n")
-        self.python_out.write("    print('        assert_eq!(field.data.to_pb_%s()?, %s);', file=f)\n" % (
+        self.python_out.write("    print('        assert_eq!(field.data.to_%s()?, %s);', file=f)\n" % (
                             field_type, rust_value))
         self.python_out.write("    print('        Ok(())', file=f)\n")
         self.python_out.write("    print('    }', file=f)\n");

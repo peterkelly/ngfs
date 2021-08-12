@@ -66,7 +66,7 @@ impl PBLink {
 
                 3 => match &tsize {
                     Some(_) => return Err(error!("duplicate tsize")),
-                    None => tsize = Some(field.data.to_u64()?),
+                    None => tsize = Some(field.data.to_uint64()?),
                 },
                 _ => (),
             }

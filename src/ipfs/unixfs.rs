@@ -96,7 +96,7 @@ impl Data {
                 1 => match &opt_type_ {
                     Some(_) => return Err(error!("duplicate opt_type_")),
                     None => {
-                        match DataType::from_u8(field.data.to_u64()? as u8) {
+                        match DataType::from_u8(field.data.to_uint64()? as u8) {
                             Some(type_) => opt_type_ = Some(type_),
                             None => return Err(error!("unknown data type")),
                         }
@@ -108,20 +108,20 @@ impl Data {
                 },
                 3 => match &filesize {
                     Some(_) => return Err(error!("duplicate filesize")),
-                    None => filesize = Some(field.data.to_u64()?),
+                    None => filesize = Some(field.data.to_uint64()?),
                 },
-                4 => blocksizes.push(field.data.to_u64()?),
+                4 => blocksizes.push(field.data.to_uint64()?),
                 5 => match &hash_type {
                     Some(_) => return Err(error!("duplicate hash_type")),
-                    None => hash_type = Some(field.data.to_u64()?),
+                    None => hash_type = Some(field.data.to_uint64()?),
                 },
                 6 => match &fanout {
                     Some(_) => return Err(error!("duplicate fanout")),
-                    None => fanout = Some(field.data.to_u64()?),
+                    None => fanout = Some(field.data.to_uint64()?),
                 },
                 7 => match &mode {
                     Some(_) => return Err(error!("duplicate mode")),
-                    None => mode = Some(field.data.to_u32()?),
+                    None => mode = Some(field.data.to_uint32()?),
                 },
                 8 => match &mtime {
                     Some(_) => return Err(error!("duplicate mtime")),
@@ -155,13 +155,13 @@ pub struct Metadata {
 #[derive(Debug)]
 pub struct UnixTime {
     pub seconds: i64, // 1
-    pub fractional_nanoseconds: Option<f32>, // 2
+    pub fractional_nanoseconds: Option<u32>, // 2
 }
 
 impl UnixTime {
     pub fn from_pb(raw_data: &[u8]) -> Result<UnixTime, Box<dyn Error>> {
         let mut seconds: Option<i64> = None;
-        let mut fractional_nanoseconds: Option<f32> = None;
+        let mut fractional_nanoseconds: Option<u32> = None;
 
         let mut reader = PBufReader::new(&raw_data);
         while let Some(field) = reader.read_field()? {
@@ -169,11 +169,11 @@ impl UnixTime {
             match field.field_number {
                 1 => match &seconds {
                     Some(_) => return Err(error!("duplicate seconds")),
-                    None => seconds = Some(field.data.to_i64()?),
+                    None => seconds = Some(field.data.to_int64()?),
                 },
                 2 => match &fractional_nanoseconds {
                     Some(_) => return Err(error!("duplicate fractional_nanoseconds")),
-                    None => fractional_nanoseconds = Some(field.data.to_float()?),
+                    None => fractional_nanoseconds = Some(field.data.to_fixed32()?),
                 },
                 _ => (),
             }

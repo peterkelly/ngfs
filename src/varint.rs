@@ -57,7 +57,7 @@ pub fn encode_u64<T>(mut value: u64, out: &mut T) where T : BufMut {
 
 #[derive(Debug, PartialEq)]
 pub enum DecodeError {
-    ValueTooLarge(u8),
+    Overflow,
     MissingFinalByte,
     MisplacedFinalByte,
 }
@@ -78,10 +78,10 @@ pub fn decode_u64(data: &[u8]) -> Result<u64, DecodeError> {
         let last = (b & 0x80) == 0;
 
         if shift >= 64 {
-            return Err(DecodeError::ValueTooLarge(64));
+            return Err(DecodeError::Overflow);
         }
         if shift == 63 && *b > 1 {
-            return Err(DecodeError::ValueTooLarge(64));
+            return Err(DecodeError::Overflow);
         }
 
         res |= (seven_bits as u64) << shift;
@@ -135,13 +135,13 @@ mod tests {
     #[test]
     fn decode_one_too_many() {
         assert_eq!(decode_u64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02]),
-            Err(DecodeError::ValueTooLarge(64)));
+            Err(DecodeError::Overflow));
     }
 
     #[test]
     fn decode_extra_byte() {
         assert_eq!(decode_u64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]),
-            Err(DecodeError::ValueTooLarge(64)));
+            Err(DecodeError::Overflow));
     }
 
     #[test]
