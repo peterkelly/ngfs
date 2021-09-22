@@ -38,13 +38,11 @@ enum SubCommand {
 
 #[derive(Clap)]
 struct Detect {
-    #[clap(settings=&[ArgSettings::AllowEmptyValues])]
     value: String,
 }
 
 #[derive(Clap)]
 struct Decode {
-    #[clap(settings=&[ArgSettings::AllowEmptyValues])]
     value: String,
 }
 
