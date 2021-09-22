@@ -201,7 +201,7 @@ pub fn encrypt_traffic(
 ) -> Result<(), TLSError> {
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
-    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
+    nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
     for i in 0..12 {
         nonce_bytes[i] ^= traffic_secret.write_iv[i];
     }
@@ -232,7 +232,7 @@ fn decrypt_traffic(
 ) -> Result<Vec<u8>, TLSError> {
     let sequence_no_bytes: [u8; 8] = sequence_no.to_be_bytes();
     let mut nonce_bytes: [u8; 12] = [0; 12];
-    &nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
+    nonce_bytes[4..12].copy_from_slice(&sequence_no_bytes);
     for i in 0..12 {
         nonce_bytes[i] ^= traffic_secret.write_iv[i];
     }
