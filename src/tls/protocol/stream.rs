@@ -33,7 +33,7 @@ use super::super::helpers::{
     decrypt_message,
 };
 use super::super::super::error;
-use crate::io::AsyncStream;
+use crate::io::{AsyncStream};
 
 pub struct Encryption {
     pub traffic_secrets: TrafficSecrets,
@@ -75,7 +75,7 @@ pub fn encrypt_record(
 
 fn poll_receive_record(
     cx: &mut Context<'_>,
-    reader: &mut Box<dyn AsyncStream>,
+    reader: &mut Pin<Box<dyn AsyncStream>>,
     incoming_data: &mut BytesMut,
 ) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
     let mut want: usize = 5;
@@ -161,7 +161,7 @@ fn poll_receive_record(
 
 fn poll_receive_record_ignore_cc(
     cx: &mut Context<'_>,
-    reader: &mut Box<dyn AsyncStream>,
+    reader: &mut Pin<Box<dyn AsyncStream>>,
     incoming_data: &mut BytesMut,
 ) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
     loop {
@@ -191,12 +191,12 @@ fn poll_receive_record_ignore_cc(
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub struct PlaintextStream {
-    pub inner: Box<dyn AsyncStream>,
+    pub inner: Pin<Box<dyn AsyncStream>>,
     pub incoming_data: BytesMut,
 }
 
 impl PlaintextStream {
-    pub fn new(inner: Box<dyn AsyncStream>, incoming_data: BytesMut) -> Self {
+    pub fn new(inner: Pin<Box<dyn AsyncStream>>, incoming_data: BytesMut) -> Self {
         PlaintextStream { inner, incoming_data }
     }
 
@@ -213,7 +213,7 @@ impl PlaintextStream {
 }
 
 pub struct ReceivePlaintextMessage<'a, 'b> {
-    reader: &'a mut Box<dyn AsyncStream>,
+    reader: &'a mut Pin<Box<dyn AsyncStream>>,
     incoming_data: &'a mut BytesMut,
     transcript: &'b mut Vec<u8>,
 }
@@ -229,7 +229,7 @@ impl<'a, 'b> Future for ReceivePlaintextMessage<'a, 'b> {
 
 fn poll_receive_plaintext_message(
     cx: &mut Context<'_>,
-    reader: &mut Box<dyn AsyncStream>,
+    reader: &mut Pin<Box<dyn AsyncStream>>,
     incoming_data: &mut BytesMut,
     transcript: &mut Vec<u8>,
 ) -> Poll<Result<Option<Message>, TLSError>> {
@@ -312,7 +312,7 @@ impl EncryptedStream {
 }
 
 pub struct ReceiveEncryptedMessage<'a, 'b> {
-    reader: &'a mut Box<dyn AsyncStream>,
+    reader: &'a mut Pin<Box<dyn AsyncStream>>,
     incoming_data: &'a mut BytesMut,
     server_sequence_no: &'a mut u64,
     encryption: &'a Encryption,
@@ -321,7 +321,7 @@ pub struct ReceiveEncryptedMessage<'a, 'b> {
 
 impl ReceiveEncryptedMessage<'_, '_> {
     pub fn new<'a, 'b>(
-        reader: &'a mut Box<dyn AsyncStream>,
+        reader: &'a mut Pin<Box<dyn AsyncStream>>,
         incoming_data: &'a mut BytesMut,
         server_sequence_no: &'a mut u64,
         encryption: &'a Encryption,
@@ -357,7 +357,7 @@ impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
 
 fn poll_receive_encrypted_message(
     cx: &mut Context<'_>,
-    reader: &mut Box<dyn AsyncStream>,
+    reader: &mut Pin<Box<dyn AsyncStream>>,
     incoming_data: &mut BytesMut,
     server_sequence_no: &mut u64,
     encryption: &Encryption,

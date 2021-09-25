@@ -417,12 +417,11 @@ async fn write_plaintext_handshake(
 }
 
 pub async fn establish_connection<T: 'static>(
-    transport: T,
+    transport: Pin<Box<T>>,
     config: ClientConfig,
 ) -> Result<EstablishedConnection, TLSError>
-    where T : AsyncRead + AsyncWrite + Unpin + Send
+    where T : AsyncRead + AsyncWrite + Send
 {
-    let transport = Box::new(transport);
     let private_key = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
         .map_err(|_| TLSError::EphemeralPrivateKeyGenerationFailed)?;
     let public_key = private_key.compute_public_key()

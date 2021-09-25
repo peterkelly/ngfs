@@ -7,6 +7,7 @@
 
 use std::error::Error;
 use std::sync::Arc;
+use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use crate::io::AsyncStream;
 use crate::libp2p::identify::Identify;
@@ -20,7 +21,7 @@ use crate::libp2p::io::{
 
 async fn identify_handler_inner(
     node: Arc<IPFSNode>,
-    mut stream: Box<dyn AsyncStream>,
+    mut stream: Pin<Box<dyn AsyncStream>>,
 ) -> Result<(), Box<dyn Error>> {
     let identify = Identify {
         protocol_version: String::from("ipfs/0.1.0"),
@@ -63,7 +64,7 @@ async fn identify_handler_inner(
     Ok(())
 }
 
-pub fn identify_handler(node: Arc<IPFSNode>, stream: Box<dyn AsyncStream>) {
+pub fn identify_handler(node: Arc<IPFSNode>, stream: Pin<Box<dyn AsyncStream>>) {
     println!("[identify] starting");
     tokio::spawn(async move {
         match identify_handler_inner(node, stream).await {

@@ -119,7 +119,7 @@ impl Frame {
 }
 
 pub struct FrameStream {
-    transport: Box<dyn AsyncStream>,
+    transport: Pin<Box<dyn AsyncStream>>,
     incoming_data: BytesMut,
     outgoing_data: BytesMut,
     read_eof: bool,
@@ -131,11 +131,10 @@ impl FrameStream {
         self.logging_enabled = b;
     }
 
-    pub fn new<T: 'static>(transport: T) -> Self
-        where T : AsyncRead + AsyncWrite + Unpin + Send
+    pub fn new(transport: Pin<Box<dyn AsyncStream>>) -> Self
     {
         FrameStream {
-            transport: Box::new(transport),
+            transport: transport,
             incoming_data: BytesMut::new(),
             outgoing_data: BytesMut::new(),
             read_eof: false,

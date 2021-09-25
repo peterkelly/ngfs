@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use bytes::{Buf};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use super::frame::{StreamId, Frame, FrameOp, FrameStream};
+use crate::io::AsyncStream;
 
 struct InternalReader {
     waker: Option<Waker>,
@@ -123,8 +124,7 @@ struct MplexShared {
 }
 
 impl MplexShared {
-    fn new<T: 'static>(transport: T) -> Self
-        where T : AsyncRead + AsyncWrite + Unpin + Send
+    fn new(transport: Pin<Box<dyn AsyncStream>>) -> Self
     {
         MplexShared {
             frames: FrameStream::new(transport),
@@ -364,9 +364,7 @@ pub struct Mplex {
 }
 
 impl Mplex {
-    pub fn new<T: 'static>(transport: T) -> Self
-        where T : AsyncRead + AsyncWrite + Unpin + Send
-    {
+    pub fn new(transport: Pin<Box<dyn AsyncStream>>) -> Self {
         Mplex {
             shared: Arc::new(Mutex::new(MplexShared::new(transport))),
         }

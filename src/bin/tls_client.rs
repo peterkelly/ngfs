@@ -212,7 +212,7 @@ async fn test_client() -> Result<(), Box<dyn Error>> {
     let address = opt.address.unwrap_or(String::from("localhost:443"));
 
     let socket = TcpStream::connect(&address).await?;
-    let mut conn = establish_connection(socket, config).await?;
+    let mut conn = establish_connection(Box::pin(socket), config).await?;
 
     test_http(&mut conn).await?;
     // test_echo(&mut conn).await?;

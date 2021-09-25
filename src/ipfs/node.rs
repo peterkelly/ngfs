@@ -6,6 +6,7 @@
 #![allow(unused_macros)]
 
 use std::sync::{Arc, Mutex};
+use std::pin::Pin;
 use crate::io::AsyncStream;
 use crate::ipfs::bitswap::bitswap::Bitswap;
 
@@ -23,7 +24,7 @@ impl IPFSNode {
     }
 }
 
-type Handler = Box<&'static (dyn Fn(Arc<IPFSNode>, Box<dyn AsyncStream>) -> () + Send + Sync + 'static)>;
+type Handler = Box<&'static (dyn Fn(Arc<IPFSNode>, Pin<Box<dyn AsyncStream>>) -> () + Send + Sync + 'static)>;
 
 pub struct Service {
     pub name: String,

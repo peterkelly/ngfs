@@ -16,6 +16,7 @@ use std::fmt;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::pin::Pin;
 use clap::{Clap, ArgSettings};
 use bytes::{Bytes, BytesMut, Buf, BufMut};
 use tokio::net::{TcpStream};
@@ -78,7 +79,7 @@ struct Show {
 async fn connection_handler2(
     node: Arc<IPFSNode>,
     services: Arc<ServiceRegistry>,
-    mut stream: Box<dyn AsyncStream>,
+    mut stream: Pin<Box<dyn AsyncStream>>,
     accept_count: usize,
 ) -> Result<(), Box<dyn Error>> {
     multistream_handshake(&mut stream).await?;
@@ -115,7 +116,7 @@ async fn connection_handler2(
 async fn connection_handler(
     node: Arc<IPFSNode>,
     services: Arc<ServiceRegistry>,
-    stream: Box<dyn AsyncStream>,
+    stream: Pin<Box<dyn AsyncStream>>,
     accept_count: usize,
 )
 {
@@ -140,7 +141,7 @@ async fn accept_loop(
                 tokio::spawn(connection_handler(
                     node.clone(),
                     services.clone(),
-                    Box::new(stream),
+                    Box::pin(stream),
                     accept_count));
                 accept_count += 1;
             }
@@ -202,7 +203,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Negotiated TLS");
 
-    let mut conn = establish_connection(socket, config).await?;
+    let mut conn = establish_connection(Box::pin(socket), config).await?;
     println!("Established TLS connection");
     println!();
     multistream_handshake(&mut conn).await?;
@@ -222,7 +223,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Negotiated /mplex/6.7.0");
 
-    let mut mplex = Mplex::new(conn);
+    let mut mplex = Mplex::new(Box::pin(conn));
     // mplex.set_logging_enabled(true);
 
     let (mut acceptor, mut connector) = mplex.split();
@@ -283,7 +284,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
 
-            bitswap_handler_show(node.clone(), Box::new(stream), args.cid.clone());
+            bitswap_handler_show(node.clone(), Box::pin(stream), args.cid.clone());
         }
     }
 

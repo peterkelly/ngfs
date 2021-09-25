@@ -7,6 +7,7 @@
 
 use std::error::Error;
 use std::sync::Arc;
+use std::pin::Pin;
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use crate::io::AsyncStream;
@@ -28,7 +29,7 @@ use crate::ipfs::fs::{Node, Directory};
 
 async fn bitswap_handler_inner(
     node: Arc<IPFSNode>,
-    mut stream: Box<dyn AsyncStream>,
+    mut stream: Pin<Box<dyn AsyncStream>>,
     show_cid: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
 
@@ -135,7 +136,7 @@ async fn bitswap_handler_inner(
     Ok(())
 }
 
-pub fn bitswap_handler_show(node: Arc<IPFSNode>, stream: Box<dyn AsyncStream>, show_cid: String) {
+pub fn bitswap_handler_show(node: Arc<IPFSNode>, stream: Pin<Box<dyn AsyncStream>>, show_cid: String) {
     println!("[bitswap] starting");
     tokio::spawn(async move {
         match bitswap_handler_inner(node, stream, Some(show_cid)).await {
@@ -149,7 +150,7 @@ pub fn bitswap_handler_show(node: Arc<IPFSNode>, stream: Box<dyn AsyncStream>, s
     });
 }
 
-pub fn bitswap_handler(node: Arc<IPFSNode>, stream: Box<dyn AsyncStream>) {
+pub fn bitswap_handler(node: Arc<IPFSNode>, stream: Pin<Box<dyn AsyncStream>>) {
     println!("[bitswap] starting");
     tokio::spawn(async move {
         match bitswap_handler_inner(node, stream, None).await {
