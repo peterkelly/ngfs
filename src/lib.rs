@@ -17,6 +17,7 @@ pub mod libp2p;
 pub mod ipfs;
 pub mod io;
 pub mod sim;
+pub mod quic;
 
 use std::fmt;
 use std::error::Error;
