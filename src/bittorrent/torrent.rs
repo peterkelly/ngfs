@@ -8,10 +8,10 @@
 use std::fmt;
 use std::error::Error;
 use sha1::{Sha1, Digest};
-use super::bencoding;
-use super::bencoding::{Value};
-use super::error;
-use super::util::BinaryData;
+use crate::formats::bencoding;
+use crate::formats::bencoding::{Value};
+use crate::error;
+use crate::util::util::BinaryData;
 
 pub struct InfoHash {
     pub data: [u8; 20],

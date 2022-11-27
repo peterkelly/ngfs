@@ -9,12 +9,12 @@
 
 use std::fmt;
 use std::error::Error;
-use super::util::{BinaryData, DebugHexDump, Indent, escape_string};
-use super::binary::BinaryReader;
-use super::error;
-use super::asn1::value::{ObjectIdentifier, BitString, Integer, Value, Item};
-use super::asn1::printer::ObjectRegistry;
-use super::asn1;
+use crate::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
+use crate::util::binary::BinaryReader;
+use crate::error;
+use crate::formats::asn1::value::{ObjectIdentifier, BitString, Integer, Value, Item};
+use crate::formats::asn1::printer::ObjectRegistry;
+use crate::formats::asn1;
 
 pub const X509_COMMON_NAME: [u64; 4] = [2, 5, 4, 3]; // [other identifier: cn]
 pub const X509_SURNAME: [u64; 4] = [2, 5, 4, 4]; // [other identifier: sn]

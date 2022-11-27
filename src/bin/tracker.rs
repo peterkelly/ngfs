@@ -13,9 +13,9 @@ use tokio::net::{UdpSocket, lookup_host};
 use std::net::SocketAddr;
 use rand::prelude::Rng;
 
-use torrent::util::BinaryData;
+use torrent::util::util::BinaryData;
 use torrent::error;
-use torrent::torrent::{Torrent};
+use torrent::bittorrent::torrent::{Torrent};
 
 struct ConnectRequest {
 }

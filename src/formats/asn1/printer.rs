@@ -8,9 +8,9 @@
 use std::fmt;
 use std::error::Error;
 use std::collections::HashMap;
-use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
-use super::super::binary::BinaryReader;
-use super::super::StringError;
+use crate::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
+use crate::util::binary::BinaryReader;
+use crate::StringError;
 use super::value::{Value, Item, ObjectIdentifier};
 
 pub struct ObjectDescriptor {

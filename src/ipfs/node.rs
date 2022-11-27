@@ -7,7 +7,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::pin::Pin;
-use crate::io::AsyncStream;
+use crate::util::io::AsyncStream;
 use crate::ipfs::bitswap::bitswap::Bitswap;
 
 pub struct IPFSNode {

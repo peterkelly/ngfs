@@ -7,10 +7,10 @@
 
 use std::error::Error;
 use std::fmt;
-use super::super::super::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
-use super::super::super::error;
-use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
-use super::super::super::x509;
+use crate::util::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
+use crate::error;
+use crate::util::util::{DebugHexDump, BinaryData, escape_string};
+use crate::crypto::x509;
 use super::extension::*;
 
 #[derive(Debug)]

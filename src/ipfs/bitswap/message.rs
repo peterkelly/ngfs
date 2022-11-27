@@ -8,9 +8,9 @@
 use std::fmt;
 use std::error::Error;
 use crate::error;
-use crate::protobuf::{PBufReader, PBufWriter};
-use crate::cid::{CID, RawCID};
-use crate::util::BinaryData;
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
+use crate::ipfs::types::cid::{CID, RawCID};
+use crate::util::util::BinaryData;
 
 #[derive(Debug)]
 pub enum WantType {

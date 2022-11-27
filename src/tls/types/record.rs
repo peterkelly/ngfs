@@ -11,7 +11,7 @@ use bytes::{BytesMut, Buf};
 
 use super::alert::Alert;
 use super::handshake::Handshake;
-use super::super::super::binary::BinaryReader;
+use crate::util::binary::BinaryReader;
 
 // The record layer fragments information blocks into TLSPlaintext records carrying data in chunks of 2^14
 pub const MAX_PLAINTEXT_RECORD_SIZE: usize = 16384;  // 2^14

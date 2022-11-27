@@ -10,9 +10,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 use std::future::Future;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
-use crate::protobuf::VarInt;
-use crate::varint;
-use crate::varint::{U64Decoder, DecoderResult};
+use crate::formats::protobuf::protobuf::VarInt;
+use crate::formats::protobuf::varint;
+use crate::formats::protobuf::varint::{U64Decoder, DecoderResult};
 
 
 #[doc(hidden)]

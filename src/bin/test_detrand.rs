@@ -1,4 +1,4 @@
-use torrent::detrand::Generator;
+use torrent::util::detrand::Generator;
 
 fn main() {
     let mut gen = Generator::new(12345);

@@ -44,9 +44,9 @@ Table 6/X.208 List of character string types
 use std::fmt;
 use std::error::Error;
 use std::ops::Range;
-use super::super::util::{BinaryData, DebugHexDump, Indent, escape_string};
-use super::super::binary::BinaryReader;
-use super::super::error;
+use crate::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
+use crate::util::binary::BinaryReader;
+use crate::error;
 use super::value::*;
 
 fn read_identifier<'a>(reader: &'a mut BinaryReader) -> Result<Identifier, Box<dyn Error>> {

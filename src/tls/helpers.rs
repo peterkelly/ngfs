@@ -1,8 +1,8 @@
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::signature::{RsaEncoding, RsaKeyPair, VerificationAlgorithm};
 use ring::rand::SecureRandom;
-use super::super::crypt::{HashAlgorithm, AeadAlgorithm, CryptError};
-use super::super::util::{vec_with_len};
+use crate::crypto::crypt::{HashAlgorithm, AeadAlgorithm, CryptError};
+use crate::util::util::{vec_with_len};
 use super::types::handshake::{
     // ClientHello,
     ServerHello,

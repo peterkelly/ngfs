@@ -15,7 +15,7 @@ use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use std::net::SocketAddr;
 use futures::future::join;
-use torrent::util::escape_string;
+use torrent::util::util::escape_string;
 
 struct StateInner {
     total_sent: usize,

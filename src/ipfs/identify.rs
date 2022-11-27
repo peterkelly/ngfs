@@ -9,10 +9,10 @@ use std::error::Error;
 use std::sync::Arc;
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
-use crate::io::AsyncStream;
+use crate::util::io::AsyncStream;
 use crate::libp2p::identify::Identify;
 use crate::ipfs::node::IPFSNode;
-use crate::p2p::{PublicKey, KeyType};
+use crate::libp2p::secio::{PublicKey, KeyType};
 use crate::libp2p::multiaddr::{MultiAddr, Addr};
 use crate::libp2p::io::{
     read_length_prefixed_data,

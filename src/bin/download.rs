@@ -26,8 +26,8 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 
-use torrent::util::BinaryData;
-use torrent::torrent::{Torrent};
+use torrent::util::util::BinaryData;
+use torrent::bittorrent::torrent::{Torrent};
 use torrent::error;
 
 #[derive(Debug)]

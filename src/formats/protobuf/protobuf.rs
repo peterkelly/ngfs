@@ -7,7 +7,7 @@
 
 use std::fmt;
 use std::error::Error;
-use super::error;
+use crate::error;
 use super::varint;
 
 pub struct VarInt<'a>(pub &'a [u8]);

@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
-use crate::util::BinaryData;
+use crate::util::util::BinaryData;
 
 #[derive(Debug)]
 pub struct ValueError {

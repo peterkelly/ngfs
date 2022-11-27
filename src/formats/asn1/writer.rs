@@ -1,5 +1,5 @@
 use std::error::Error;
-use super::super::error;
+use crate::error;
 use super::value::{
     Class,
     Form,

@@ -6,10 +6,10 @@
 #![allow(unused_macros)]
 
 use std::fmt;
-use super::util::BinaryData;
-use super::error;
-use super::protobuf::VarInt;
-use super::varint;
+use crate::util::util::BinaryData;
+use crate::error;
+use crate::formats::protobuf::protobuf::VarInt;
+use crate::formats::protobuf::varint;
 use super::multibase::{decode, decode_noprefix, encode, encode_noprefix, Base, DecodeError};
 use std::error::Error;
 

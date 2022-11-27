@@ -9,7 +9,7 @@ use std::fmt;
 use std::error::Error;
 use super::dagpb::{PBLink, PBNode};
 use super::unixfs::{Data, DataType};
-use super::super::cid::CID;
+use crate::ipfs::types::cid::CID;
 use std::collections::HashSet;
 
 pub enum Node {

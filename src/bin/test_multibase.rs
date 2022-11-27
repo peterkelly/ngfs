@@ -5,9 +5,9 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use torrent::util::{escape_string, from_hex, BinaryData};
+use torrent::util::util::{escape_string, from_hex, BinaryData};
 use torrent::error;
-use torrent::multibase::{Base, encode, decode};
+use torrent::ipfs::types::multibase::{Base, encode, decode};
 use std::iter::FromIterator;
 use std::error::Error;
 use std::fmt;

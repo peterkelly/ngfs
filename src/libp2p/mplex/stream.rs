@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use bytes::{Buf};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use super::frame::{StreamId, Frame, FrameOp, FrameStream};
-use crate::io::AsyncStream;
+use crate::util::io::AsyncStream;
 
 struct InternalReader {
     waker: Option<Waker>,

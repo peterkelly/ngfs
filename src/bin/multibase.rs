@@ -7,7 +7,7 @@
 
 use std::error::Error;
 use clap::{Clap, ArgSettings};
-use torrent::multibase::{
+use torrent::ipfs::types::multibase::{
     DecodeError,
     Base,
     encode,

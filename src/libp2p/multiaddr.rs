@@ -2,9 +2,9 @@ use std::fmt;
 use std::error::Error;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::{BufMut};
-use crate::util::BinaryData;
-use crate::protobuf::VarInt;
-use crate::varint;
+use crate::util::util::BinaryData;
+use crate::formats::protobuf::protobuf::VarInt;
+use crate::formats::protobuf::varint;
 
 enum DecodeVarintError {
     UnexpectedEof,

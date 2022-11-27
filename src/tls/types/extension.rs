@@ -7,9 +7,9 @@
 
 use std::error::Error;
 use std::fmt;
-use super::super::super::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
-use super::super::super::error;
-use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
+use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
+use crate::error;
+use crate::util::util::{DebugHexDump, BinaryData, escape_string};
 
 pub struct ProtocolName {
     pub data: Vec<u8>,

@@ -19,9 +19,9 @@ use std::time::Duration;
 use ring::agreement::{EphemeralPrivateKey, X25519};
 use ring::rand::SystemRandom;
 use torrent::error;
-use torrent::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
-use torrent::binary::{BinaryReader, BinaryWriter};
-use torrent::crypt::{HashAlgorithm, AeadAlgorithm};
+use torrent::util::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
+use torrent::util::binary::{BinaryReader, BinaryWriter};
+use torrent::crypto::crypt::{HashAlgorithm, AeadAlgorithm};
 use torrent::tls::error::TLSError;
 use torrent::tls::types::handshake::{
     CipherSuite,
@@ -72,7 +72,7 @@ use torrent::tls::protocol::client::{
     ClientConfig,
     establish_connection,
 };
-use torrent::x509;
+use torrent::crypto::x509;
 
 #[derive(Clap, Debug)]
 #[clap(name="tls_client")]

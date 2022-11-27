@@ -75,12 +75,12 @@ use super::super::types::alert::{
 use super::super::error::{
     TLSError,
 };
-use super::super::super::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
+use crate::util::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
 use super::super::super::error;
-use super::super::super::crypt::{HashAlgorithm, AeadAlgorithm};
-use super::super::super::binary::{BinaryReader, BinaryWriter};
-use super::super::super::asn1;
-use super::super::super::x509;
+use crate::crypto::crypt::{HashAlgorithm, AeadAlgorithm};
+use crate::util::binary::{BinaryReader, BinaryWriter};
+use crate::formats::asn1;
+use crate::crypto::x509;
 
 pub enum ServerAuth {
     None,

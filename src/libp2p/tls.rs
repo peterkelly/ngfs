@@ -1,12 +1,12 @@
 use std::error::Error;
 use ring::signature::{RsaKeyPair, KeyPair};
 use crate::error;
-use crate::util::from_hex;
-use crate::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
-use crate::asn1::writer::encode_item;
+use crate::util::util::from_hex;
+use crate::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
+use crate::formats::asn1::writer::encode_item;
 use super::peer_id::encode_libp2p_public_key;
-use crate::x509;
-use crate::x509::{
+use crate::crypto::x509;
+use crate::crypto::x509::{
     TBSCertificate,
     Version,
     AlgorithmIdentifier,

@@ -23,7 +23,7 @@ use super::super::types::record::{
 use super::super::types::handshake::{
     Handshake,
 };
-use super::super::super::util::{vec_with_len};
+use crate::util::util::{vec_with_len};
 use super::super::error::TLSError;
 use super::super::helpers::{
     EncryptionKey,
@@ -33,7 +33,7 @@ use super::super::helpers::{
     decrypt_message,
 };
 use super::super::super::error;
-use crate::io::{AsyncStream};
+use crate::util::io::{AsyncStream};
 
 pub struct Encryption {
     pub traffic_secrets: TrafficSecrets,

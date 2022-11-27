@@ -17,7 +17,7 @@ use openssl::hash::MessageDigest;
 use ring::rand;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use torrent::error;
-use torrent::util::{BinaryData, from_hex, DebugHexDump};
+use torrent::util::util::{BinaryData, from_hex, DebugHexDump};
 
 use std::error::Error;
 

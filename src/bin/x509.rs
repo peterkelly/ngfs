@@ -9,14 +9,14 @@
 use std::fmt;
 use std::error::Error;
 use clap::{Clap, ValueHint};
-use torrent::util::{BinaryData, DebugHexDump, Indent, escape_string, from_hex};
-use torrent::binary::BinaryReader;
+use torrent::util::util::{BinaryData, DebugHexDump, Indent, escape_string, from_hex};
+use torrent::util::binary::BinaryReader;
 use torrent::error;
-use torrent::asn1;
-use torrent::asn1::printer::ObjectDescriptor;
-use torrent::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
-use torrent::asn1::writer::encode_item;
-use torrent::x509::{
+use torrent::formats::asn1;
+use torrent::formats::asn1::printer::ObjectDescriptor;
+use torrent::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
+use torrent::formats::asn1::writer::encode_item;
+use torrent::crypto::x509::{
     Certificate,
     TBSCertificate,
     Version,

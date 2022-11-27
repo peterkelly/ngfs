@@ -10,8 +10,8 @@
 use std::fmt;
 use std::error::Error;
 use crate::error;
-use crate::protobuf::{PBufReader, PBufWriter};
-use crate::cid::CID;
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
+use crate::ipfs::types::cid::CID;
 
 #[derive(Debug)]
 pub enum DataType {

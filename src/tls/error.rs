@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt;
-use super::super::crypt::CryptError;
+use crate::crypto::crypt::CryptError;
 use super::types::alert::Alert;
 use ring::error::KeyRejected;
 

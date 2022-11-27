@@ -16,11 +16,11 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 // use tokio_tls;
 use openssl::rsa::Rsa;
 use rand::prelude::Rng;
-use super::error;
-use super::util::{BinaryData, escape_string};
-use super::protobuf::{PBufReader, PBufWriter, VarInt};
-use super::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
-use super::varint;
+use crate::error;
+use crate::util::util::{BinaryData, escape_string};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
+use crate::crypto::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
+use crate::formats::protobuf::varint;
 
 use openssl::bn::{BigNum, BigNumRef, BigNumContext};
 use openssl::ec::*;

@@ -10,13 +10,13 @@ use std::fmt;
 use std::error::Error;
 use std::path::PathBuf;
 use clap::{Clap, ValueHint};
-use torrent::util::{BinaryData, DebugHexDump, Indent, escape_string};
-use torrent::binary::BinaryReader;
+use torrent::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
+use torrent::util::binary::BinaryReader;
 use torrent::error;
-use torrent::asn1;
-use torrent::asn1::printer::ObjectDescriptor;
-use torrent::asn1::writer::encode_item;
-use torrent::x509;
+use torrent::formats::asn1;
+use torrent::formats::asn1::printer::ObjectDescriptor;
+use torrent::formats::asn1::writer::encode_item;
+use torrent::crypto::x509;
 
 #[derive(Clap, Debug)]
 #[clap(name = "asn1: Test for reading/writing ASN.1 DER files")]

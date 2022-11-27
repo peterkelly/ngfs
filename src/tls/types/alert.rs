@@ -7,9 +7,9 @@
 
 use std::error::Error;
 use std::fmt;
-use super::super::super::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
-use super::super::super::StringError;
-use super::super::super::util::{DebugHexDump, BinaryData, escape_string};
+use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
+use crate::StringError;
+use crate::util::util::{DebugHexDump, BinaryData, escape_string};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum AlertLevel {

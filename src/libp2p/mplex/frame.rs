@@ -1,12 +1,12 @@
 use std::io;
 use std::pin::Pin;
 use bytes::{Bytes, BytesMut, Buf};
-use crate::io::AsyncStream;
+use crate::util::io::AsyncStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use std::task::{Context, Poll};
-use crate::protobuf::VarInt;
-use crate::varint;
-use crate::util::{Indent, DebugHexDump};
+use crate::formats::protobuf::protobuf::VarInt;
+use crate::formats::protobuf::varint;
+use crate::util::util::{Indent, DebugHexDump};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StreamId {

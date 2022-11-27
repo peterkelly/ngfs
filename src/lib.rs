@@ -1,23 +1,12 @@
-pub mod bencoding;
-pub mod util;
-pub mod torrent;
-pub mod varint;
-pub mod protobuf;
-pub mod detrand;
-pub mod multibase;
-pub mod cid;
-pub mod p2p;
-pub mod hmac;
-pub mod binary;
 pub mod tls;
-pub mod asn1;
-pub mod x509;
-pub mod crypt;
 pub mod libp2p;
 pub mod ipfs;
-pub mod io;
 pub mod sim;
 pub mod quic;
+pub mod formats;
+pub mod util;
+pub mod crypto;
+pub mod bittorrent;
 
 use std::fmt;
 use std::error::Error;

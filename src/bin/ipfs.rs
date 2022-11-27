@@ -21,9 +21,9 @@ use clap::{Clap, ArgSettings};
 use bytes::{Bytes, BytesMut, Buf, BufMut};
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
-use torrent::protobuf::PBufReader;
-use torrent::p2p::{PublicKey, KeyType};
-use torrent::util::{escape_string, vec_with_len, from_hex, Indent, DebugHexDump, BinaryData};
+use torrent::formats::protobuf::protobuf::PBufReader;
+use torrent::libp2p::secio::{PublicKey, KeyType};
+use torrent::util::util::{escape_string, vec_with_len, from_hex, Indent, DebugHexDump, BinaryData};
 use torrent::libp2p::multiaddr::{MultiAddr, Addr};
 use torrent::libp2p::identify::{Identify, SignedPeerRecord};
 use torrent::libp2p::tls::generate_certificate;
@@ -45,7 +45,7 @@ use torrent::tls::protocol::client::{
     ClientConfig,
     establish_connection,
 };
-use torrent::io::AsyncStream;
+use torrent::util::io::AsyncStream;
 use torrent::error;
 use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
 use torrent::ipfs::identify::identify_handler;
