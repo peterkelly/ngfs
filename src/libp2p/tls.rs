@@ -121,7 +121,7 @@ fn generate_certificate_inner(
             } ] },
         validity: Validity {
             not_before: Time::UTCTime(UTCTime { data: String::from("210515162539Z") }),
-            not_after: Time::UTCTime(UTCTime {  data: String::from("220312162539Z") }),
+            not_after: Time::UTCTime(UTCTime {  data: String::from("240312162539Z") }),
         },
         subject: Name { parts: vec![
             RelativeDistinguishedName {
