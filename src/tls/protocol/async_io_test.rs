@@ -60,8 +60,7 @@ impl<'a, T : AsyncRead + Unpin> AsyncRead for FixedSizeReader<'a, T> {
         }
 
         let amt = std::cmp::min(self.nbytes, xbuf.remaining());
-        let mut our_data = Vec::with_capacity(amt);
-        our_data.resize(amt, 0);
+        let mut our_data = vec![0; amt];
 
         let mut our_buf = ReadBuf::new(&mut our_data);
 

@@ -1,12 +1,13 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
+#![allow(clippy::redundant_field_names)]
+#![allow(clippy::identity_op)]
 
 use std::convert::TryInto;
-use std::convert::Into;
 use std::error::Error;
 use tokio::net::{UdpSocket, lookup_host};
 // use std::error::Error;
@@ -17,8 +18,8 @@ use torrent::util::util::BinaryData;
 use torrent::error;
 use torrent::bittorrent::torrent::{Torrent};
 
-struct ConnectRequest {
-}
+// struct ConnectRequest {
+// }
 
 struct ConnectResponse {
     action: u32,
@@ -85,7 +86,7 @@ impl AnnounceRequest {
         request[92..96].copy_from_slice(&self.num_want.to_be_bytes());
         // 96      16-bit integer  port
         request[96..98].copy_from_slice(&self.port.to_be_bytes());
-        return request;
+        request
     }
 }
 
@@ -193,7 +194,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("transaction_id = {}", transaction_id);
 
 
-    let mut sock = UdpSocket::bind("0.0.0.0:0").await?;
+    let sock = UdpSocket::bind("0.0.0.0:0").await?;
     let sock_addr = sock.local_addr()?;
     println!("UDP client socket address = {}", sock_addr);
     sock.connect(tracker_addr).await?;
@@ -207,7 +208,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
 
     let mut request: [u8; 16] = [0; 16];
-    let other: [u8; 8] = [0; 8];
+    // let other: [u8; 8] = [0; 8];
 
     let connect_magic: u64 = 0x41727101980;
     let action: u32 = 0;
@@ -255,7 +256,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         connection_id: connection_id,  // 0       64-bit integer  connection_id
         action: 1,         // 8       32-bit integer  action          1 // announce
         transaction_id: transaction_id, // 12      32-bit integer  transaction_id
-        info_hash: info_hash.clone(), // 16      20-byte string  info_hash
+        info_hash: *info_hash, // 16      20-byte string  info_hash
         peer_id: peer_id,   // 36      20-byte string  peer_id
         downloaded: 0,     // 56      64-bit integer  downloaded
         left: 0,           // 64      64-bit integer  left

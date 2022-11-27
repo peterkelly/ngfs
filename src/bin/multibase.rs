@@ -1,19 +1,18 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 use std::error::Error;
-use clap::{Clap, ArgSettings};
+use clap::Clap;
 use torrent::ipfs::types::multibase::{
     DecodeError,
     Base,
     encode,
     encode_noprefix,
     decode,
-    decode_noprefix,
 };
 use torrent::error;
 
@@ -60,8 +59,8 @@ fn list() -> Result<(), Box<dyn Error>> {
 }
 
 fn detect(args: &Detect) -> Result<(), Box<dyn Error>> {
-    let code = args.value.chars().nth(0).ok_or_else(|| DecodeError::EmptyString)?;
-    let base = Base::for_code(code).ok_or_else(|| DecodeError::UnsupportedEncoding(code))?;
+    let code = args.value.chars().next().ok_or(DecodeError::EmptyString)?;
+    let base = Base::for_code(code).ok_or(DecodeError::UnsupportedEncoding(code))?;
     println!("{}", base.name());
     Ok(())
 }

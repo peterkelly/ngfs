@@ -1,10 +1,3 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_mut)]
-// #![allow(unused_assignments)]
-// #![allow(unused_imports)]
-// #![allow(unused_macros)]
-
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use super::io::{write_length_prefixed_data, read_length_prefixed_data, read_varint};
 

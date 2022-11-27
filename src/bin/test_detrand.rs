@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 use torrent::util::detrand::Generator;
 
 fn main() {
@@ -5,7 +7,7 @@ fn main() {
 
     let mut frequency: [usize; 32] = [0; 32];
     for _ in 0..100000 {
-        let v = gen.next();
+        let v = gen.next_u32();
         print!("{:08x} ", v);
 
         for i in 0..32 {

@@ -1,16 +1,14 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 use torrent::util::util::{escape_string, from_hex, BinaryData};
 use torrent::error;
 use torrent::ipfs::types::multibase::{Base, encode, decode};
-use std::iter::FromIterator;
 use std::error::Error;
-use std::fmt;
 
 fn main_result() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -31,7 +29,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let base = match Base::for_name(&base_name) {
+    let base = match Base::for_name(base_name) {
         Some(v) => v,
         None => {
             eprintln!("Unknown base: {}", base_name);
@@ -40,8 +38,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
     };
 
     let numbers_content = std::fs::read_to_string(numbers_filename)?;
-    let mut lineno = 0;
-    for line in numbers_content.lines() {
+    for (lineno, line) in numbers_content.lines().enumerate() {
         if let Some(num_bytes) = from_hex(line) {
             let encoded = encode(&num_bytes, base);
             println!("{:<40} {}", line, encoded);
@@ -67,7 +64,6 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         else {
             return Err(error!("Line {}: Invalid hex string: {}", lineno, escape_string(line)));
         }
-        lineno += 1;
     }
 
     Ok(())

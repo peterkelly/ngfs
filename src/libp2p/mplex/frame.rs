@@ -61,7 +61,7 @@ impl Flag {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FrameOp {
     New,
     Message,
@@ -69,7 +69,7 @@ pub enum FrameOp {
     Reset,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
     pub stream_id: StreamId,
     pub op: FrameOp,
@@ -172,7 +172,7 @@ impl FrameStream {
             // cleanly, which we consider an error condition (albeit not a serious one; it could
             // be safely ignored).
             if self.read_eof {
-                if self.incoming_data.len() > 0 {
+                if !self.incoming_data.is_empty() {
                     return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
                 }
                 else {
@@ -203,7 +203,7 @@ impl FrameStream {
     }
 
     pub fn poll_drain(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        while self.outgoing_data.len() > 0 {
+        while !self.outgoing_data.is_empty() {
             match Pin::new(&mut self.transport).poll_write(cx, &self.outgoing_data) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
@@ -243,7 +243,7 @@ impl FrameStream {
         stream_id: &StreamId,
         data: &[u8],
     ) {
-        self.log_outgoing_frame(&stream_id, FrameOp::Message, data);
+        self.log_outgoing_frame(stream_id, FrameOp::Message, data);
         let header: u64 = match stream_id {
             StreamId::Receiver(num) => (num << 3) | (Flag::MessageReceiver.to_raw() as u64),
             StreamId::Initiator(num) => (num << 3) | (Flag::MessageInitiator.to_raw() as u64),
@@ -255,7 +255,7 @@ impl FrameStream {
         &mut self,
         stream_id: &StreamId
     ) {
-        self.log_outgoing_frame(&stream_id, FrameOp::Close, &[]);
+        self.log_outgoing_frame(stream_id, FrameOp::Close, &[]);
         let header: u64 = match stream_id {
             StreamId::Receiver(num) => (num << 3) | (Flag::CloseReceiver.to_raw() as u64),
             StreamId::Initiator(num) => (num << 3) | (Flag::CloseInitiator.to_raw() as u64),
@@ -266,7 +266,7 @@ impl FrameStream {
     fn append_frame(&mut self, header: u64, data: &[u8]) {
         varint::encode_u64(header, &mut self.outgoing_data);
         varint::encode_usize(data.len(), &mut self.outgoing_data);
-        self.outgoing_data.extend_from_slice(&data);
+        self.outgoing_data.extend_from_slice(data);
     }
 
     fn log_incoming_frame(&self, frame: &Frame) {
@@ -280,7 +280,7 @@ impl FrameStream {
     fn log_outgoing_frame(&self, stream_id: &StreamId, op: FrameOp, data: &[u8]) {
         if self.logging_enabled {
             println!("[mplex] >>>> {:?} {:?} <{} bytes>", stream_id, op, data.len());
-            println!("{:#?}", Indent(&DebugHexDump(&data)));
+            println!("{:#?}", Indent(&DebugHexDump(data)));
         }
     }
 

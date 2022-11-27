@@ -1,20 +1,16 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-#![allow(non_upper_case_globals)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
+// #![allow(non_upper_case_globals)]
 
-use std::fmt;
 use std::error::Error;
-use std::path::PathBuf;
 use clap::{Clap, ValueHint};
-use torrent::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use torrent::util::binary::BinaryReader;
 use torrent::error;
 use torrent::formats::asn1;
-use torrent::formats::asn1::printer::ObjectDescriptor;
 use torrent::formats::asn1::writer::encode_item;
 use torrent::crypto::x509;
 

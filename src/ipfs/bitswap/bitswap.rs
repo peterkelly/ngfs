@@ -1,15 +1,7 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
-
 use std::sync::{Arc, Mutex};
 
-struct ConnectedPeer {
-}
+// struct ConnectedPeer {
+// }
 
 struct BitswapShared {
 }
@@ -30,6 +22,12 @@ impl Bitswap {
         Bitswap {
             shared: Arc::new(Mutex::new(BitswapShared::new())),
         }
+    }
+}
+
+impl Default for Bitswap {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

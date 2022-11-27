@@ -90,7 +90,7 @@ pub fn escape_string(s: &str) -> String {
         }
     }
     escaped.push('\"');
-    return escaped.into_iter().collect();
+    escaped.into_iter().collect()
 }
 
 pub fn vec_with_len<T : Default + Clone>(len: usize) -> Vec<T> {
@@ -112,7 +112,7 @@ impl<'a> fmt::Debug for DebugHexDump<'a> {
             }
         }
         else {
-            let nlines = if self.0.len() == 0 { 1 } else { (self.0.len() + 15) / 16 };
+            let nlines = if self.0.is_empty() { 1 } else { (self.0.len() + 15) / 16 };
             for lineno in 0..nlines {
                 let start = lineno * 16;
                 write!(f, "{:08x}", start)?;
@@ -129,7 +129,7 @@ impl<'a> fmt::Debug for DebugHexDump<'a> {
                 }
                 self.fmt_chars(start, f)?;
                 if lineno + 1 < nlines {
-                    write!(f, "\n")?;
+                    writeln!(f)?;
                 }
             }
         }
@@ -143,7 +143,7 @@ impl<'a> DebugHexDump<'a> {
         write!(f, "  |")?;
         for i in start..end {
             let byte = self.0[i];
-            if byte >= 32 && byte <= 126 {
+            if (32..=126).contains(&byte) {
                 write!(f, "{}", byte as char)?;
             }
             else {

@@ -1,18 +1,7 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::io;
-use std::error::Error;
-use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
-use futures::stream::StreamExt;
-use futures::sink::SinkExt;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use bytes::{BytesMut, Buf};
 use ring::agreement::{EphemeralPrivateKey, X25519};
 use ring::rand::{SystemRandom, SecureRandom};
@@ -23,14 +12,11 @@ use super::stream::{
     EncryptedStream,
 };
 use super::super::helpers::{
-    EncryptionKey,
     Ciphers,
     TrafficSecrets,
     get_server_hello_x25519_shared_secret,
     get_derived_prk,
     get_zero_prk,
-    encrypt_traffic,
-    decrypt_message,
     verify_finished,
     derive_secret,
     rsa_sign,
@@ -62,9 +48,7 @@ use super::super::types::extension::{
 use super::super::types::record::{
     Message,
     ContentType,
-    TLSOwnedPlaintext,
     TLSOutputPlaintext,
-    TLSPlaintextError,
     MAX_PLAINTEXT_RECORD_SIZE,
 };
 use super::super::types::alert::{
@@ -75,9 +59,8 @@ use super::super::types::alert::{
 use super::super::error::{
     TLSError,
 };
-use crate::util::util::{from_hex, vec_with_len, BinaryData, DebugHexDump, Indent};
-use super::super::super::error;
-use crate::crypto::crypt::{HashAlgorithm, AeadAlgorithm};
+use crate::util::util::vec_with_len;
+use crate::crypto::crypt::HashAlgorithm;
 use crate::util::binary::{BinaryReader, BinaryWriter};
 use crate::formats::asn1;
 use crate::crypto::x509;
@@ -109,11 +92,12 @@ pub fn make_client_hello(
     SystemRandom::new().fill(&mut random).map_err(|_| TLSError::RandomFillFailed)?;
     SystemRandom::new().fill(&mut session_id).map_err(|_| TLSError::RandomFillFailed)?;
 
-    let mut cipher_suites = Vec::<CipherSuite>::new();
-    cipher_suites.push(CipherSuite::TLS_AES_128_GCM_SHA256);
-    cipher_suites.push(CipherSuite::TLS_AES_256_GCM_SHA384);
-    // cipher_suites.push(CipherSuite::TLS_CHACHA20_POLY1305_SHA256);
-    cipher_suites.push(CipherSuite::Unknown(0x00ff));
+    let cipher_suites = vec![
+        CipherSuite::TLS_AES_128_GCM_SHA256,
+        CipherSuite::TLS_AES_256_GCM_SHA384,
+        // CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+        CipherSuite::Unknown(0x00ff),
+    ];
 
     let mut extensions = vec![
         Extension::ECPointFormats(vec![
@@ -187,7 +171,7 @@ async fn send_finished(
         hash_alg,
         &stream.encryption.traffic_secrets.client.raw,
         b"finished", &[])?;
-    let verify_data = hash_alg.hmac_sign(&finished_key, &new_transcript_hash)?;
+    let verify_data = hash_alg.hmac_sign(&finished_key, new_transcript_hash)?;
     let client_finished = Handshake::Finished(Finished { verify_data });
     send_handshake(&client_finished, None, stream).await?;
     Ok(())
@@ -253,16 +237,16 @@ async fn send_handshake(
 }
 
 fn verify_certificate(ca_raw: &[u8], target_raw: &[u8]) -> Result<(), TLSError> {
-    let ca_cert = x509::Certificate::from_bytes(&ca_raw)
+    let ca_cert = x509::Certificate::from_bytes(ca_raw)
         .map_err(|_| TLSError::InvalidCertificate)?;
 
-    let mut target_reader = BinaryReader::new(&target_raw);
+    let mut target_reader = BinaryReader::new(target_raw);
     let target_item = asn1::reader::read_item(&mut target_reader)
         .map_err(|_| TLSError::InvalidCertificate)?;
     let elements = target_item.as_exact_sequence(3)
         .map_err(|_| TLSError::InvalidCertificate)?;
 
-    let tbs_certificate = x509::TBSCertificate::from_asn1(&elements[0])
+    /*let tbs_certificate = */x509::TBSCertificate::from_asn1(&elements[0])
         .map_err(|_| TLSError::InvalidCertificate)?;
     let signature_algorithm = x509::AlgorithmIdentifier::from_asn1(&elements[1])
         .map_err(|_| TLSError::InvalidCertificate)?;
@@ -298,10 +282,7 @@ fn verify_certificate(ca_raw: &[u8], target_raw: &[u8]) -> Result<(), TLSError> 
 }
 
 fn make_verify_transcript_input(endpoint: Endpoint, thash: &[u8]) -> Vec<u8> {
-    let mut verify_input: Vec<u8> = Vec::new();
-    for _ in 0..64 {
-        verify_input.push(0x20);
-    }
+    let mut verify_input: Vec<u8> = vec![0x20; 64];
     let context_string = match endpoint {
         Endpoint::Client => b"TLS 1.3, client CertificateVerify",
         Endpoint::Server => b"TLS 1.3, server CertificateVerify",
@@ -410,7 +391,7 @@ async fn write_plaintext_handshake(
         fragment: &fragment_vec,
     };
 
-    transcript.extend_from_slice(&record.fragment);
+    transcript.extend_from_slice(record.fragment);
     let mut encoded = BytesMut::new();
     record.encode(&mut encoded);
     writer.write_all(&encoded).await.map_err(|e| TLSError::IOError(e.kind()))?;
@@ -471,16 +452,18 @@ fn get_handshake_encryption(
     server_hello: &ServerHello,
     private_key: EphemeralPrivateKey,
 ) -> Result<HandshakeEncryption, TLSError> {
-    let ciphers = Ciphers::from_server_hello(&server_hello)?;
-    let secret = get_server_hello_x25519_shared_secret(private_key, &server_hello)
-        .ok_or_else(|| TLSError::GetSharedSecretFailed)?;
+    let ciphers = Ciphers::from_server_hello(server_hello)?;
+    let secret = get_server_hello_x25519_shared_secret(private_key, server_hello)
+        .ok_or(TLSError::GetSharedSecretFailed)?;
     let prk = get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), &secret)?;
     let traffic_secrets = TrafficSecrets::derive_from(&ciphers, transcript, &prk, "hs")?;
     Ok(HandshakeEncryption { traffic_secrets, ciphers, prk })
 }
 
 struct ServerMessages {
+    #[allow(dead_code)]
     encrypted_extensions: EncryptedExtensions,
+    #[allow(dead_code)]
     certificate_request: Option<CertificateRequest>,
     certificate: Option<Certificate>,
     certificate_verify: Option<(CertificateVerify, Vec<u8>)>,
@@ -563,9 +546,9 @@ async fn do_phase_two(
 
     let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
     let new_prk = get_derived_prk(ciphers.hash_alg, prk, input_psk)
-        .map_err(|e| TLSError::Internal(e))?;
+        .map_err(TLSError::Internal)?;
 
-    let application_secrets = TrafficSecrets::derive_from(&ciphers, &conn.transcript, &new_prk, "ap")?;
+    let application_secrets = TrafficSecrets::derive_from(ciphers, &conn.transcript, &new_prk, "ap")?;
     // let mut bad_finished = Finished { verify_data: finished.verify_data.clone() };
     // bad_finished.verify_data.push(0);
     let (finished, finished_thash) = &sm.finished;
@@ -591,9 +574,9 @@ async fn do_phase_two(
     let ca_cert: &[u8] = match &conn.config.server_auth {
         ServerAuth::None => return Err(TLSError::CACertificateUnavailable),
         ServerAuth::CertificateAuthority(v) => v,
-        ServerAuth::SelfSigned => &server_cert_raw,
+        ServerAuth::SelfSigned => server_cert_raw,
     };
-    verify_certificate(ca_cert, &server_cert_raw)?;
+    verify_certificate(ca_cert, server_cert_raw)?;
 
     match &sm.certificate_verify {
         Some((certificate_verify, certificate_verify_thash)) => {
@@ -711,12 +694,12 @@ impl EstablishedConnection {
             alert.description.to_raw(),
         ];
 
-        self.append_record(&alert_data, ContentType::Alert)
+        self.append_record(alert_data, ContentType::Alert)
     }
 
 
     fn poll_drain_encrypted(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
-        while self.outgoing_encrypted.len() > 0 {
+        while !self.outgoing_encrypted.is_empty() {
             match AsyncWrite::poll_write(Pin::new(&mut self.stream.plaintext.inner), cx, &self.outgoing_encrypted) {
                 Poll::Ready(Ok(w)) => {
                     self.outgoing_encrypted.advance(w);
@@ -746,8 +729,8 @@ impl EstablishedConnection {
         loop {
             match self.stream.poll_receive_encrypted_message(cx, None) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
-                Poll::Ready(Ok(Some(Message::Handshake(Handshake::NewSessionTicket(ticket))))) => {
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Ready(Ok(Some(Message::Handshake(Handshake::NewSessionTicket(_))))) => {
                     // ignore; repeat loop
                 }
                 Poll::Ready(Ok(Some(Message::ApplicationData(data)))) => {
@@ -895,6 +878,6 @@ impl AsyncWrite for EstablishedConnection {
         // Shutdown is now complete. Cause any future calls to shutdown() to fail. Note that
         // read() and write() will already fail since we transitioned to the InShutdown state.
         direct.write_state = WriteState::Error(TLSError::IOError(io::ErrorKind::BrokenPipe));
-        return Poll::Ready(Ok(()));
+        Poll::Ready(Ok(()))
     }
 }

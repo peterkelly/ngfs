@@ -1,17 +1,10 @@
-
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::fmt;
 use std::error::Error;
+use std::cmp::Ordering;
 use tokio::net::{lookup_host};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 // use native_tls;
 // use tokio_tls;
 use openssl::rsa::Rsa;
@@ -22,11 +15,10 @@ use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
 use crate::crypto::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
 use crate::formats::protobuf::varint;
 
-use openssl::bn::{BigNum, BigNumRef, BigNumContext};
+use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::*;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
 use openssl::sign::{Signer, Verifier};
 use openssl::sha::Sha256;
@@ -67,7 +59,7 @@ impl PublicKey {
         let mut key_type: Option<KeyType> = None;
         let mut data: Option<Vec<u8>> = None;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             // println!("offset 0x{:04x}, field_number {:2}, data {:?}",
             //     field.offset, field.field_number, field.data);
@@ -131,7 +123,7 @@ struct Propose {
 
 impl Propose {
     fn from_pb(raw_data: &[u8]) -> Result<Propose, Box<dyn Error>> {
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
 
         let mut rand: Option<Vec<u8>> = None;
         let mut pubkey: Option<Vec<u8>> = None;
@@ -173,9 +165,9 @@ impl Propose {
         Ok(Propose {
             rand,
             pubkey: pubkey,
-            exchanges: exchanges.split(',').map(|s| String::from(s)).collect(),
-            ciphers: ciphers.split(',').map(|s| String::from(s)).collect(),
-            hashes: hashes.split(',').map(|s| String::from(s)).collect(),
+            exchanges: exchanges.split(',').map(String::from).collect(),
+            ciphers: ciphers.split(',').map(String::from).collect(),
+            hashes: hashes.split(',').map(String::from).collect(),
         })
     }
 
@@ -190,7 +182,7 @@ impl Propose {
     }
 }
 
-fn join_strings(strings: &Vec<String>, joiner: &str) -> String {
+fn join_strings(strings: &[String], joiner: &str) -> String {
     let mut result = String::new();
     for (i, s) in strings.iter().enumerate() {
         if i > 0 {
@@ -198,7 +190,7 @@ fn join_strings(strings: &Vec<String>, joiner: &str) -> String {
         }
         result.push_str(s);
     }
-    return result;
+    result
 }
 
 struct Exchange {
@@ -208,7 +200,7 @@ struct Exchange {
 
 impl Exchange {
     fn from_pb(raw_data: &[u8]) -> Result<Exchange, Box<dyn Error>> {
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
 
         let mut epubkey: Option<Vec<u8>> = None;
         let mut signature: Option<Vec<u8>> = None;
@@ -241,7 +233,7 @@ impl Exchange {
 
 
 async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), Box<dyn Error>> {
-    send_bytes(stream, &tosend_str.as_bytes()).await?;
+    send_bytes(stream, tosend_str.as_bytes()).await?;
     println!("Sent {}", escape_string(tosend_str));
     Ok(())
 }
@@ -271,7 +263,7 @@ async fn send_length_prefixed_bytes(stream: &mut TcpStream, tosend_bytes: &[u8])
 }
 
 pub fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
-    let mut reader = PBufReader::new(&data);
+    let mut reader = PBufReader::new(data);
     while let Some(field) = reader.read_field()? {
         println!("offset 0x{:04x}, field_number {:2}, data {:?}",
             field.offset, field.field_number, field.data);
@@ -310,13 +302,13 @@ async fn receive_exact(stream: &mut TcpStream, msglen: usize) -> Result<Vec<u8>,
     const CHUNK_SIZE: usize = 16;
     while total_read < msglen {
         let mut msg_buf: [u8; CHUNK_SIZE] = [0; CHUNK_SIZE];
-        let want: usize;
+        let want: usize =
         if total_read + CHUNK_SIZE <= msglen {
-            want = CHUNK_SIZE;
+            CHUNK_SIZE
         }
         else {
-            want = msglen - total_read;
-        }
+            msglen - total_read
+        };
         let r = stream.read(&mut msg_buf[0..want]).await?;
         if r != want {
             println!("r = {}", r);
@@ -342,7 +334,7 @@ fn make_propose(rng: &mut impl Rng, pubkey: &PublicKey) -> Propose {
     // let transaction_id: f64 = rng.gen();
 
     let mut rand_bytes: Vec<u8> = Vec::with_capacity(16);
-    for i in 0..16 {
+    for _ in 0..16 {
         rand_bytes.push(rng.gen());
     }
 
@@ -361,7 +353,7 @@ fn make_propose(rng: &mut impl Rng, pubkey: &PublicKey) -> Propose {
     let hashes: Vec<String> = vec![String::from("SHA256")];
 
     Propose {
-        rand: Vec::from(rand_bytes),
+        rand: rand_bytes,
         pubkey: pubkey.to_pb(),
         exchanges,
         ciphers,
@@ -400,7 +392,7 @@ async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8
     // println!("length = {}", length);
 
 
-    Ok(receive_exact(stream, length).await?)
+    receive_exact(stream, length).await
 }
 
 fn print_propose(propose: &Propose, pubkey: &PublicKey) {
@@ -519,14 +511,10 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     println!("oh1 = {}", BinaryData(&oh1));
     println!("oh2 = {}", BinaryData(&oh2));
 
-    let preference: Preference = if oh1_raw == oh2_raw {
-        return Err(error!("Talking to self"));
-    }
-    else if oh1_raw < oh2_raw {
-        Preference::Remote
-    }
-    else {
-        Preference::Local
+    let preference: Preference = match oh1_raw.cmp(&oh2_raw) {
+        Ordering::Equal => return Err(error!("Talking to self")),
+        Ordering::Less => Preference::Remote,
+        Ordering::Greater => Preference::Local,
     };
 
     // Receive the server's key exchange
@@ -537,7 +525,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     // println!("    signature = {}", BinaryData(&remote_exchange.signature));
 
     // get bytes from somewhere, i.e. this will not produce a valid key
-    let public_key: Vec<u8> = vec![];
+    // let public_key: Vec<u8> = vec![];
 
     // create an EcKey from the binary form of a EcPoint
     let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
@@ -617,7 +605,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
 
 
-    shared_secret_point.mul(&group, &remote_eckey.public_key(), &local_eckey.private_key(), &mut ctx)?;
+    shared_secret_point.mul(&group, remote_eckey.public_key(), local_eckey.private_key(), &ctx)?;
     let mut shared_secret_x: BigNum = BigNum::new()?;
     let mut shared_secret_y: BigNum = BigNum::new()?;
     shared_secret_point.affine_coordinates_gfp(&group, &mut shared_secret_x, &mut shared_secret_y, &mut ctx)?;
@@ -753,7 +741,7 @@ fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Res
     let block_size = cipher.block_size();
     let mut decrypter = Crypter::new(cipher, Mode::Decrypt, &keys.cipher_key, Some(&keys.iv))?;
     let mut plaintext: Vec<u8> = vec![0; message_enc.len() + block_size];
-    let mut decrpyted_count = decrypter.update(message_enc, &mut plaintext)?;
+    let decrpyted_count = decrypter.update(message_enc, &mut plaintext)?;
     println!("    decrpyted_count = {}", decrpyted_count);
     println!("    plaintext.len() = {}", plaintext.len());
     plaintext.truncate(decrpyted_count);
@@ -761,7 +749,7 @@ fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Res
     // println!("expected  = {}", BinaryData(&local_propose.rand));
 
     let mut message_hmac = HmacSha256::new(&keys.mac_key);
-    message_hmac.update(&message_enc);
+    message_hmac.update(message_enc);
     let computed_mac = message_hmac.finish();
     println!("    message_mac  = ({} bytes) {}", message_mac.len(), BinaryData(message_mac));
     println!("    computed_mac = ({} bytes) {}", computed_mac.len(), BinaryData(&computed_mac));

@@ -37,6 +37,13 @@ impl U64Decoder {
     }
 }
 
+impl Default for U64Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+
 pub fn encode_usize<T>(value: usize, out: &mut T) where T : BufMut {
     encode_u64(value as u64, out);
 }
@@ -44,7 +51,7 @@ pub fn encode_usize<T>(value: usize, out: &mut T) where T : BufMut {
 pub fn encode_u64<T>(mut value: u64, out: &mut T) where T : BufMut {
     loop {
         let seven = value & 0x7f;
-        value = value >> 7;
+        value >>= 7;
         if value != 0 {
             out.put_u8((seven | 0x80) as u8);
         }
@@ -55,7 +62,7 @@ pub fn encode_u64<T>(mut value: u64, out: &mut T) where T : BufMut {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
     Overflow,
     MissingFinalByte,
@@ -96,13 +103,13 @@ pub fn decode_u64(data: &[u8]) -> Result<u64, DecodeError> {
             }
         }
     }
-    return Err(DecodeError::MissingFinalByte);
+    Err(DecodeError::MissingFinalByte)
 }
 
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use super::super::util::BinaryData;
+    use crate::util::util::BinaryData;
     use rand::rngs::StdRng;
     use rand::{SeedableRng, RngCore};
     use super::{encode_u64, decode_u64, DecodeError};

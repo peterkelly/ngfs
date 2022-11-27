@@ -1,13 +1,6 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::error::Error;
 use std::fmt;
-use bytes::{BytesMut, Buf};
+use bytes::BytesMut;
 
 use super::alert::Alert;
 use super::handshake::Handshake;
@@ -187,6 +180,6 @@ impl<'a> TLSOutputPlaintext<'a> {
         res.extend_from_slice(&[self.content_type.to_raw()]);
         res.extend_from_slice(&self.legacy_record_version.to_be_bytes());
         res.extend_from_slice(&(self.fragment.len() as u16).to_be_bytes());
-        res.extend_from_slice(&self.fragment);
+        res.extend_from_slice(self.fragment);
     }
 }

@@ -1,16 +1,8 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::io;
 use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
+use std::task::{Context, Poll};
 use std::future::Future;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
-use crate::formats::protobuf::protobuf::VarInt;
 use crate::formats::protobuf::varint;
 use crate::formats::protobuf::varint::{U64Decoder, DecoderResult};
 
@@ -44,7 +36,7 @@ impl<'a, T> Future for ReadOptVarInt<'a, T>
                     }
                 }
                 Poll::Ready(Ok(())) => {
-                    if buf.filled().len() == 0 {
+                    if buf.filled().is_empty() {
                         if iself.num_bytes == 0 {
                             return Poll::Ready(Ok(None));
                         }
@@ -70,7 +62,7 @@ impl<'a, T> Future for ReadOptVarInt<'a, T>
     }
 }
 
-pub fn read_opt_varint<'a, T>(reader: &'a mut T) -> ReadOptVarInt<'a, T>
+pub fn read_opt_varint<T>(reader: &mut T) -> ReadOptVarInt<T>
     where T : AsyncRead + Unpin
 {
     ReadOptVarInt {
@@ -109,7 +101,7 @@ pub async fn read_opt_length_prefixed_data<T>(reader: &mut T) -> Result<Option<V
     while incoming_data.len() < expected_len {
         let mut buf: [u8; 1024] = [0; 1024];
         match reader.read(&mut buf).await {
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
             Ok(r) => incoming_data.extend_from_slice(&buf[0..r]),
         };
@@ -130,6 +122,6 @@ pub async fn write_length_prefixed_data<T>(writer: &mut T, data: &[u8]) -> Resul
     let mut len_bytes: Vec<u8> = Vec::new();
     varint::encode_usize(data.len(), &mut len_bytes);
     writer.write_all(&len_bytes).await?;
-    writer.write_all(&data).await?;
+    writer.write_all(data).await?;
     Ok(())
 }

@@ -1,24 +1,21 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
+#![allow(clippy::redundant_field_names)]
+#![allow(clippy::collapsible_if)]
 
-use std::marker::PhantomData;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use std::sync::{Arc, Mutex};
 use std::cmp::Ordering;
 use rand::rngs::StdRng;
-use rand::{SeedableRng, Rng, RngCore};
+use rand::{SeedableRng, RngCore};
 use torrent::sim::{
     ChannelParameters,
     Endpoint,
     ChannelMessage,
     Simulation,
-    opt_min,
 };
 
 const RETRANSMIT_DELAY: u64 = 1000;
@@ -236,7 +233,7 @@ fn main() {
     };
 
 
-    let mut rng: Arc<Mutex<dyn RngCore>> = Arc::new(Mutex::new(StdRng::seed_from_u64(0)));
+    let rng: Arc<Mutex<dyn RngCore>> = Arc::new(Mutex::new(StdRng::seed_from_u64(0)));
     let mut sim = Simulation::new(rng.clone());
     let max_time = 100_000;
 

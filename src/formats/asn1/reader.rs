@@ -34,22 +34,13 @@ Table 6/X.208 List of character string types
 27 GeneralString
  */
 
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
-use std::fmt;
 use std::error::Error;
 use std::ops::Range;
-use crate::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
 use crate::util::binary::BinaryReader;
 use crate::error;
 use super::value::*;
 
-fn read_identifier<'a>(reader: &'a mut BinaryReader) -> Result<Identifier, Box<dyn Error>> {
+fn read_identifier(reader: &mut BinaryReader) -> Result<Identifier, Box<dyn Error>> {
     let first = reader.read_u8()?;
     let bit8 = (first & 0x80) == 0x80;
     let bit7 = (first & 0x40) == 0x40;
@@ -77,36 +68,36 @@ fn read_identifier<'a>(reader: &'a mut BinaryReader) -> Result<Identifier, Box<d
     })
 }
 
-fn read_length<'a>(reader: &'a mut BinaryReader) -> Result<u32, Box<dyn Error>> {
+fn read_length(reader: &mut BinaryReader) -> Result<u32, Box<dyn Error>> {
     let first = reader.read_u8()?;
     if first & 0x80 == 0 {
         // short form
-        return Ok((first & 0x7f) as u32);
+        Ok((first & 0x7f) as u32)
     }
     else {
         // long form
         let noctets = first & 0x7f;
         if noctets == 0x7f {
-            return Err(error!("noctets is 127"));
+            Err(error!("noctets is 127"))
         }
         else if noctets == 0 {
-            return Err(error!("Unsupported: Indefinite form"));
+            Err(error!("Unsupported: Indefinite form"))
         }
         else if noctets > 4 {
-            return Err(error!("noctets cannot fit in u32"));
+            Err(error!("noctets cannot fit in u32"))
         }
         else {
             let mut length: u32 = 0;
-            for i in 0..noctets {
+            for _ in 0..noctets {
                 let byte = reader.read_u8()?;
                 length = (length << 8) | (byte as u32);
             }
-            return Ok(length)
+            Ok(length)
         }
     }
 }
 
-fn read_item_list<'a>(reader: &mut BinaryReader) -> Result<Vec<Item>, Box<dyn Error>> {
+fn read_item_list(reader: &mut BinaryReader) -> Result<Vec<Item>, Box<dyn Error>> {
     let mut items: Vec<Item> = Vec::new();
     while reader.remaining() > 0 {
         // let old_offset = inner.offset;
@@ -133,7 +124,7 @@ fn read_var_u64(reader: &mut BinaryReader) -> Result<u64, Box<dyn Error>> {
     Ok(value)
 }
 
-fn read_object_identifier<'a>(reader: &mut BinaryReader) -> Result<ObjectIdentifier, Box<dyn Error>> {
+fn read_object_identifier(reader: &mut BinaryReader) -> Result<ObjectIdentifier, Box<dyn Error>> {
     let mut parts: Vec<u64> = Vec::new();
     while reader.remaining() > 0 {
         // let old_offset = inner.offset;
@@ -153,7 +144,7 @@ fn read_object_identifier<'a>(reader: &mut BinaryReader) -> Result<ObjectIdentif
         // second object identifier component.
 
 
-        if parts.len() == 0 {
+        if parts.is_empty() {
             parts.push(part / 40);
             parts.push(part % 40);
         }
@@ -168,7 +159,7 @@ fn read_object_identifier<'a>(reader: &mut BinaryReader) -> Result<ObjectIdentif
     Ok(ObjectIdentifier(parts))
 }
 
-pub fn read_item<'a>(reader: &mut BinaryReader) -> Result<Item, Box<dyn Error>> {
+pub fn read_item(reader: &mut BinaryReader) -> Result<Item, Box<dyn Error>> {
     let start = reader.abs_offset();
     let value = read_value(reader)?;
     let end = reader.abs_offset();
@@ -178,7 +169,7 @@ pub fn read_item<'a>(reader: &mut BinaryReader) -> Result<Item, Box<dyn Error>> 
     })
 }
 
-fn read_value<'a>(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>> {
+fn read_value(reader: &mut BinaryReader) -> Result<Value, Box<dyn Error>> {
     let identifier = read_identifier(reader)?;
     let length = read_length(reader)?;
     let mut contents = reader.read_nested(length as usize)?;

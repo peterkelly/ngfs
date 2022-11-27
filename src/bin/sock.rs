@@ -6,7 +6,6 @@
 #![allow(unused_macros)]
 
 use clap::{Clap, ArgEnum};
-use clap;
 
 use std::error::Error;
 use std::fmt;

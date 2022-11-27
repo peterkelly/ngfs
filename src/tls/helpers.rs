@@ -86,11 +86,11 @@ impl TrafficSecrets {
         let thash = ciphers.hash_alg.hash(transcript);
         Ok(TrafficSecrets {
             client: EncryptionKey::new(
-                derive_secret(ciphers.hash_alg, &prk, client_label.as_bytes(), &thash)?,
+                derive_secret(ciphers.hash_alg, prk, client_label.as_bytes(), &thash)?,
                 ciphers.hash_alg,
                 ciphers.aead_alg)?,
             server: EncryptionKey::new(
-                derive_secret(ciphers.hash_alg, &prk, server_label.as_bytes(), &thash)?,
+                derive_secret(ciphers.hash_alg, prk, server_label.as_bytes(), &thash)?,
                 ciphers.hash_alg,
                 ciphers.aead_alg)?,
         })
@@ -124,7 +124,7 @@ fn hkdf_expand_label(
 pub fn derive_secret(alg: HashAlgorithm, secret: &[u8], label: &[u8], thash: &[u8]) -> Result<Vec<u8>, CryptError> {
     let len = alg.byte_len();
     let mut result: Vec<u8> = vec_with_len(len);
-    hkdf_expand_label(alg, &secret, label, &thash, &mut result)?;
+    hkdf_expand_label(alg, secret, label, thash, &mut result)?;
     Ok(result)
 }
 
@@ -149,7 +149,7 @@ fn get_server_hello_x25519_key_share(server_hello: &ServerHello) -> Option<Vec<u
             }
         }
     }
-    return None;
+    None
 }
 
 pub fn get_server_hello_x25519_shared_secret(
@@ -176,7 +176,7 @@ pub fn get_server_hello_x25519_shared_secret(
         }
     };
 
-    return Some(key_material1);
+    Some(key_material1)
 }
 
 fn empty_transcript_hash(alg: HashAlgorithm) -> Vec<u8> {
@@ -186,11 +186,11 @@ fn empty_transcript_hash(alg: HashAlgorithm) -> Vec<u8> {
 pub fn get_zero_prk(alg: HashAlgorithm) -> Vec<u8> {
     let input_zero: &[u8] = &vec_with_len(alg.byte_len());
     let input_psk: &[u8] = &vec_with_len(alg.byte_len());
-    alg.hkdf_extract(&input_zero, input_psk)
+    alg.hkdf_extract(input_zero, input_psk)
 }
 
 pub fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Result<Vec<u8>, CryptError> {
-    let salt_bytes: Vec<u8> = derive_secret(alg, &prbytes, b"derived", &empty_transcript_hash(alg))?;
+    let salt_bytes: Vec<u8> = derive_secret(alg, prbytes, b"derived", &empty_transcript_hash(alg))?;
     Ok(alg.hkdf_extract(&salt_bytes, secret))
 }
 
@@ -237,7 +237,7 @@ fn decrypt_traffic(
         nonce_bytes[i] ^= traffic_secret.write_iv[i];
     }
 
-    let (tls_ciphertext, bytes_consumed) = match TLSCiphertext::from_raw_data(&plaintext_raw) {
+    let (tls_ciphertext, bytes_consumed) = match TLSCiphertext::from_raw_data(plaintext_raw) {
         Ok(v) => v,
         Err(_) => return Err(TLSError::DecryptionFailed),
     };
@@ -319,7 +319,7 @@ pub fn verify_finished(
     // println!("finish: finished.data  = {:?}", BinaryData(&finished.verify_data));
     // println!();
 
-    if hash_alg.hmac_verify(&finished_key, &transcript_hash, &finished.verify_data)? {
+    if hash_alg.hmac_verify(&finished_key, transcript_hash, &finished.verify_data)? {
         Ok(())
     }
     else {
@@ -339,9 +339,9 @@ pub fn rsa_sign(
         SignatureScheme::RsaPssRsaeSha512 => &ring::signature::RSA_PSS_SHA512,
         _ => return Err(TLSError::UnsupportedSignatureScheme),
     };
-    let key_pair = RsaKeyPair::from_der(&key_data).map_err(|e| TLSError::RsaKeyRejected(e))?;
+    let key_pair = RsaKeyPair::from_der(key_data).map_err(TLSError::RsaKeyRejected)?;
     let mut signature = vec![0; key_pair.public_modulus_len()];
-    key_pair.sign(encoding, rng, &input, &mut signature).map_err(|_| TLSError::SignatureFailed)?;
+    key_pair.sign(encoding, rng, input, &mut signature).map_err(|_| TLSError::SignatureFailed)?;
     Ok(signature)
 }
 
@@ -360,5 +360,5 @@ pub fn rsa_verify(
     };
 
     let ring_public_key = ring::signature::UnparsedPublicKey::new(parameters, key);
-    ring_public_key.verify(&input, signature).map_err(|_| TLSError::SignatureVerificationFailed)
+    ring_public_key.verify(input, signature).map_err(|_| TLSError::SignatureVerificationFailed)
 }

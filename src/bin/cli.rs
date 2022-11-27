@@ -1,24 +1,19 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
-use tokio;
-use std::env;
 use std::error::Error;
-use std::future::Future;
 use torrent::error;
 use torrent::ipfs::types::multibase::decode;
 use torrent::util::util::{BinaryData};
 use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
 use torrent::formats::protobuf::varint;
 use torrent::ipfs::types::cid::CID;
-use torrent::libp2p::secio::{p2p_test, PrivateKey, print_fields};
-use rand::prelude::Rng;
+use torrent::libp2p::secio::{p2p_test, PrivateKey};
 use rand::distributions::{Distribution, Uniform};
-use openssl;
 
 fn get_argument<'a>(args: &'a [String], index: usize, name: &str) -> Result<&'a String, Box<dyn Error>> {
     match args.get(index) {
@@ -34,8 +29,8 @@ fn get_argument<'a>(args: &'a [String], index: usize, name: &str) -> Result<&'a 
 
 async fn cid_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let cid_str = get_argument(args, 0, "cid")?;
-    let cid_bytes = decode(cid_str)?;
-    let cid = CID::from_string(&cid_str)?;
+    let _cid_bytes = decode(cid_str)?;
+    let cid = CID::from_string(cid_str)?;
     println!("{:#?}", cid);
 
     Ok(())
@@ -43,7 +38,7 @@ async fn cid_command(args: &[String]) -> Result<(), Box<dyn Error>> {
 
 async fn p2p_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let server_addr = get_argument(args, 0, "server_addr")?;
-    match p2p_test(&server_addr).await {
+    match p2p_test(server_addr).await {
         Ok(_) => {},
         Err(e) => {
             eprintln!("p2p_test failed: {}", e);
@@ -53,9 +48,9 @@ async fn p2p_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn varint_command(args: &[String]) -> Result<(), Box<dyn Error>> {
+async fn varint_command(_args: &[String]) -> Result<(), Box<dyn Error>> {
     let range = Uniform::new_inclusive(0, u64::max_value());
-    let mut rng = rand::thread_rng();
+    let rng = rand::thread_rng();
     let mut generator = range.sample_iter(rng);
     for i in 0..1000000 {
         let raw: u64 = generator.next().unwrap();
@@ -97,7 +92,7 @@ async fn getkey_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn write_pbuf_command(args: &[String]) -> Result<(), Box<dyn Error>> {
+async fn write_pbuf_command(_args: &[String]) -> Result<(), Box<dyn Error>> {
     let mut writer = PBufWriter::new();
     writer.write_int64(3, -1234567890123456789);
     // writer.write_string(3, "Hello World");

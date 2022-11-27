@@ -1,13 +1,6 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::fmt;
 use std::error::Error;
-use super::dagpb::{PBLink, PBNode};
+use super::dagpb::PBNode;
 use super::unixfs::{Data, DataType};
 use crate::ipfs::types::cid::CID;
 use std::collections::HashSet;
@@ -104,22 +97,21 @@ impl Node {
 }
 
 impl Raw {
-    pub fn from_dagpb(dagpb_node: PBNode, unixfs_data: Data) -> Result<Raw, DecodeError> {
+    pub fn from_dagpb(_dagpb_node: PBNode, _unixfs_data: Data) -> Result<Raw, DecodeError> {
         Err(DecodeError::Unimplemented(String::from("Raw")))
     }
 }
 
 impl Directory {
-    pub fn from_dagpb(dagpb_node: PBNode, unixfs_data: Data) -> Result<Directory, DecodeError> {
+    pub fn from_dagpb(dagpb_node: PBNode, _unixfs_data: Data) -> Result<Directory, DecodeError> {
         let mut entries: Vec<DirectoryEntry> = Vec::new();
         let mut names: HashSet<String> = HashSet::new();
 
-        let mut index = 0;
-        for link in dagpb_node.links {
+        for (index, link) in dagpb_node.links.into_iter().enumerate() {
             let name = match &link.name {
                 None => return Err(DecodeError::EntryMissingFilename(index)),
                 Some(name) => {
-                    if name == "" {
+                    if name.is_empty() {
                         return Err(DecodeError::EntryMissingFilename(index));
                     }
                     else if names.contains(name) {
@@ -140,7 +132,6 @@ impl Directory {
                 name: name.clone(),
                 tsize: size as usize,
             });
-            index += 1;
         }
 
         Ok(Directory { entries })
@@ -148,25 +139,25 @@ impl Directory {
 }
 
 impl File {
-    pub fn from_dagpb(dagpb_node: PBNode, unixfs_data: Data) -> Result<File, DecodeError> {
+    pub fn from_dagpb(_dagpb_node: PBNode, _unixfs_data: Data) -> Result<File, DecodeError> {
         Err(DecodeError::Unimplemented(String::from("File")))
     }
 }
 
 impl Metadata {
-    pub fn from_dagpb(dagpb_node: PBNode, unixfs_data: Data) -> Result<Metadata, DecodeError> {
+    pub fn from_dagpb(_dagpb_node: PBNode, _unixfs_data: Data) -> Result<Metadata, DecodeError> {
         Err(DecodeError::Unimplemented(String::from("Metadata")))
     }
 }
 
 impl Symlink {
-    pub fn from_dagpb(dagpb_node: PBNode, unixfs_data: Data) -> Result<Symlink, DecodeError> {
+    pub fn from_dagpb(_dagpb_node: PBNode, _unixfs_data: Data) -> Result<Symlink, DecodeError> {
         Err(DecodeError::Unimplemented(String::from("Symlink")))
     }
 }
 
 impl HAMTShard {
-    pub fn from_dagpb(dagpb_node: PBNode, unixfs_data: Data) -> Result<HAMTShard, DecodeError> {
+    pub fn from_dagpb(_dagpb_node: PBNode, _unixfs_data: Data) -> Result<HAMTShard, DecodeError> {
         Err(DecodeError::Unimplemented(String::from("HAMTShard")))
     }
 }

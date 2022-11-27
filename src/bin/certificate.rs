@@ -1,12 +1,12 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
-use openssl::x509::{X509Builder, X509, X509NameRef, X509NameEntryRef, X509NameBuilder, X509Extension};
-use openssl::asn1::{Asn1Time, Asn1TimeRef};
+use openssl::x509::{X509Builder, X509, X509NameEntryRef, X509NameBuilder, X509Extension};
+use openssl::asn1::Asn1Time;
 use openssl::rsa::Rsa;
 use openssl::pkey::PKey;
 use openssl::hash::MessageDigest;
@@ -17,7 +17,7 @@ use openssl::hash::MessageDigest;
 use ring::rand;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use torrent::error;
-use torrent::util::util::{BinaryData, from_hex, DebugHexDump};
+use torrent::util::util::{BinaryData, from_hex};
 
 use std::error::Error;
 
@@ -180,12 +180,12 @@ fn generate_certificate() -> Result<(), Box<dyn Error>> {
 
     let libp2p_oid = "1.3.6.1.4.1.53594.1.1";
     let libp2p_value = "the value";
-    let ext = X509Extension::new(None, None, &libp2p_oid, &libp2p_value)?;
+    let ext = X509Extension::new(None, None, libp2p_oid, libp2p_value)?;
 
 
     let mut builder = X509Builder::new()?;
-    builder.set_not_before(&Asn1Time::days_from_now(0)?.as_ref())?;
-    builder.set_not_after(&Asn1Time::days_from_now(365)?.as_ref())?;
+    builder.set_not_before(Asn1Time::days_from_now(0)?.as_ref())?;
+    builder.set_not_after(Asn1Time::days_from_now(365)?.as_ref())?;
     builder.set_pubkey(&pkey)?;
     builder.set_subject_name(&subject_name_builder.build())?;
     builder.set_issuer_name(&issuer_name_builder.build())?;
@@ -203,10 +203,10 @@ fn generate_certificate() -> Result<(), Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let command = std::env::args().nth(1).ok_or_else(|| "No command specified")?;
+    let command = std::env::args().nth(1).ok_or("No command specified")?;
     match command.as_str() {
         "show" => {
-            let filename = std::env::args().nth(2).ok_or_else(|| "No filename specified")?;
+            let filename = std::env::args().nth(2).ok_or("No filename specified")?;
             show_certificate(&filename)?;
         }
         "generate" => {

@@ -1,10 +1,3 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_mut)]
-// #![allow(unused_assignments)]
-// #![allow(unused_imports)]
-// #![allow(unused_macros)]
-
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -127,7 +120,7 @@ impl Value {
 
 impl Value {
     pub fn as_string(&self) -> Result<String, Box<dyn Error>> {
-        return Ok(self.as_byte_string()?.as_string()?)
+        Ok(self.as_byte_string()?.as_string()?)
     }
 
     pub fn as_byte_string(&self) -> Result<&ByteString, ValueError> {
@@ -271,7 +264,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_usize(&mut self, path: &String) -> Result<usize, ParseError> {
+    fn parse_usize(&mut self, path: &str) -> Result<usize, ParseError> {
         let start = self.offset;
         loop {
             match self.peek() {
@@ -286,15 +279,15 @@ impl<'a> Parser<'a> {
         }
 
         let s = String::from_utf8(Vec::from(&self.data[start..end]))
-            .or_else(|e| Err(ParseError::new(start, path, &format!("{}", e))))?;
+            .map_err(|e| ParseError::new(start, path, &format!("{}", e)))?;
 
         let value = s.parse::<usize>()
-            .or_else(|e| Err(ParseError::new(start, path, &format!("{}", e))))?;
+            .map_err(|e| ParseError::new(start, path, &format!("{}", e)))?;
 
         Ok(value)
     }
 
-    fn expect_byte(&mut self, path: &String, byte: u8) -> Result<(), ParseError> {
+    fn expect_byte(&mut self, path: &str, byte: u8) -> Result<(), ParseError> {
         match self.peek() {
             None => {
                 Err(self.error(path, &format!("Expected {}, got end of file", byte_repr(byte))))
@@ -309,7 +302,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_byte_string(&mut self, path: &String) -> Result<Vec<u8>, ParseError> {
+    fn parse_byte_string(&mut self, path: &str) -> Result<Vec<u8>, ParseError> {
         let size = self.parse_usize(path)?;
         self.expect_byte(path, b':')?;
 
@@ -346,11 +339,11 @@ impl<'a> Parser<'a> {
         Ok(elements)
     }
 
-    fn parse_utf8_string(&mut self, path: &String) -> Result<String, ParseError> {
+    fn parse_utf8_string(&mut self, path: &str) -> Result<String, ParseError> {
         let start = self.offset;
         let data = self.parse_byte_string(path)?;
         String::from_utf8(data)
-            .or_else(|e| Err(ParseError::new(start, path, &format!("{}", e))))
+            .map_err(|e| ParseError::new(start, path, &format!("{}", e)))
     }
 
     fn parse_dict(&mut self, path: &String) -> Result<BTreeMap<String, Value>, ParseError> {
@@ -373,7 +366,7 @@ impl<'a> Parser<'a> {
         Ok(elements)
     }
 
-    fn parse_integer(&mut self, path: &String) -> Result<usize, ParseError> {
+    fn parse_integer(&mut self, path: &str) -> Result<usize, ParseError> {
         self.expect_byte(path, b'i')?;
         let value = self.parse_usize(path)?;
         self.expect_byte(path, b'e')?;
@@ -410,7 +403,7 @@ impl<'a> Parser<'a> {
 }
 
 fn byte_repr(value: u8) -> String {
-    if value >= 0x20 && value <= 0x7e {
+    if (0x20..=0x7e).contains(&value) {
         format!("'{}'", String::from_utf8_lossy(&[value]))
     }
     else {

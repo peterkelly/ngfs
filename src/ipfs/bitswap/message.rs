@@ -1,10 +1,3 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::fmt;
 use std::error::Error;
 use crate::error;
@@ -53,7 +46,7 @@ impl Entry {
         let mut want_type: WantType = WantType::Block;
         let mut send_dont_have: bool = false;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             println!("        Entry: field {} wire_type {}", field.field_number, field.wire_type);
 
@@ -127,13 +120,13 @@ impl WantList {
         let mut full: bool = false;
 
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             println!("    WantList: field {} wire_type {}", field.field_number, field.wire_type);
 
             match field.field_number {
                 1 => {
-                    entries.push(Entry::from_pb(&field.data.to_bytes()?)?);
+                    entries.push(Entry::from_pb(field.data.to_bytes()?)?);
                 },
                 2 => {
                     full = field.data.to_bool()?;
@@ -167,7 +160,7 @@ impl Block {
         let mut prefix: Option<Vec<u8>> = None;
         let mut data: Option<Vec<u8>> = None;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             println!("    Block: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
@@ -215,7 +208,7 @@ pub struct BlockPresence {
 }
 
 impl BlockPresence {
-    pub fn from_pb(raw_data: &[u8]) -> Result<BlockPresence, Box<dyn Error>> {
+    pub fn from_pb(_raw_data: &[u8]) -> Result<BlockPresence, Box<dyn Error>> {
         unimplemented!()
     }
 }
@@ -244,19 +237,19 @@ impl Message {
     pub fn from_pb(raw_data: &[u8]) -> Result<Message, Box<dyn Error>> {
         let mut wantlist: Option<WantList> = None;
         let mut blocks: Vec<Block> = Vec::new();
-        let mut payload: Vec<Block> = Vec::new();
-        let mut block_presence: Vec<BlockPresence> = Vec::new();
-        let mut pending_bytes: Option<u32> = None;
+        let payload: Vec<Block> = Vec::new();
+        let block_presence: Vec<BlockPresence> = Vec::new();
+        let pending_bytes: Option<u32> = None;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             println!("Message: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
                 1 => match &wantlist {
                     Some(_) => return Err(error!("duplicate wantlist")),
-                    None => wantlist = Some(WantList::from_pb(&field.data.to_bytes()?)?),
+                    None => wantlist = Some(WantList::from_pb(field.data.to_bytes()?)?),
                 },
-                3 => blocks.push(Block::from_pb(&field.data.to_bytes()?)?),
+                3 => blocks.push(Block::from_pb(field.data.to_bytes()?)?),
                 _ => (),
             }
         }

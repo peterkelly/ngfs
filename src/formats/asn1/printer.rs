@@ -1,16 +1,5 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
-use std::fmt;
-use std::error::Error;
 use std::collections::HashMap;
-use crate::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
-use crate::util::binary::BinaryReader;
-use crate::StringError;
+use crate::util::util::escape_string;
 use super::value::{Value, Item, ObjectIdentifier};
 
 pub struct ObjectDescriptor {
@@ -46,14 +35,14 @@ impl ObjectRegistry {
 
     pub fn lookup_long_name(&self, oid: &[u64]) -> Option<&str> {
         match self.long_names.get(oid) {
-            Some(s) => Some(&s),
+            Some(s) => Some(s),
             None => None,
         }
     }
 
     pub fn lookup_short_name(&self, oid: &[u64]) -> Option<&str> {
         match self.short_names.get(oid) {
-            Some(s) => Some(&s),
+            Some(s) => Some(s),
             None => None,
         }
     }
@@ -75,6 +64,12 @@ impl ObjectRegistry {
     pub fn lookup_descriptor(&self, oid: &[u64]) -> Option<&&'static ObjectDescriptor> {
     // pub fn lookup_descriptor(&self, oid: &[u64]) {
         self.descriptors.get(oid)
+    }
+}
+
+impl Default for ObjectRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -206,5 +201,11 @@ impl Printer<'_> {
 
     pub fn print(&self, item: &Item) {
         self.print_item(item, "", "");
+    }
+}
+
+impl Default for Printer<'_> {
+    fn default() -> Self {
+        Self::new()
     }
 }

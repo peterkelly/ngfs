@@ -1,9 +1,9 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 // https://github.com/libp2p/specs/blob/master/connections/README.md#connection-upgrade
 
@@ -12,24 +12,17 @@ const ID_PROTOCOL_STR: &str = "/ipfs/id/1.0.0";
 const BITSWAP_PROTOCOL_STR: &str = "/ipfs/bitswap/1.2.0";
 const BITSWAP_PROTOCOL: &[u8] = b"/ipfs/bitswap/1.2.0\n";
 
-use std::fmt;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use std::pin::Pin;
-use clap::{Clap, ArgSettings};
-use bytes::{Bytes, BytesMut, Buf, BufMut};
+use clap::Clap;
 use tokio::net::{TcpStream};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
-use torrent::formats::protobuf::protobuf::PBufReader;
-use torrent::libp2p::secio::{PublicKey, KeyType};
-use torrent::util::util::{escape_string, vec_with_len, from_hex, Indent, DebugHexDump, BinaryData};
-use torrent::libp2p::multiaddr::{MultiAddr, Addr};
-use torrent::libp2p::identify::{Identify, SignedPeerRecord};
+use tokio::io::AsyncWriteExt;
+use torrent::util::util::escape_string;
 use torrent::libp2p::tls::generate_certificate;
 use torrent::libp2p::io::{
     read_opt_length_prefixed_data,
-    read_length_prefixed_data,
     write_length_prefixed_data,
 };
 use torrent::libp2p::multistream::{
@@ -84,7 +77,7 @@ async fn connection_handler2(
 ) -> Result<(), Box<dyn Error>> {
     multistream_handshake(&mut stream).await?;
 
-    let mut count = 0;
+    // let mut count = 0;
     loop {
         let data = match read_opt_length_prefixed_data(&mut stream).await? {
             Some(data) => data,
@@ -95,7 +88,7 @@ async fn connection_handler2(
         };
         // if count == 0 {
             println!("{}: peer requested service: {}",
-                accept_count, escape_string(&String::from_utf8_lossy(&data).to_string()));
+                accept_count, escape_string(&String::from_utf8_lossy(&data)));
         // }
         // count += 1;
         match services.lookup(&data) {
@@ -224,10 +217,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Negotiated /mplex/6.7.0");
 
-    let mut mplex = Mplex::new(Box::pin(conn));
+    let mplex = Mplex::new(Box::pin(conn));
     // mplex.set_logging_enabled(true);
 
-    let (mut acceptor, mut connector) = mplex.split();
+    let (acceptor, mut connector) = mplex.split();
     tokio::spawn(accept_loop(node.clone(), registry.clone(), acceptor));
 
     // println!("-------- Before sleep");

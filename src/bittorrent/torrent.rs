@@ -1,10 +1,3 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_mut)]
-// #![allow(unused_assignments)]
-// #![allow(unused_imports)]
-// #![allow(unused_macros)]
-
 use std::fmt;
 use std::error::Error;
 use sha1::{Sha1, Digest};
@@ -70,7 +63,7 @@ impl Torrent {
             groups.push(TrackerGroup { members });
         }
 
-        return Ok(groups);
+        Ok(groups)
     }
 
     fn parse_files(be_files_value: &Value) -> Result<Vec<TorrentFile>, Box<dyn Error>> {
@@ -85,14 +78,14 @@ impl Torrent {
             let mut spath = String::new();
             for be_component_value in be_components_list.items.iter() {
                 let component = be_component_value.as_string()?;
-                if spath.len() > 0 {
-                    spath.push_str("/");
+                if !spath.is_empty() {
+                    spath.push('/');
                 }
                 spath.push_str(&component);
             }
             files.push(TorrentFile { length, path: spath });
         }
-        return Ok(files);
+        Ok(files)
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Torrent, Box<dyn Error>> {

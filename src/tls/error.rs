@@ -36,15 +36,14 @@ pub enum TLSError {
     IOError(std::io::ErrorKind),
 }
 
-impl Into<std::io::Error> for TLSError {
-    fn into(self) -> std::io::Error {
-        match self {
+impl From<TLSError> for std::io::Error {
+    fn from(e: TLSError) -> std::io::Error {
+        match e {
             TLSError::IOError(kind) => std::io::Error::from(kind),
             TLSError::UnexpectedEOF => std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
-            _ => std::io::Error::new(std::io::ErrorKind::Other, self),
+            _ => std::io::Error::new(std::io::ErrorKind::Other, e),
         }
     }
-
 }
 
 impl fmt::Display for TLSError {

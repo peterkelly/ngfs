@@ -4,6 +4,7 @@
 #![allow(unused_assignments)]
 #![allow(unused_imports)]
 #![allow(unused_macros)]
+#![allow(clippy::single_match)]
 
 use std::error::Error;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
@@ -153,7 +154,7 @@ enum WriterMessage {
     Close,
 }
 
-async fn connection_reader<'a>(state: Arc<State>, conn: Arc<Connection>, mut reader: ReadHalf<'a>) {
+async fn connection_reader(state: Arc<State>, conn: Arc<Connection>, mut reader: ReadHalf<'_>) {
     let mut buf: [u8; 1024] = [0; 1024];
     loop {
         match reader.read(&mut buf).await {
@@ -177,8 +178,12 @@ async fn connection_reader<'a>(state: Arc<State>, conn: Arc<Connection>, mut rea
     println!("connection_reader {} finished", conn.connection_id);
 }
 
-async fn connection_writer<'a>(state: Arc<State>, conn: Arc<Connection>, mut writer: WriteHalf<'a>,
-                mut rx: UnboundedReceiver<WriterMessage>) {
+async fn connection_writer(
+    state: Arc<State>,
+    conn: Arc<Connection>,
+    mut writer: WriteHalf<'_>,
+    mut rx: UnboundedReceiver<WriterMessage>,
+) {
     while let Some(msg) = rx.recv().await {
         match msg {
             WriterMessage::Write(data) => {

@@ -112,7 +112,7 @@ impl<M> Channel<M> where M : ChannelMessage + Clone {
             }
         }
 
-        return result;
+        result
     }
 
     pub fn recv(&mut self) -> Option<M> {
@@ -139,13 +139,12 @@ impl<M> Channel<M> where M : ChannelMessage + Clone {
 
         match best_index {
             None => {
-                return None;
+                None
             }
             Some(i) => {
                 let mit = self.messages.remove(i);
                 self.sim.trace_channel_recv(&self.name, mit.message_no, &mit.message.description());
-                return Some(mit.message);
-
+                Some(mit.message)
             }
         }
     }
@@ -172,8 +171,8 @@ impl<M> Endpoint<M> where M : ChannelMessage + Clone {
         };
 
         let sf = Endpoint {
-            send_channel: snd.clone(),
-            recv_channel: fst.clone(),
+            send_channel: snd,
+            recv_channel: fst,
         };
 
         (fs, sf)

@@ -1,9 +1,9 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 use std::error::Error;
 use torrent::formats::bencoding;
@@ -64,11 +64,11 @@ struct Command {
 
 impl Command {
     fn new(name: &str, f: CommandFun) -> Command {
-        Command { name: String::from(name), f: f }
+        Command { name: String::from(name), f }
     }
 }
 
-fn filename_arg(args: &[String], index: usize) -> Result<&String, Box<dyn Error>> {
+fn filename_arg(args: &[String], _index: usize) -> Result<&String, Box<dyn Error>> {
     Ok(args.get(0).ok_or_else(|| error!("No filename specified"))?)
 }
 
@@ -82,11 +82,11 @@ fn trackers(args: &[String]) -> Result<(), Box<dyn Error>> {
     let data = read_file_from_arg(args, 0)?;
     let torrent = Torrent::from_bytes(&data)?;
     for (group_index, group) in torrent.tracker_groups.iter().enumerate() {
-        for (tracker_index, tracker) in group.members.iter().enumerate() {
+        for tracker in group.members.iter() {
             println!("{}", tracker.url);
         }
         if group_index + 1 < torrent.tracker_groups.len() {
-            println!("");
+            println!();
         }
     }
     Ok(())
@@ -145,17 +145,17 @@ fn full(args: &[String]) -> Result<(), Box<dyn Error>> {
 }
 
 fn build_commands() -> Vec<Command> {
-    let mut commands = Vec::<Command>::new();
-    commands.push(Command::new("trackers", &trackers));
-    commands.push(Command::new("files", &files));
-    commands.push(Command::new("info", &info));
-    commands.push(Command::new("hash", &hash));
-    commands.push(Command::new("raw", &raw));
-    commands.push(Command::new("full", &full));
-    return commands;
+    vec![
+        Command::new("trackers", &trackers),
+        Command::new("files", &files),
+        Command::new("info", &info),
+        Command::new("hash", &hash),
+        Command::new("raw", &raw),
+        Command::new("full", &full),
+    ]
 }
 
-fn print_usage(commands: &Vec<Command>) {
+fn print_usage(commands: &[Command]) {
     // println!("Usage: view [OPTIONS] COMMAND [ARGS]...");
     // println!("");
     // println!("Options:");
@@ -183,7 +183,7 @@ fn main() {
 
     match command_opt {
         Some(command) => {
-            match (&command.f)(&args[2..]) {
+            match (command.f)(&args[2..]) {
                 Ok(_) => {},
                 Err(e) => {
                     eprintln!("{}", e);

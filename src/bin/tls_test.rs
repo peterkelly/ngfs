@@ -1,46 +1,15 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 use std::error::Error;
-use std::net::SocketAddr;
-use std::fmt;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use ring::agreement::{PublicKey, EphemeralPrivateKey, UnparsedPublicKey, X25519};
+use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::rand::SystemRandom;
-use torrent::StringError;
-use torrent::util::util::{from_hex, escape_string, vec_with_len, BinaryData, DebugHexDump, Indent};
-use torrent::util::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
+use torrent::util::util::{from_hex, BinaryData, DebugHexDump, Indent};
 use torrent::crypto::crypt::HashAlgorithm;
-// use torrent::tls::types::alert::*;
-use torrent::tls::types::handshake::{
-    CipherSuite,
-    Handshake,
-    ClientHello,
-    ServerHello,
-    Finished,
-};
-use torrent::tls::types::extension::{
-    ECPointFormat,
-    NamedCurve,
-    Extension,
-    SignatureScheme,
-    PskKeyExchangeMode,
-    NamedGroup,
-    ServerName,
-    ProtocolName,
-    KeyShareEntry,
-};
-use torrent::tls::types::record::{
-    ContentType,
-    Message,
-    TLSPlaintextError,
-    TLSCiphertext,
-};
 
 fn test_hexdump() -> Result<(), Box<dyn Error>> {
     let len_str: String = match std::env::args().nth(2) {
@@ -64,7 +33,7 @@ fn test_aes() -> Result<(), Box<dyn Error>> {
     let key_bytes: Vec<u8> = from_hex("573f321bc48531ac0340c91e4eb90ceb8da128255da285def0529f01a547034f").unwrap();
     assert!(key_bytes.len() == 32);
 
-    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305};
+    use ring::aead::{LessSafeKey, UnboundKey, Nonce, Aad, AES_256_GCM};
 
     // println!("AES_128_GCM       key_len = {}, tag_len = {}, nonce_len = {}",
     //          AES_128_GCM.key_len(), AES_128_GCM.tag_len(), AES_128_GCM.nonce_len());
@@ -83,14 +52,14 @@ fn test_aes() -> Result<(), Box<dyn Error>> {
     let nonce_bytes: [u8; 12] = [1; 12];
     let enc_nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let input_plaintext: &[u8] = b"The quick brown fox jumps over the lazy dog";
-    let input_plaintext_len = input_plaintext.len();
+    // let input_plaintext_len = input_plaintext.len();
     println!("input_plaintext ({} bytes) =\n{:#?}",
              input_plaintext.len(),
-             Indent(&DebugHexDump(&input_plaintext)));
+             Indent(&DebugHexDump(input_plaintext)));
 
     let enc_aad = Aad::from(b"hello");
     let mut work: Vec<u8> = Vec::new();
-    work.extend_from_slice(&input_plaintext);
+    work.extend_from_slice(input_plaintext);
     key.seal_in_place_append_tag(enc_nonce, enc_aad, &mut work)?;
     println!("ciphertext ({} bytes) =\n{:#?}",
              work.len(),

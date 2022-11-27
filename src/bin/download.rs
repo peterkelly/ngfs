@@ -1,25 +1,19 @@
-#![allow(unused_variables)]
+// #![allow(unused_variables)]
 #![allow(dead_code)]
-#![allow(unused_mut)]
+// #![allow(unused_mut)]
 #![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
+#![allow(clippy::redundant_field_names)]
 
 use futures::future::{join};
-use rand::prelude::Rng;
 use std::collections::BTreeSet;
-use std::convert::Into;
-use std::convert::TryInto;
-// use std::error::Error;
-// use std::io::Error;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::result::Result;
 use std::sync::Arc;
-use std::task::{Poll, Context};
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
-use tokio::net::{UdpSocket, lookup_host};
+use tokio::net::lookup_host;
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::mpsc;
@@ -96,7 +90,7 @@ impl PeerConnection {
                 self.choked = false;
             }
             Message::BitField(b) => {
-                println!("BitField: {}", BinaryData(&b));
+                println!("BitField: {}", BinaryData(b));
                 // let expected_bitfield_len = (self.torrent.pieces.len() + 8 - 1) / 8;
                 let expected_bitfield_len = bitfield_bytes_required(self.torrent.pieces.len());
                 if b.len() != expected_bitfield_len {
@@ -144,7 +138,7 @@ impl PeerConnection {
         print!(" them {}/{} us {}/{}",
             self.they_have.len(), self.torrent.pieces.len(),
             self.we_have.len(), self.torrent.pieces.len());
-        println!("");
+        println!();
     }
 
     // pub fn on_sent(&mut self, len: usize) {
@@ -170,7 +164,7 @@ async fn send_handshake(stream: &mut WriteHalf<'_>, msg: &HandshakeMessage) -> R
     request.extend_from_slice(&msg.info_hash);
     request.extend_from_slice(&msg.peer_id);
     println!("request.len() = {}", request.len());
-    stream.write(&request).await?;
+    stream.write_all(&request).await?;
     Ok(())
 }
 
@@ -244,36 +238,36 @@ async fn read_message<'a>(reader: &mut ReadHalf<'a>) -> Result<Message, Box<dyn 
     println!("read_message: body.len() = {}", body.len());
 
 
-    if body.len() == 0 {
-        return Ok(Message::KeepAlive);
+    if body.is_empty() {
+        Ok(Message::KeepAlive)
     }
     else {
         let id = body.remove(0);
         // println!("read_message: id = {}", id);
         match id {
             0 => { // choke
-                if body.len() != 0 {
+                if !body.is_empty() {
                     return Err(error!("Choke body: {} bytes, expected 0", body.len()));
                 }
-                return Ok(Message::Choke);
+                Ok(Message::Choke)
             }
             1 => { // unchoke
-                if body.len() != 0 {
+                if !body.is_empty() {
                     return Err(error!("Unchoke body: {} bytes, expected 0", body.len()));
                 }
-                return Ok(Message::Unchoke);
+                Ok(Message::Unchoke)
             }
             2 => { // interested
-                if body.len() != 0 {
+                if !body.is_empty() {
                     return Err(error!("Interested body: {} bytes, expected 0", body.len()));
                 }
-                return Ok(Message::Interested);
+                Ok(Message::Interested)
             }
             3 => { // not interested
-                if body.len() != 0 {
+                if !body.is_empty() {
                     return Err(error!("NotInterested body: {} bytes, expected 0", body.len()));
                 }
-                return Ok(Message::NotInterested);
+                Ok(Message::NotInterested)
             }
             4 => { // have
                 if body.len() != 4 {
@@ -282,10 +276,10 @@ async fn read_message<'a>(reader: &mut ReadHalf<'a>) -> Result<Message, Box<dyn 
                 let mut data: [u8; 4] = [0; 4];
                 data.copy_from_slice(&body[0..4]);
                 let piece_index = u32::from_be_bytes(data);
-                return Ok(Message::Have(piece_index));
+                Ok(Message::Have(piece_index))
             }
             5 => { // bitfield
-                return Ok(Message::BitField(body));
+                Ok(Message::BitField(body))
             }
             // 6 => { // request
             // }
@@ -301,20 +295,20 @@ async fn read_message<'a>(reader: &mut ReadHalf<'a>) -> Result<Message, Box<dyn 
                 begin_raw.copy_from_slice(&body[4..8]);
                 let begin = u32::from_be_bytes(begin_raw);
 
-                return Ok(Message::Piece(index, begin, Vec::from(&body[8..])));
+                Ok(Message::Piece(index, begin, Vec::from(&body[8..])))
             }
             // 8 => { // cancel
             // }
             // 9 => { // port
             // }
             _ => {
-                return Ok(Message::Unknown(id, body))
+                Ok(Message::Unknown(id, body))
             }
         }
     }
 }
 
-async fn connection_reader<'a>(peer: Arc<Mutex<PeerConnection>>, mut reader: ReadHalf<'a>) {
+async fn connection_reader(peer: Arc<Mutex<PeerConnection>>, mut reader: ReadHalf<'_>) {
     loop {
         if peer.lock().await.disconnect {
             break;
@@ -342,7 +336,7 @@ enum WriterAction {
 async fn write_raw_message(writer: &mut WriteHalf<'_>, body: &[u8])
     -> Result<(), Box<dyn std::error::Error>> {
     writer.write_all(&(body.len() as u32).to_be_bytes()).await?;
-    writer.write_all(&body).await?;
+    writer.write_all(body).await?;
     Ok(())
 }
 
@@ -368,7 +362,7 @@ async fn writer_iteration(peer: &Arc<Mutex<PeerConnection>>, writer: &mut WriteH
 
         match action {
             Some(WriterAction::Interested) => {
-                let mut body: Vec<u8> = vec![2];
+                let body: Vec<u8> = vec![2];
                 write_raw_message(writer, &body).await?;
                 println!("connection_writer: sent interested");
                 {
@@ -380,9 +374,7 @@ async fn writer_iteration(peer: &Arc<Mutex<PeerConnection>>, writer: &mut WriteH
             Some(WriterAction::BitField) => {
                 let nbytes = bitfield_bytes_required(pieces_len);
                 let mut body: Vec<u8> = vec![5];
-                for i in 0..nbytes {
-                    body.push(0);
-                }
+                body.extend(vec![0; nbytes]);
                 write_raw_message(writer, &body).await?;
                 println!("connection_writer: sent bitfield");
                 {
@@ -418,8 +410,8 @@ async fn writer_iteration(peer: &Arc<Mutex<PeerConnection>>, writer: &mut WriteH
     Ok(())
 }
 
-async fn connection_writer<'a>(peer: Arc<Mutex<PeerConnection>>, mut writer: WriteHalf<'a>,
-                               mut rx: UnboundedReceiver<WriterCommand>) {
+async fn connection_writer(peer: Arc<Mutex<PeerConnection>>, mut writer: WriteHalf<'_>,
+                           mut rx: UnboundedReceiver<WriterCommand>) {
     loop {
         if peer.lock().await.disconnect {
             break;
@@ -435,7 +427,7 @@ async fn connection_writer<'a>(peer: Arc<Mutex<PeerConnection>>, mut writer: Wri
         }
 
 
-        if let None = rx.recv().await {
+        if rx.recv().await.is_none() {
             break;
         }
     }
@@ -549,7 +541,7 @@ async fn do_peer_connection(peer: String, torrent: Torrent) -> std::result::Resu
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let mut rng = rand::thread_rng();
+    // let mut rng = rand::thread_rng();
 
     let args: Vec<String> = std::env::args().collect();
 
@@ -587,9 +579,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    match handle.await {
-        _ => ()
-    }
+    handle.await?;
 
     Ok(())
 }

@@ -1,14 +1,13 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 use std::thread;
 use std::time::Duration;
 use std::sync::mpsc;
-use std::sync::mpsc::{Sender, Receiver};
 
 fn main() {
     let (tx, rx) = mpsc::channel::<String>();

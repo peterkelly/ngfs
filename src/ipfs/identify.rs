@@ -1,23 +1,13 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::error::Error;
 use std::sync::Arc;
 use std::pin::Pin;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use crate::util::io::AsyncStream;
 use crate::libp2p::identify::Identify;
 use crate::ipfs::node::IPFSNode;
 use crate::libp2p::secio::{PublicKey, KeyType};
 use crate::libp2p::multiaddr::{MultiAddr, Addr};
-use crate::libp2p::io::{
-    read_length_prefixed_data,
-    write_length_prefixed_data,
-};
+use crate::libp2p::io::write_length_prefixed_data;
 
 async fn identify_handler_inner(
     node: Arc<IPFSNode>,

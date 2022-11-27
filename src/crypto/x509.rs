@@ -1,15 +1,7 @@
 // https://tools.ietf.org/html/rfc5280
 
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
-use std::fmt;
 use std::error::Error;
-use crate::util::util::{BinaryData, DebugHexDump, Indent, escape_string};
+use crate::util::util::BinaryData;
 use crate::util::binary::BinaryReader;
 use crate::error;
 use crate::formats::asn1::value::{ObjectIdentifier, BitString, Integer, Value, Item};
@@ -62,18 +54,14 @@ impl AlgorithmIdentifier {
     pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
         let mut it = item.as_sequence_iter()?;
 
-        let mut elem = it.next().ok_or("Missing algorithm")?;
+        let elem = it.next().ok_or("Missing algorithm")?;
         let algorithm = elem.as_object_identifier()?.clone();
 
-        let parameters = match it.next() {
-            Some(elem) => Some(elem.clone()),
-            None => None,
-        };
+        let parameters = it.next().cloned();
 
-        match it.next() {
-            Some(_) => return Err(error!("Unexpected value")),
-            None => {},
-        };
+        if it.next().is_some() {
+            return Err(error!("Unexpected value"));
+        }
 
         Ok(AlgorithmIdentifier {
             algorithm,
@@ -112,7 +100,7 @@ pub struct Certificate {
 
 impl Certificate {
     pub fn from_bytes(data: &[u8]) -> Result<Self, Box<dyn Error>> {
-        let mut certificate_reader = BinaryReader::new(&data);
+        let mut certificate_reader = BinaryReader::new(data);
         let item = asn1::reader::read_item(&mut certificate_reader)?;
         Certificate::from_asn1(&item)
     }
@@ -139,11 +127,11 @@ impl Certificate {
     }
 
     pub fn to_asn1(&self) -> Item {
-        let mut items: Vec<Item> = Vec::new();
-        items.push(self.tbs_certificate.to_asn1());
-        items.push(self.signature_algorithm.to_asn1());
-        items.push(Item::from(Value::BitString(self.signature_value.clone())));
-        Item::from(Value::Sequence(items))
+        Item::from(Value::Sequence(vec![
+            self.tbs_certificate.to_asn1(),
+            self.signature_algorithm.to_asn1(),
+            Item::from(Value::BitString(self.signature_value.clone())),
+        ]))
     }
 }
 
@@ -193,17 +181,12 @@ impl RelativeDistinguishedName {
     }
 
     pub fn to_asn1(&self) -> Item {
-        let id_item = Item::from(Value::ObjectIdentifier(self.id.clone()));
-        let value_item = self.value.clone();
-        let mut inner_items: Vec<Item> = Vec::new();
-        inner_items.push(id_item);
-        inner_items.push(value_item);
-
-        let mut outer_items: Vec<Item> = Vec::new();
-        outer_items.push(Item::from(Value::Sequence(inner_items)));
-
-
-        Item::from(Value::Set(outer_items))
+        Item::from(Value::Set(vec![
+            Item::from(Value::Sequence(vec![
+                Item::from(Value::ObjectIdentifier(self.id.clone())),
+                self.value.clone(),
+            ]))
+        ]))
     }
 }
 
@@ -412,56 +395,47 @@ impl TBSCertificate {
 
         let mut elem = it.next().ok_or("Missing version")?;
         let mut version = Version::V1;
-        match &elem.value {
-            Value::ContextSpecific(0, child) => {
-                version = Version::from_asn1(child)?;
-                elem = it.next().ok_or("Missing serial_number")?;
-            }
-            _ => {
-            }
+        if let Value::ContextSpecific(0, child) = &elem.value {
+            version = Version::from_asn1(child)?;
+            elem = it.next().ok_or("Missing serial_number")?;
         }
 
         let serial_number = elem.as_integer()?.clone();
 
         let elem = it.next().ok_or("Missing signature")?;
-        let signature = AlgorithmIdentifier::from_asn1(&elem)?;
+        let signature = AlgorithmIdentifier::from_asn1(elem)?;
 
         let elem = it.next().ok_or("Missing issuer")?;
-        let issuer = Name::from_asn1(&elem)?;
+        let issuer = Name::from_asn1(elem)?;
 
         let elem = it.next().ok_or("Missing validity")?;
-        let validity = Validity::from_asn1(&elem)?;
+        let validity = Validity::from_asn1(elem)?;
 
         let elem = it.next().ok_or("Missing subject")?;
-        let subject = Name::from_asn1(&elem)?;
+        let subject = Name::from_asn1(elem)?;
 
         let elem = it.next().ok_or("Missing subject_public_key_info")?;
-        let subject_public_key_info = SubjectPublicKeyInfo::from_asn1(&elem)?;
+        let subject_public_key_info = SubjectPublicKeyInfo::from_asn1(elem)?;
 
         let mut extensions: Vec<Extension> = Vec::new();
 
-        match it.next() {
-            Some(elem) => {
-                match &elem.value {
-                    Value::ContextSpecific(3, ext_elements2) => {
-                        let ext_elements3 = ext_elements2.as_sequence()?;
-                        for ext_elem in ext_elements3 {
-                            extensions.push(Extension::from_asn1(ext_elem)?);
-                        }
-                    }
-                    _ => {
-                        return Err(error!("Unexpected value for extension"));
+        if let Some(elem) = it.next() {
+            match &elem.value {
+                Value::ContextSpecific(3, ext_elements2) => {
+                    let ext_elements3 = ext_elements2.as_sequence()?;
+                    for ext_elem in ext_elements3 {
+                        extensions.push(Extension::from_asn1(ext_elem)?);
                     }
                 }
-            }
-            None => {
+                _ => {
+                    return Err(error!("Unexpected value for extension"));
+                }
             }
         };
 
-        match it.next() {
-            Some(_) => return Err(error!("Unexpected value")),
-            None => {},
-        };
+        if it.next().is_some() {
+            return Err(error!("Unexpected value"));
+        }
 
         Ok(TBSCertificate {
             version,
@@ -482,11 +456,11 @@ pub fn name_to_simple_string(registry: &ObjectRegistry, name: &Name) -> String {
     let mut result = String::new();
     for (i, part) in name.parts.iter().enumerate() {
         let mut name: String = String::from("?");
-        let mut value: &str = &"?";
+        let mut value: &str = "?";
 
         value = match part.value.as_string() {
             Ok(s) => s,
-            Err(e) => value,
+            Err(_) => value,
         };
 
         if let Some(short_name) = registry.lookup_short_name(&part.id.0) {
@@ -536,7 +510,7 @@ pub fn print_certificate(reg: &ObjectRegistry, certificate: &Certificate) {
     let tbs: &TBSCertificate = &certificate.tbs_certificate;
     println!("Certificate");
     println!("    tbs_certificate");
-    let child_indent: &str = &"        ";
+    let child_indent: &str = "        ";
     print_tbs_certificate(tbs, reg, child_indent);
     println!("    signature_algorithm = {}", certificate.signature_algorithm.to_string(reg));
     println!("    signature_value = <{} bytes>", certificate.signature_value.bytes.len());

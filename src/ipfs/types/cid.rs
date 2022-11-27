@@ -1,13 +1,5 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::fmt;
 use crate::util::util::BinaryData;
-use crate::error;
 use crate::formats::protobuf::protobuf::VarInt;
 use crate::formats::protobuf::varint;
 use super::multibase::{decode, decode_noprefix, encode, encode_noprefix, Base, DecodeError};
@@ -178,12 +170,12 @@ impl CID {
     pub fn from_string(cid_str: &str) -> Result<CID, CIDParseError> {
         if cid_str.len() == 46 && cid_str.starts_with("Qm") {
             let cid_bytes = decode_noprefix(cid_str, Base::Base58BTC)
-                .map_err(|e| CIDParseError::DecodeError(e))?;
+                .map_err(CIDParseError::DecodeError)?;
             Self::from_bytes(&cid_bytes)
         }
         else {
-            let cid_bytes = decode(cid_str).map_err(|e| CIDParseError::DecodeError(e))?;
-            return Ok(CID::from_bytes_v1(&cid_bytes)?);
+            let cid_bytes = decode(cid_str).map_err(CIDParseError::DecodeError)?;
+            Ok(CID::from_bytes_v1(&cid_bytes)?)
         }
     }
 
@@ -197,7 +189,7 @@ impl CID {
             })
         }
         else {
-            return CID::from_bytes_v1(cid_bytes);
+            CID::from_bytes_v1(cid_bytes)
         }
     }
 
@@ -223,12 +215,12 @@ impl CID {
         varint::encode_u64(self.hash_type.to_u64(), &mut result);
         varint::encode_usize(self.hash.len(), &mut result);
         result.extend_from_slice(&self.hash);
-        return result;
+        result
     }
 
     pub fn from_bytes_v1(cid_bytes: &[u8]) -> Result<CID, CIDParseError> {
         // CID version
-        let version = match cid_bytes.get(0) {
+        let version = match cid_bytes.first() {
             Some(v) => v,
             None => return Err(CIDParseError::Empty),
         };
@@ -238,21 +230,21 @@ impl CID {
 
         // Codec
         let mut offset: usize = 1;
-        let codec_num = match VarInt::read_from(&cid_bytes, &mut offset) {
+        let codec_num = match VarInt::read_from(cid_bytes, &mut offset) {
             Some(v) => v.to_u64().map_err(|_| CIDParseError::InvalidCodec)?,
             None => return Err(CIDParseError::InvalidCodec),
         };
         let codec = MultiCodec::from_u64(codec_num);
 
         // Hash type
-        let hash_num = match VarInt::read_from(&cid_bytes, &mut offset) {
+        let hash_num = match VarInt::read_from(cid_bytes, &mut offset) {
             Some(v) => v.to_u64().map_err(|_| CIDParseError::InvalidHashType)?,
             None => return Err(CIDParseError::InvalidHashType),
         };
         let hash_type = MultiHash::from_u64(hash_num);
 
         // Hash size
-        let hash_size = match VarInt::read_from(&cid_bytes, &mut offset) {
+        let hash_size = match VarInt::read_from(cid_bytes, &mut offset) {
             Some(v) => v.to_usize().map_err(|_| CIDParseError::InvalidHashSize)?,
             None => return Err(CIDParseError::InvalidHashSize),
         };
@@ -288,7 +280,7 @@ pub struct CIDPrefix {
 impl CIDPrefix {
     pub fn from_bytes(cid_bytes: &[u8]) -> Result<CIDPrefix, CIDParseError> {
         // CID version
-        let version = match cid_bytes.get(0) {
+        let version = match cid_bytes.first() {
             Some(0) => CIDVersion::CIDv0,
             Some(1) => CIDVersion::CIDv1,
             Some(_) => return Err(CIDParseError::UnsupportedVersion),
@@ -297,21 +289,21 @@ impl CIDPrefix {
 
         // Codec
         let mut offset: usize = 1;
-        let codec_num = match VarInt::read_from(&cid_bytes, &mut offset) {
+        let codec_num = match VarInt::read_from(cid_bytes, &mut offset) {
             Some(v) => v.to_u64().map_err(|_| CIDParseError::InvalidCodec)?,
             None => return Err(CIDParseError::InvalidCodec),
         };
         let codec = MultiCodec::from_u64(codec_num);
 
         // Hash type
-        let hash_num = match VarInt::read_from(&cid_bytes, &mut offset) {
+        let hash_num = match VarInt::read_from(cid_bytes, &mut offset) {
             Some(v) => v.to_u64().map_err(|_| CIDParseError::InvalidHashType)?,
             None => return Err(CIDParseError::InvalidHashType),
         };
         let hash_type = MultiHash::from_u64(hash_num);
 
         // Hash size
-        let hash_size = match VarInt::read_from(&cid_bytes, &mut offset) {
+        let hash_size = match VarInt::read_from(cid_bytes, &mut offset) {
             Some(v) => v.to_usize().map_err(|_| CIDParseError::InvalidHashSize)?,
             None => return Err(CIDParseError::InvalidHashSize),
         };

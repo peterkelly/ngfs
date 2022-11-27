@@ -5,7 +5,6 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use tokio;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::net::tcp::{ReadHalf, WriteHalf};
@@ -54,7 +53,7 @@ impl ConnectionImpl {
     }
 
     fn on_receive(&mut self, data: &[u8]) {
-        println!("Received: {}", String::from_utf8_lossy(data.clone()));
+        println!("Received: {}", String::from_utf8_lossy(data));
     }
 }
 

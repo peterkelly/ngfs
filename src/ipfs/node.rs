@@ -1,11 +1,4 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::pin::Pin;
 use crate::util::io::AsyncStream;
 use crate::ipfs::bitswap::bitswap::Bitswap;
@@ -24,7 +17,7 @@ impl IPFSNode {
     }
 }
 
-type Handler = Box<&'static (dyn Fn(Arc<IPFSNode>, Pin<Box<dyn AsyncStream>>) -> () + Send + Sync + 'static)>;
+type Handler = Box<&'static (dyn Fn(Arc<IPFSNode>, Pin<Box<dyn AsyncStream>>) + Send + Sync + 'static)>;
 
 pub struct Service {
     pub name: String,
@@ -58,6 +51,12 @@ impl ServiceRegistry {
                 return Some(&service.handler);
             }
         }
-        return None;
+        None
+    }
+}
+
+impl Default for ServiceRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }

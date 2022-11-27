@@ -1,11 +1,3 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_mut)]
-// #![allow(unused_assignments)]
-// #![allow(unused_imports)]
-// #![allow(unused_macros)]
-
-// use super::util::{escape_string, from_hex, BinaryData};
 use std::iter::FromIterator;
 use std::error::Error;
 use std::fmt;
@@ -217,14 +209,13 @@ enum Case {
 }
 
 pub fn encode(data: &[u8], base: Base) -> String {
-    let mut chars_vec: Vec<char> = Vec::new();
-    chars_vec.push(base.code());
-    return encode_inner(data, base, chars_vec);
+    let chars_vec = vec![base.code()];
+    encode_inner(data, base, chars_vec)
 }
 
 pub fn encode_noprefix(data: &[u8], base: Base) -> String {
     let chars_vec: Vec<char> = Vec::new();
-    return encode_inner(data, base, chars_vec);
+    encode_inner(data, base, chars_vec)
 }
 
 fn encode_inner(data: &[u8], base: Base, mut chars_vec: Vec<char>) -> String {
@@ -242,15 +233,15 @@ fn encode_inner(data: &[u8], base: Base, mut chars_vec: Vec<char>) -> String {
         Base::Base64URL      => encode_base64(&mut chars_vec, data, &BASE64_URL_ALPHABET, None),
         Base::Base64URLPad   => encode_base64(&mut chars_vec, data, &BASE64_URL_ALPHABET, Some('=')),
     }
-    return String::from_iter(chars_vec.into_iter());
+    String::from_iter(chars_vec.into_iter())
 }
 
 pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
-    let code = s.chars().nth(0).ok_or_else(|| DecodeError::EmptyString)?;
-    let base = Base::for_code(code).ok_or_else(|| DecodeError::UnsupportedEncoding(code))?;
+    let code = s.chars().next().ok_or(DecodeError::EmptyString)?;
+    let base = Base::for_code(code).ok_or(DecodeError::UnsupportedEncoding(code))?;
     match s.char_indices().nth(1) {
         Some((data_index, _)) => decode_noprefix(&s[data_index..], base),
-        None => return Ok(Vec::new()),
+        None => Ok(Vec::new())
     }
 }
 
@@ -297,7 +288,7 @@ fn encode_base58(chars_vec: &mut Vec<char>, data: &[u8], alphabet: &[char; 58]) 
         for i in 0..bytes.len() {
             carry = (carry << 8) | (bytes[i] as u16);
             bytes[i] = (carry / 58) as u8;
-            carry = carry % 58;
+            carry %= 58;
         }
         b58_bytes.push(carry as u8);
     }
@@ -336,12 +327,10 @@ fn decode_base58(encoded: &[u8], inv_alphabet: &[u8; 128]) -> Result<Vec<u8>, De
         }
     }
 
-    for _ in 0..zero_count {
-        decoded.push(0);
-    }
+    decoded.resize(decoded.len() + zero_count, 0);
 
     decoded.reverse();
-    return Ok(decoded);
+    Ok(decoded)
 }
 
 // https://tools.ietf.org/html/rfc4648
@@ -372,7 +361,7 @@ fn encode_base32(chars_vec: &mut Vec<char>, data: &[u8], case: Case, padding: bo
     };
 
     while offset < data.len() {
-        let input0: u8 = data[offset + 0];
+        let input0: u8 = data[offset];
         let input1: u8 = match data.get(offset + 1) { Some(v) => *v, None => 0 };
         let input2: u8 = match data.get(offset + 2) { Some(v) => *v, None => 0 };
         let input3: u8 = match data.get(offset + 3) { Some(v) => *v, None => 0 };
@@ -420,7 +409,7 @@ fn decode_basen(encoded_bytes: &[u8], pow2: u8, inv_alphabet: &[u8; 128], paddin
             Some(0xff) => return Err(DecodeError::InvalidChar(offset, eb)),
             Some(b) => {
                 for i in (8 - pow2)..8 {
-                    let bit = (b >> (7 - i)) & (0x1 as u8);
+                    let bit = (b >> (7 - i)) & 0x1;
                     byte |= bit << (7 - shift);
                     shift = (shift + 1) % 8;
                     if shift == 0 {
@@ -433,7 +422,7 @@ fn decode_basen(encoded_bytes: &[u8], pow2: u8, inv_alphabet: &[u8; 128], paddin
         offset += 1;
     }
 
-    return Ok(output_bytes);
+    Ok(output_bytes)
 }
 
 // https://tools.ietf.org/html/rfc4648
@@ -442,7 +431,7 @@ fn encode_base64(chars_vec: &mut Vec<char>, data: &[u8], alphabet: &[char; 64], 
     let mut offset: usize = 0;
 
     while offset + 3 <= data.len() {
-        let input0: u8 = data[offset + 0];
+        let input0: u8 = data[offset];
         let input1: u8 = data[offset + 1];
         let input2: u8 = data[offset + 2];
         let output0: u8 = input0 >> 2;
@@ -459,7 +448,7 @@ fn encode_base64(chars_vec: &mut Vec<char>, data: &[u8], alphabet: &[char; 64], 
     assert!((offset == data.len()) || (offset + 1 == data.len()) || (offset + 2 == data.len()));
 
     if offset + 1 == data.len() {
-        let input0: u8 = data[offset + 0];
+        let input0: u8 = data[offset];
         let output0: u8 = input0 >> 2;
         let output1: u8 = (input0 << 4) & 0x30;
         chars_vec.push(alphabet[output0 as usize]);
@@ -470,7 +459,7 @@ fn encode_base64(chars_vec: &mut Vec<char>, data: &[u8], alphabet: &[char; 64], 
         }
     }
     else if offset + 2 == data.len() {
-        let input0: u8 = data[offset + 0];
+        let input0: u8 = data[offset];
         let input1: u8 = data[offset + 1];
         let output0: u8 = input0 >> 2;
         let output1: u8 = ((input0 << 4) & 0x30) | (input1 >> 4);

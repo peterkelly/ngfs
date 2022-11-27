@@ -28,7 +28,7 @@ fn decode_varint_u64(data: &[u8]) -> Result<(u64, usize), DecodeVarintError>
         }
     }
 
-    Ok((VarInt(&parts).to_u64().map_err(|e| DecodeVarintError::Other(e))?, offset))
+    Ok((VarInt(&parts).to_u64().map_err(DecodeVarintError::Other)?, offset))
 }
 
 #[derive(Clone)]
@@ -84,7 +84,7 @@ impl Addr {
             PROTOCOL_TCP => {
                 if data_offset + 2 <= bytes.len() {
                     let be_bytes: [u8; 2] = [
-                        bytes[data_offset + 0],
+                        bytes[data_offset],
                         bytes[data_offset + 1],
                     ];
 
@@ -100,7 +100,7 @@ impl Addr {
             PROTOCOL_UDP => {
                 if data_offset + 2 <= bytes.len() {
                     let be_bytes: [u8; 2] = [
-                        bytes[data_offset + 0],
+                        bytes[data_offset],
                         bytes[data_offset + 1],
                     ];
 

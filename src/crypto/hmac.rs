@@ -16,12 +16,12 @@ impl HmacSha256 {
 
         if key_slice.len() > SHA256_BLOCK_SIZE {
             let mut key_hasher = Sha256::new();
-            key_hasher.update(&key_slice);
+            key_hasher.update(key_slice);
             let key_digest: [u8; 32] = key_hasher.finish();
             key[0..32].copy_from_slice(&key_digest);
         }
         else {
-            key[0..key_slice.len()].copy_from_slice(&key_slice);
+            key[0..key_slice.len()].copy_from_slice(key_slice);
         }
 
         let mut k_xor_ipad: [u8; SHA256_BLOCK_SIZE] = [0x36; SHA256_BLOCK_SIZE];
@@ -57,7 +57,6 @@ impl HmacSha256 {
         let mut outer_hasher = Sha256::new();
         outer_hasher.update(&self.k_xor_opad);
         outer_hasher.update(&inner_digest);
-        let outer_digest = outer_hasher.finish();
-        outer_digest
+        outer_hasher.finish()
     }
 }

@@ -1,18 +1,11 @@
 // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-pb.md
 
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::fmt;
 use std::error::Error;
 use crate::error;
 use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
 use crate::ipfs::types::cid::CID;
-use crate::util::util::{BinaryDataLen, OptBinaryDataLen};
+use crate::util::util::OptBinaryDataLen;
 
 pub struct PBLink {
     pub hash: CID,
@@ -50,7 +43,7 @@ impl PBLink {
         let mut name: Option<String> = None;
         let mut tsize: Option<u64> = None;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             // println!("    PBLink: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
@@ -107,7 +100,7 @@ impl PBNode {
 
     pub fn from_pb(raw_data: &[u8]) -> Result<PBNode, Box<dyn Error>> {
         // Zero length data block is considered valid
-        if raw_data.len() == 0 {
+        if raw_data.is_empty() {
             return Ok(PBNode { links: vec![], bytes: None });
         }
 
@@ -115,12 +108,12 @@ impl PBNode {
         let mut bytes: Option<Vec<u8>> = None;
 
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             // println!("    PBNode: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
                 2 => {
-                    links.push(PBLink::from_pb(&field.data.to_bytes()?)?);
+                    links.push(PBLink::from_pb(field.data.to_bytes()?)?);
                 },
                 1 => match &bytes {
                     Some(_) => return Err(error!("duplicate bytes")),

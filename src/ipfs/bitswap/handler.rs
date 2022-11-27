@@ -1,34 +1,23 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::error::Error;
 use std::sync::Arc;
 use std::pin::Pin;
-use bytes::Bytes;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use crate::util::io::AsyncStream;
 use crate::util::util::{Indent, DebugHexDump};
-use crate::libp2p::identify::Identify;
 use crate::ipfs::node::IPFSNode;
-use crate::libp2p::secio::{PublicKey, KeyType};
 use crate::ipfs::types::cid::{CID, CIDPrefix, RawCID};
-use crate::libp2p::multiaddr::{MultiAddr, Addr};
 use crate::libp2p::io::{
     read_opt_length_prefixed_data,
     write_length_prefixed_data,
 };
 use super::message::{Message, WantList, Entry, WantType};
 use super::block::get_block_cid;
-use crate::ipfs::dagpb::{PBNode, PBLink};
+use crate::ipfs::dagpb::PBNode;
 use crate::ipfs::unixfs::{Data as UnixFsData};
-use crate::ipfs::fs::{Node, Directory};
+use crate::ipfs::fs::Node;
 
 async fn bitswap_handler_inner(
-    node: Arc<IPFSNode>,
+    _node: Arc<IPFSNode>,
     mut stream: Pin<Box<dyn AsyncStream>>,
     show_cid: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
@@ -64,7 +53,7 @@ async fn bitswap_handler_inner(
         println!("After sending request");
     }
 
-    let mut count = 0;
+    // let mut count = 0;
 
     loop {
         let data = match read_opt_length_prefixed_data(&mut stream).await? {
@@ -128,7 +117,7 @@ async fn bitswap_handler_inner(
             }
         }
 
-        count += 1;
+        // count += 1;
     }
 
     stream.flush().await?;

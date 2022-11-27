@@ -47,7 +47,9 @@ impl MplexStreams {
     }
 
     fn wake_accept(&mut self) {
-        self.accept_waker.take().map(|w| w.wake());
+        if let Some(w) = self.accept_waker.take() {
+            w.wake()
+        }
     }
 
     fn set_accept_waker(&mut self, waker: Waker) {
@@ -56,7 +58,9 @@ impl MplexStreams {
 
     fn wake_reader(&mut self, stream_id: &StreamId) {
         if let Some(reader) = self.readers.get_mut(stream_id) {
-            reader.waker.take().map(|w| w.wake());
+            if let Some(w) = reader.waker.take() {
+                w.wake()
+            }
         }
     }
 
@@ -69,7 +73,9 @@ impl MplexStreams {
     fn wake_all_readers(&mut self) {
         self.wake_accept();
         for (_, reader) in self.readers.iter_mut() {
-            reader.waker.take().map(|w| w.wake());
+            if let Some(w) = reader.waker.take() {
+                w.wake()
+            }
         }
     }
 
@@ -206,7 +212,7 @@ impl MplexShared {
                 let amt = std::cmp::min(frame.data.remaining(), buf.remaining());
                 buf.put_slice(&frame.data[0..amt]);
                 frame.data.advance(amt);
-                if frame.data.len() == 0 {
+                if frame.data.is_empty() {
                     self.want_another_frame();
                 }
                 Poll::Ready(Ok(()))
@@ -351,10 +357,7 @@ pub struct Connector {
 
 impl Connector {
     pub fn connect(&mut self, name: Option<&str>) -> Connect {
-        let name: Option<String> = match name {
-            Some(name) => Some(String::from(name)),
-            None => None,
-        };
+        let name = name.map(String::from);
         Connect { connector: self, stream_id: None, name: name }
     }
 }
@@ -372,7 +375,7 @@ impl Mplex {
 
     pub fn split(self) -> (Acceptor, Connector) {
         let acceptor = Acceptor { shared: self.shared.clone() };
-        let connector = Connector { shared: self.shared.clone() };
+        let connector = Connector { shared: self.shared };
         (acceptor, connector)
     }
 
@@ -511,8 +514,8 @@ impl Stream {
                 shared: shared.clone(),
             },
             writer: StreamWriter {
-                stream_id: stream_id.clone(),
-                shared: shared.clone(),
+                stream_id: stream_id,
+                shared: shared,
                 write_error: None,
             }
         }

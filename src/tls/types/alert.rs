@@ -1,15 +1,5 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::error::Error;
-use std::fmt;
 use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
-use crate::StringError;
-use crate::util::util::{DebugHexDump, BinaryData, escape_string};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum AlertLevel {

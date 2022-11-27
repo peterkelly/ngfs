@@ -1,10 +1,3 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::fmt;
 
 pub trait FromBinary {
@@ -65,14 +58,14 @@ pub struct BinaryReader<'a> {
 }
 
 impl<'a> BinaryReader<'a> {
-    pub fn new<'x>(buf: &'x [u8]) -> BinaryReader<'x> {
+    pub fn new(buf: &[u8]) -> BinaryReader {
         BinaryReader {
             buf: buf,
             offset: 0,
         }
     }
 
-    fn new_at<'x>(buf: &'x [u8], offset: usize) -> BinaryReader<'x> {
+    fn new_at(buf: &[u8], offset: usize) -> BinaryReader {
         BinaryReader {
             buf: buf,
             offset: offset,
@@ -140,7 +133,7 @@ impl<'a> BinaryReader<'a> {
 
     pub fn read_u24(&mut self) -> Result<u32, BinaryError> {
         let next = self.check_available(3)?;
-        let mut bytes: [u8; 4] = [
+        let bytes: [u8; 4] = [
             0,
             self.buf[self.offset],
             self.buf[self.offset + 1],
@@ -316,7 +309,7 @@ impl BinaryWriter {
             }
             Ok(len) => {
                 let len_bytes: [u8; 2] = (len as u16).to_be_bytes();
-                self.data[len_offset + 0] = len_bytes[0];
+                self.data[len_offset] = len_bytes[0];
                 self.data[len_offset + 1] = len_bytes[1];
                 Ok(())
             }
@@ -340,7 +333,7 @@ impl BinaryWriter {
             Ok(len) => {
                 // println!("write_len24_list: len = {}", len);
                 let len_bytes: [u8; 4] = (len as u32).to_be_bytes();
-                self.data[len_offset + 0] = len_bytes[1];
+                self.data[len_offset] = len_bytes[1];
                 self.data[len_offset + 1] = len_bytes[2];
                 self.data[len_offset + 2] = len_bytes[3];
                 Ok(())
@@ -373,7 +366,7 @@ impl BinaryWriter {
                 let end_offset = self.data.len();
                 let len = end_offset - start_offset;
                 let len_bytes: [u8; 2] = (len as u16).to_be_bytes();
-                self.data[len_offset + 0] = len_bytes[0];
+                self.data[len_offset] = len_bytes[0];
                 self.data[len_offset + 1] = len_bytes[1];
                 Ok(())
             }
@@ -383,6 +376,12 @@ impl BinaryWriter {
             }
         }
         // unimplemented!()
+    }
+}
+
+impl Default for BinaryWriter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

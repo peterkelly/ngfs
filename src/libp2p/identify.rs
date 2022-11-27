@@ -36,7 +36,7 @@ impl Identify {
         let mut protocols: Vec<String> = Vec::new();
         let mut signed_peer_record: Option<SignedPeerRecord> = None;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             match field.field_number {
                 5 => match &opt_protocol_version {
@@ -50,12 +50,12 @@ impl Identify {
                 3 => protocols.push(field.data.to_string()?),
                 1 => match &opt_public_key {
                     Some(_) => return Err(error!("duplicate public_key")),
-                    None => opt_public_key = Some(PublicKey::from_pb(&field.data.to_bytes()?)?),
+                    None => opt_public_key = Some(PublicKey::from_pb(field.data.to_bytes()?)?),
                 }
-                2 => listen_addrs.push(MultiAddr::from_bytes(&field.data.to_bytes()?)?),
+                2 => listen_addrs.push(MultiAddr::from_bytes(field.data.to_bytes()?)?),
                 4 => match &opt_observed_addr {
                     Some(_) => return Err(error!("duplicate observed_addr")),
-                    None => opt_observed_addr = Some(MultiAddr::from_bytes(&field.data.to_bytes()?)?),
+                    None => opt_observed_addr = Some(MultiAddr::from_bytes(field.data.to_bytes()?)?),
                 }
                 8 => match &signed_peer_record {
                     Some(_) => return Err(error!("duplicate signed_peer_record")),

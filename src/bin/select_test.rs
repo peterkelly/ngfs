@@ -29,7 +29,7 @@ impl<A, B> Future for Receiver<A, B> {
         if let Poll::Ready(res) = Future::poll(self.b.as_mut(), cx) {
             return Poll::Ready(MyResult::Second(res));
         }
-        return Poll::Pending;
+        Poll::Pending
     }
 }
 

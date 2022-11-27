@@ -135,8 +135,8 @@ fn make_client_config(
     certificate_filename: &str,
 ) -> Result<rustls::ClientConfig, Box<dyn Error>> {
 
-    let private_key_bytes = std::fs::read(&private_key_filename)?;
-    let certificate_bytes = std::fs::read(&certificate_filename)?;
+    let private_key_bytes = std::fs::read(private_key_filename)?;
+    let certificate_bytes = std::fs::read(certificate_filename)?;
     let private_key = rustls::PrivateKey(private_key_bytes);
     let certificate = rustls::Certificate(certificate_bytes);
 

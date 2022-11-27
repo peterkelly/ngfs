@@ -37,7 +37,7 @@ struct ConsumerFuture {
 impl ConsumerFuture {
     fn new(shared: Arc<Mutex<Shared>>) -> Self {
         ConsumerFuture {
-            shared: shared,
+            shared
         }
     }
 }
@@ -58,7 +58,7 @@ impl Future for ConsumerFuture {
     }
 }
 
-fn consumer2<'a>(shared: Arc<Mutex<Shared>>) -> impl Future<Output = usize> {
+fn consumer2(shared: Arc<Mutex<Shared>>) -> impl Future<Output = usize> {
     ConsumerFuture::new(shared)
 }
 

@@ -1,17 +1,9 @@
 // https://github.com/ipfs/specs/blob/master/UNIXFS.md
 
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::fmt;
 use std::error::Error;
 use crate::error;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
-use crate::ipfs::types::cid::CID;
+use crate::formats::protobuf::protobuf::PBufReader;
 
 #[derive(Debug)]
 pub enum DataType {
@@ -63,17 +55,17 @@ pub struct Data {
 impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Data");
-        let mut d = d.field("type_", &self.type_);
-        let mut d = match &self.data {
+        let d = d.field("type_", &self.type_);
+        let d = match &self.data {
             Some(data) => d.field("data len", &data.len()),
             None => d.field("data", &Option::<()>::None),
         };
-        let mut d = d.field("filesize", &self.filesize);
-        let mut d = d.field("blocksizes", &self.blocksizes);
-        let mut d = d.field("hash_type", &self.hash_type);
-        let mut d = d.field("fanout", &self.fanout);
-        let mut d = d.field("mode", &self.mode);
-        let mut d = d.field("mtime", &self.mtime);
+        let d = d.field("filesize", &self.filesize);
+        let d = d.field("blocksizes", &self.blocksizes);
+        let d = d.field("hash_type", &self.hash_type);
+        let d = d.field("fanout", &self.fanout);
+        let d = d.field("mode", &self.mode);
+        let d = d.field("mtime", &self.mtime);
         d.finish()
     }
 }
@@ -89,7 +81,7 @@ impl Data {
         let mut mode: Option<u32> = None;
         let mut mtime: Option<UnixTime> = None;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             // println!("    Data: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
@@ -125,7 +117,7 @@ impl Data {
                 },
                 8 => match &mtime {
                     Some(_) => return Err(error!("duplicate mtime")),
-                    None => mtime = Some(UnixTime::from_pb(&field.data.to_bytes()?)?),
+                    None => mtime = Some(UnixTime::from_pb(field.data.to_bytes()?)?),
                 },
 
                 _ => (),
@@ -163,7 +155,7 @@ impl UnixTime {
         let mut seconds: Option<i64> = None;
         let mut fractional_nanoseconds: Option<u32> = None;
 
-        let mut reader = PBufReader::new(&raw_data);
+        let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
             // println!("    UnixTime: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {

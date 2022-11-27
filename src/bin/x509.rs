@@ -1,19 +1,17 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-#![allow(non_upper_case_globals)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
+// #![allow(non_upper_case_globals)]
 
-use std::fmt;
 use std::error::Error;
 use clap::{Clap, ValueHint};
-use torrent::util::util::{BinaryData, DebugHexDump, Indent, escape_string, from_hex};
+use torrent::util::util::from_hex;
 use torrent::util::binary::BinaryReader;
 use torrent::error;
 use torrent::formats::asn1;
-use torrent::formats::asn1::printer::ObjectDescriptor;
 use torrent::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use torrent::formats::asn1::writer::encode_item;
 use torrent::crypto::x509::{
@@ -80,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-use ring::signature::{RsaKeyPair, KeyPair, RsaSubjectPublicKey};
+use ring::signature::{RsaKeyPair, KeyPair};
 
 fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
     // pub serial_number: Integer,
@@ -121,7 +119,7 @@ fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
     // println!("generate: output = {:?}", subcmd.output);
     let tbs_certificate = TBSCertificate {
         version: Version::V3,
-        serial_number: Integer(serial_number.clone()),
+        serial_number: Integer(serial_number),
         signature: AlgorithmIdentifier {
             algorithm: ObjectIdentifier(Vec::from(CRYPTO_SHA_256_WITH_RSA_ENCRYPTION)),
             parameters: Some(Item::from(Value::Null)),
@@ -220,11 +218,11 @@ fn wrap_signature(
     signature_algorithm: &AlgorithmIdentifier,
     signature_value: &BitString) -> Result<Vec<u8>, Box<dyn Error>> {
 
-    let mut items: Vec<Item> = Vec::new();
-    items.push(tbs_certificate.to_asn1());
-    items.push(signature_algorithm.to_asn1());
-    items.push(Item::from(Value::BitString(signature_value.clone())));
-    let item = Item::from(Value::Sequence(items));
+    let item = Item::from(Value::Sequence(vec![
+        tbs_certificate.to_asn1(),
+        signature_algorithm.to_asn1(),
+        Item::from(Value::BitString(signature_value.clone())),
+    ]));
 
     let mut output_data: Vec<u8> = Vec::new();
     encode_item(&item, &mut output_data)?;

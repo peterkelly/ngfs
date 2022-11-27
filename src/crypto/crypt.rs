@@ -165,6 +165,7 @@ impl<AEAD> AEADCommon<AEAD> where AEAD : AeadInPlace + NewAead {
         AEAD::TagSize::USIZE
     }
 
+    #[allow(clippy::ptr_arg)]
     fn encrypt_in_place(
         key: &[u8],
         nonce: &[u8],
@@ -175,10 +176,11 @@ impl<AEAD> AEADCommon<AEAD> where AEAD : AeadInPlace + NewAead {
         let key = try_key_from_slice::<AEAD>(key)?;
         let nonce = try_nonce_from_slice::<AEAD>(nonce)?;
         let aead = AEAD::new(key);
-        aead.encrypt_in_place(&nonce, associated_data, buffer)
+        aead.encrypt_in_place(nonce, associated_data, buffer)
             .map_err(|_| CryptError::DecryptionFailed)
     }
 
+    #[allow(clippy::ptr_arg)]
     fn decrypt_in_place(
         key: &[u8],
         nonce: &[u8],
@@ -189,7 +191,7 @@ impl<AEAD> AEADCommon<AEAD> where AEAD : AeadInPlace + NewAead {
         let key = try_key_from_slice::<AEAD>(key)?;
         let nonce = try_nonce_from_slice::<AEAD>(nonce)?;
         let aead = AEAD::new(key);
-        aead.decrypt_in_place(&nonce, associated_data, buffer)
+        aead.decrypt_in_place(nonce, associated_data, buffer)
             .map_err(|_| CryptError::DecryptionFailed)
     }
 }

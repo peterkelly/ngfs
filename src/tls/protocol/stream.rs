@@ -1,27 +1,15 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
-use std::error::Error;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, ReadBuf};
-use bytes::{Bytes, BytesMut, Buf, BufMut};
+use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
+use bytes::{BytesMut, Buf};
 use super::super::types::record::{
     Message,
     ContentType,
     TLSOwnedPlaintext,
     TLSOutputPlaintext,
-    TLSPlaintextError,
     MAX_PLAINTEXT_RECORD_SIZE,
     MAX_CIPHERTEXT_RECORD_SIZE,
-};
-use super::super::types::handshake::{
-    Handshake,
 };
 use crate::util::util::{vec_with_len};
 use super::super::error::TLSError;
@@ -32,7 +20,6 @@ use super::super::helpers::{
     encrypt_traffic,
     decrypt_message,
 };
-use super::super::super::error;
 use crate::util::io::{AsyncStream};
 
 pub struct Encryption {
@@ -54,9 +41,8 @@ pub fn encrypt_record(
 
     let mut data = data_ref.to_vec();
 
-    match transcript {
-        Some(transcript) => transcript.extend_from_slice(&data),
-        None => (),
+    if let Some(transcript) = transcript {
+        transcript.extend_from_slice(&data);
     }
     data.push(content_type.to_raw());
     encrypt_traffic(
@@ -97,7 +83,7 @@ fn poll_receive_record(
 
 
         if incoming_data.remaining() >= 5 + length {
-            let mut header: [u8; 5] = [
+            let header: [u8; 5] = [
                 incoming_data[0],
                 incoming_data[1],
                 incoming_data[2],
@@ -109,7 +95,7 @@ fn poll_receive_record(
             fragment.extend_from_slice(&incoming_data[5..]);
 
             let mut raw: Vec<u8> = Vec::new();
-            raw.extend_from_slice(&incoming_data);
+            raw.extend_from_slice(incoming_data);
 
             let record = TLSOwnedPlaintext {
                 content_type,
@@ -221,7 +207,7 @@ pub struct ReceivePlaintextMessage<'a, 'b> {
 
 impl<'a, 'b> Future for ReceivePlaintextMessage<'a, 'b> {
     type Output = Result<Option<Message>, TLSError>;
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let direct = Pin::into_inner(self);
         poll_receive_plaintext_message(cx, direct.reader, direct.incoming_data, direct.transcript)
     }
@@ -296,10 +282,10 @@ impl EncryptedStream {
             transcript)
     }
 
-    pub fn poll_receive_encrypted_message<'a, 'b, 'c>(
-        &'a mut self,
-        cx: &'b mut Context<'_>,
-        transcript: Option<&'c mut Vec<u8>>,
+    pub fn poll_receive_encrypted_message(
+        &mut self,
+        cx: &mut Context<'_>,
+        transcript: Option<&mut Vec<u8>>,
     ) -> Poll<Result<Option<Message>, TLSError>> {
         poll_receive_encrypted_message(
             cx,
@@ -339,7 +325,7 @@ impl ReceiveEncryptedMessage<'_, '_> {
 
 impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
     type Output = Result<Option<Message>, TLSError>;
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let direct = Pin::into_inner(self);
         let transcript: Option<&mut Vec<u8>> = match &mut direct.transcript {
             Some(v) => Some(v),
@@ -375,10 +361,9 @@ fn poll_receive_encrypted_message(
                 &encryption.traffic_secrets.server,
                 &plaintext.raw)?;
             *server_sequence_no += 1;
-            match transcript {
-                Some(transcript) => transcript.extend_from_slice(&message_raw),
-                None => (),
-            };
+            if let Some(transcript) = transcript {
+                 transcript.extend_from_slice(&message_raw);
+            }
             Poll::Ready(Ok(Some(message)))
         }
     }

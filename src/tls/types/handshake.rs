@@ -1,15 +1,8 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::error::Error;
 use std::fmt;
 use crate::util::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
 use crate::error;
-use crate::util::util::{DebugHexDump, BinaryData, escape_string};
+use crate::util::util::{DebugHexDump, BinaryData};
 use crate::crypto::x509;
 use super::extension::*;
 
@@ -197,7 +190,7 @@ impl FromBinary for ClientHello {
         let legacy_compression_methods_len = reader.read_u8()? as usize;
         let mut legacy_compression_methods_reader = reader.read_nested(legacy_compression_methods_len)?;
         let mut legacy_compression_methods = Vec::new();
-        for i in 0..legacy_compression_methods_len {
+        for _i in 0..legacy_compression_methods_len {
             legacy_compression_methods.push(legacy_compression_methods_reader.read_u8()?);
         }
 
@@ -302,7 +295,7 @@ pub struct EndOfEarlyData {
 impl FromBinary for EndOfEarlyData {
     type Output = EndOfEarlyData;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(_reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         Err(error!("EndOfEarlyData::from_binary(): Not implemented"))
     }
 }
@@ -513,7 +506,7 @@ pub struct KeyUpdate {
 impl FromBinary for KeyUpdate {
     type Output = KeyUpdate;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(_reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
         unimplemented!()
     }
 }

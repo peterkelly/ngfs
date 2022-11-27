@@ -1,15 +1,8 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use std::error::Error;
 use std::fmt;
 use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
 use crate::error;
-use crate::util::util::{DebugHexDump, BinaryData, escape_string};
+use crate::util::util::{BinaryData, escape_string};
 
 pub struct ProtocolName {
     pub data: Vec<u8>,
@@ -191,8 +184,8 @@ impl ToBinary for ServerName {
 impl fmt::Debug for ServerName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ServerName::HostName(name) => write!(f, "{}", escape_string(&name)),
-            ServerName::Other(name_type, data) => write!(f, "<other {}>", name_type),
+            ServerName::HostName(name) => write!(f, "{}", escape_string(name)),
+            ServerName::Other(name_type, _) => write!(f, "<other {}>", name_type),
         }
     }
 }
@@ -585,7 +578,7 @@ impl Extension {
                 Ok(Extension::ECPointFormats(ec_point_formats))
             }
             16 => {
-                let mut names = nested_reader.read_len16_list::<ProtocolName>()?;
+                let names = nested_reader.read_len16_list::<ProtocolName>()?;
                 Ok(Extension::ApplicationLayerProtocolNegotiation(names))
             }
             13 => {
@@ -668,11 +661,11 @@ impl ToBinary for Extension {
             }
             Extension::EncryptThenMac => {
                 writer.write_u16(22);
-                writer.write_u16_nested(|w| Ok(()))
+                writer.write_u16_nested(|_| Ok(()))
             }
             Extension::ExtendedMasterSecret => {
                 writer.write_u16(23);
-                writer.write_u16_nested(|w| Ok(()))
+                writer.write_u16_nested(|_| Ok(()))
             }
             Extension::NextProtocolNegotiation(data) => {
                 writer.write_u16(13172);
@@ -680,7 +673,7 @@ impl ToBinary for Extension {
             }
             Extension::PostHandshakeAuth => {
                 writer.write_u16(49);
-                writer.write_u16_nested(|w| Ok(()))
+                writer.write_u16_nested(|_| Ok(()))
             }
             Extension::SupportedVersions(data) => {
                 writer.write_u16(43);
@@ -690,7 +683,7 @@ impl ToBinary for Extension {
                 writer.write_u16(45);
                 writer.write_u16_nested(|w| w.write_len8_list(psk_exchange_modes))
             }
-            Extension::CertificateAuthorities(distinguished_names) => {
+            Extension::CertificateAuthorities(_distinguished_names) => {
                 writer.write_u16(47);
                 unimplemented!()
             }

@@ -1,10 +1,3 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_mut)]
-// #![allow(unused_assignments)]
-// #![allow(unused_imports)]
-// #![allow(unused_macros)]
-
 use std::fmt;
 use std::error::Error;
 use crate::error;
@@ -17,26 +10,26 @@ pub struct Bytes<'a>(pub &'a [u8]);
 
 impl<'a> VarInt<'a> {
     pub fn to_u64(&self) -> Result<u64, varint::DecodeError> {
-        varint::decode_u64(&self.0)
+        varint::decode_u64(self.0)
     }
 
     pub fn to_u32(&self) -> Result<u32, varint::DecodeError> {
-        let v = varint::decode_u64(&self.0)?;
+        let v = varint::decode_u64(self.0)?;
         if v > u32::MAX as u64 {
-            return Err(varint::DecodeError::Overflow);
+            Err(varint::DecodeError::Overflow)
         }
         else {
-            return Ok(v as u32);
+            Ok(v as u32)
         }
     }
 
     pub fn to_i64(&self) -> Result<i64, varint::DecodeError> {
-        let value_u64 = varint::decode_u64(&self.0)?;
+        let value_u64 = varint::decode_u64(self.0)?;
         Ok(value_u64 as i64)
     }
 
     pub fn to_i32(&self) -> Result<i32, varint::DecodeError> {
-        let value_u64 = varint::decode_u64(&self.0)?;
+        let value_u64 = varint::decode_u64(self.0)?;
         Ok(value_u64 as i32)
     }
 
@@ -51,7 +44,7 @@ impl<'a> VarInt<'a> {
     }
 
     pub fn to_usize(&self) -> Result<usize, varint::DecodeError> {
-        varint::decode_u64(&self.0).map(|value| value as usize)
+        varint::decode_u64(self.0).map(|value| value as usize)
     }
 
     pub fn to_bool(&self) -> Result<bool, varint::DecodeError> {
@@ -422,13 +415,19 @@ impl PBufWriter {
     }
 }
 
+impl Default for PBufWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct PBufReader<'a> {
     pub offset: usize,
     pub data: &'a [u8],
 }
 
 impl<'a> PBufReader<'a> {
-    pub fn new<'x>(data: &'x [u8]) -> PBufReader<'x> {
+    pub fn new(data: &[u8]) -> PBufReader {
         PBufReader { offset: 0, data: data }
     }
 
@@ -519,7 +518,7 @@ impl<'a> PBufReader<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::from_hex;
+    use crate::util::util::from_hex;
     use super::{PBufReader};
     use std::error::Error;
 

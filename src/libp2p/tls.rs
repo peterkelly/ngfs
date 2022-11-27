@@ -101,7 +101,7 @@ fn generate_certificate_inner(
 
     let tbs_certificate = TBSCertificate {
         version: Version::V3,
-        serial_number: Integer(serial_number.clone()),
+        serial_number: Integer(serial_number),
         signature: AlgorithmIdentifier {
             algorithm: ObjectIdentifier(Vec::from(CRYPTO_SHA_256_WITH_RSA_ENCRYPTION)),
             parameters: Some(Item::from(Value::Null)),
@@ -164,7 +164,7 @@ fn generate_certificate_inner(
         ],
     };
 
-    let output_data = sign_tbs_certificate(&tbs_certificate, &certificate_key_pair)?;
+    let output_data = sign_tbs_certificate(&tbs_certificate, certificate_key_pair)?;
     Ok(output_data)
 }
 

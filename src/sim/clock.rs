@@ -54,12 +54,18 @@ impl Clock {
 
     fn poll_wait_until(&self, cx: &mut Context<'_>, target_time: u64) -> Poll<()> {
         if self.current_time() >= target_time {
-            return Poll::Ready(());
+            Poll::Ready(())
         }
         else {
             self.imp.lock().unwrap().wakers.push(cx.waker().clone());
-            return Poll::Pending;
+            Poll::Pending
         }
+    }
+}
+
+impl Default for Clock {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -5,16 +5,14 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use clap::{Clap, ArgEnum};
-use clap;
+use clap::Clap;
 
 use std::error::Error;
-use std::fmt;
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Clap, Clone, Debug)]
 #[clap(name="sock")]

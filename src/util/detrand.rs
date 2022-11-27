@@ -20,8 +20,8 @@ impl Generator {
         }
     }
 
-    pub fn next(&mut self) -> u32 {
+    pub fn next_u32(&mut self) -> u32 {
         self.seed = self.a.wrapping_mul(self.seed).wrapping_add(self.c);
-        return self.seed;
+        self.seed
     }
 }

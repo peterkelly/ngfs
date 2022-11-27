@@ -1,9 +1,9 @@
-#![allow(unused_variables)]
+// #![allow(unused_variables)]
 #![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(unused_imports)]
+// #![allow(unused_macros)]
 
 use std::collections::BTreeMap;
 use super::protocol::frame::Frame;

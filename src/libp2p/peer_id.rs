@@ -1,10 +1,3 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
-
 use crate::libp2p::secio::{PublicKey, KeyType};
 
 pub fn encode_libp2p_public_key(dalek_public_key: &ed25519_dalek::PublicKey) -> Vec<u8> {
