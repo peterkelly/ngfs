@@ -16,6 +16,7 @@ pub mod crypt;
 pub mod libp2p;
 pub mod ipfs;
 pub mod io;
+pub mod sim;
 
 use std::fmt;
 use std::error::Error;
