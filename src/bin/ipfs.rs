@@ -203,7 +203,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Negotiated TLS");
 
-    let mut conn = establish_connection(Box::pin(socket), config).await?;
+    let protocol_names = ["libp2p"];
+    let mut conn = establish_connection(Box::pin(socket), config, &protocol_names).await?;
     println!("Established TLS connection");
     println!();
     multistream_handshake(&mut conn).await?;

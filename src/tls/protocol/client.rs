@@ -102,6 +102,7 @@ pub struct ClientConfig {
 pub fn make_client_hello(
     my_public_key_bytes: &[u8],
     server_name: Option<&String>,
+    protocol_names: &[&str],
 ) -> Result<ClientHello, TLSError> {
     let mut random: [u8; 32] = Default::default();
     let mut session_id: [u8; 32] = Default::default();
@@ -126,10 +127,10 @@ pub fn make_client_hello(
             NamedCurve::Secp521r1,
             NamedCurve::Secp384r1]),
         Extension::NextProtocolNegotiation(vec![]),
-        Extension::ApplicationLayerProtocolNegotiation(vec![
-            ProtocolName { data: Vec::from("h2".as_bytes()) },
-            ProtocolName { data: Vec::from("http/1.1".as_bytes()) },
-            ]),
+        Extension::ApplicationLayerProtocolNegotiation(
+            protocol_names.iter()
+                .map(|n| ProtocolName { data: Vec::from(n.as_bytes()) })
+                .collect::<Vec<ProtocolName>>()),
         Extension::EncryptThenMac,
         Extension::ExtendedMasterSecret,
         Extension::PostHandshakeAuth,
@@ -419,6 +420,7 @@ async fn write_plaintext_handshake(
 pub async fn establish_connection<T: 'static>(
     transport: Pin<Box<T>>,
     config: ClientConfig,
+    protocol_names: &[&str],
 ) -> Result<EstablishedConnection, TLSError>
     where T : AsyncRead + AsyncWrite + Send
 {
@@ -426,7 +428,8 @@ pub async fn establish_connection<T: 'static>(
         .map_err(|_| TLSError::EphemeralPrivateKeyGenerationFailed)?;
     let public_key = private_key.compute_public_key()
         .map_err(|_| TLSError::ComputePublicKeyFailed)?;
-    let client_hello = make_client_hello(public_key.as_ref(), config.server_name.as_ref())?;
+    let client_hello = make_client_hello(public_key.as_ref(), config.server_name.as_ref(),
+                                         protocol_names)?;
     let client_hello_handshake = Handshake::ClientHello(client_hello);
 
     let mut initial_transcript: Vec<u8> = Vec::new();
