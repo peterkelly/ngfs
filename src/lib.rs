@@ -1,6 +1,5 @@
 #![allow(clippy::redundant_field_names)]
 #![allow(clippy::module_inception)]
-#![allow(clippy::wrong_self_convention)]
 
 pub mod tls;
 pub mod libp2p;

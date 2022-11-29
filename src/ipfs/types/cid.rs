@@ -32,13 +32,13 @@ impl MultiCodec {
         }
     }
 
-    fn to_u64(&self) -> u64 {
+    fn to_u64(self) -> u64 {
         match self {
             MultiCodec::Raw            => 0x55,
             MultiCodec::DagPB          => 0x70,
             MultiCodec::DagCBOR        => 0x71,
             MultiCodec::LibP2PKey      => 0x72,
-            MultiCodec::Unknown(value) => *value,
+            MultiCodec::Unknown(value) => value,
         }
     }
 }
@@ -63,13 +63,13 @@ impl MultiHash {
         }
     }
 
-    fn to_u64(&self) -> u64 {
+    fn to_u64(self) -> u64 {
         match self {
             MultiHash::Sha1           => 0x11,
             MultiHash::Sha2256        => 0x12,
             MultiHash::Blake2b256     => 0xb220,
             MultiHash::Blake3         => 0x1e,
-            MultiHash::Unknown(value) => *value,
+            MultiHash::Unknown(value) => value,
         }
     }
 }
