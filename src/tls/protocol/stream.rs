@@ -100,9 +100,9 @@ fn poll_receive_record(
             let record = TLSOwnedPlaintext {
                 content_type,
                 legacy_record_version,
-                header: header,
-                fragment: fragment,
-                raw: raw,
+                header,
+                fragment,
+                raw,
             };
 
             assert!(incoming_data.remaining() == 5 + (length as usize)); // TODO: remove
@@ -193,7 +193,7 @@ impl PlaintextStream {
         ReceivePlaintextMessage {
             reader: &mut self.inner,
             incoming_data: &mut self.incoming_data,
-            transcript: transcript,
+            transcript,
         }
     }
 }
@@ -261,7 +261,7 @@ impl EncryptedStream {
             plaintext,
             client_sequence_no: 0,
             server_sequence_no: 0,
-            encryption: encryption,
+            encryption,
         }
     }
 

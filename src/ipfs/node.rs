@@ -11,7 +11,7 @@ pub struct IPFSNode {
 impl IPFSNode {
     pub fn new(dalek_keypair: ed25519_dalek::Keypair) -> Self {
         IPFSNode {
-            dalek_keypair: dalek_keypair,
+            dalek_keypair,
             bitswap: Bitswap::new(),
         }
     }
@@ -41,7 +41,7 @@ impl ServiceRegistry {
         self.entries.push(Service {
             name: String::from(name),
             bname: Vec::from(format!("{}\n", name).as_bytes()),
-            handler: handler,
+            handler,
         });
     }
 

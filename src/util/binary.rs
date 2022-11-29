@@ -59,17 +59,11 @@ pub struct BinaryReader<'a> {
 
 impl<'a> BinaryReader<'a> {
     pub fn new(buf: &[u8]) -> BinaryReader {
-        BinaryReader {
-            buf: buf,
-            offset: 0,
-        }
+        BinaryReader { buf, offset: 0 }
     }
 
     fn new_at(buf: &[u8], offset: usize) -> BinaryReader {
-        BinaryReader {
-            buf: buf,
-            offset: offset,
-        }
+        BinaryReader { buf, offset }
     }
 
     pub fn abs_offset(&self) -> usize {
@@ -87,7 +81,7 @@ impl<'a> BinaryReader<'a> {
     pub fn expect_eof(&self) -> Result<(), BinaryError> {
         let remaining = self.remaining();
         if remaining > 0 {
-            Err(BinaryError::ExpectedEOF { offset: self.offset, remaining: remaining })
+            Err(BinaryError::ExpectedEOF { offset: self.offset, remaining })
         }
         else {
             Ok(())

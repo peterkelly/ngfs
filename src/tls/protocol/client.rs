@@ -147,11 +147,11 @@ pub fn make_client_hello(
 
     Ok(ClientHello {
         legacy_version: 0x0303,
-        random: random,
+        random,
         legacy_session_id: Vec::from(session_id),
-        cipher_suites: cipher_suites,
+        cipher_suites,
         legacy_compression_methods: vec![0],
-        extensions: extensions,
+        extensions,
     })
 }
 
@@ -204,7 +204,7 @@ async fn send_client_certificate(
     let signature = rsa_sign(client_key_data, &verify_input, signature_scheme, rng)?;
     let handshake = Handshake::CertificateVerify(CertificateVerify {
         algorithm: signature_scheme,
-        signature: signature,
+        signature,
     });
     send_handshake(&handshake, Some(transcript), stream).await?;
     Ok(())
@@ -324,8 +324,8 @@ impl EncryptedHandshake {
         transcript: Vec<u8>,
     ) -> Self {
         EncryptedHandshake {
-            transcript: transcript,
-            config: config,
+            transcript,
+            config,
         }
     }
 
@@ -651,7 +651,7 @@ pub struct EstablishedConnection {
 impl EstablishedConnection {
     fn new(stream: EncryptedStream) -> Self {
         EstablishedConnection {
-            stream: stream,
+            stream,
             incoming_decrypted: BytesMut::new(),
             outgoing_encrypted: BytesMut::new(),
             read_state: ReadState::Active,

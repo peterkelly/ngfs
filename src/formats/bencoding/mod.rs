@@ -223,7 +223,7 @@ pub struct ParseError {
 
 impl ParseError {
     fn new(offset: usize, path: &str, msg: &str) -> ParseError {
-        ParseError { offset: offset, path: String::from(path), msg: String::from(msg) }
+        ParseError { offset, path: String::from(path), msg: String::from(msg) }
     }
 }
 
@@ -242,7 +242,7 @@ impl fmt::Display for ParseError {
 
 impl<'a> Parser<'a> {
     fn new(data: &[u8]) -> Parser {
-        Parser { offset: 0, data: data }
+        Parser { offset: 0, data }
     }
 
     fn error(&mut self, path: &str, msg: &str) -> ParseError {

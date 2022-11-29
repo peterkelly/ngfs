@@ -165,7 +165,7 @@ pub fn read_item(reader: &mut BinaryReader) -> Result<Item, Box<dyn Error>> {
     let end = reader.abs_offset();
     Ok(Item {
         range: Range { start, end },
-        value: value,
+        value,
     })
 }
 

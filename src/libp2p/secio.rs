@@ -164,7 +164,7 @@ impl Propose {
 
         Ok(Propose {
             rand,
-            pubkey: pubkey,
+            pubkey,
             exchanges: exchanges.split(',').map(String::from).collect(),
             ciphers: ciphers.split(',').map(String::from).collect(),
             hashes: hashes.split(',').map(String::from).collect(),
@@ -573,7 +573,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
 
     let local_exchange = Exchange {
         epubkey: local_eckey_public_bytes,
-        signature: signature,
+        signature,
     };
     let local_exchange_bytes = local_exchange.to_pb();
     send_length_prefixed_bytes(&mut stream, &local_exchange_bytes).await?;

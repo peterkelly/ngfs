@@ -358,7 +358,7 @@ pub struct Connector {
 impl Connector {
     pub fn connect(&mut self, name: Option<&str>) -> Connect {
         let name = name.map(String::from);
-        Connect { connector: self, stream_id: None, name: name }
+        Connect { connector: self, stream_id: None, name }
     }
 }
 
@@ -514,8 +514,8 @@ impl Stream {
                 shared: shared.clone(),
             },
             writer: StreamWriter {
-                stream_id: stream_id,
-                shared: shared,
+                stream_id,
+                shared,
                 write_error: None,
             }
         }

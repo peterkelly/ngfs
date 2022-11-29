@@ -16,7 +16,7 @@ impl Generator {
         Generator {
             a: 214013,
             c: 2531011,
-            seed: seed,
+            seed,
         }
     }
 

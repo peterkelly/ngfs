@@ -1,4 +1,3 @@
-#![allow(clippy::redundant_field_names)]
 #![allow(clippy::module_inception)]
 
 pub mod tls;

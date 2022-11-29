@@ -204,12 +204,12 @@ impl FromBinary for ClientHello {
 
 
         let res = ClientHello {
-            legacy_version: legacy_version, // should be 0x0303 or 0x0301
-            random: random,
-            legacy_session_id: legacy_session_id,
-            cipher_suites: cipher_suites,
-            legacy_compression_methods: legacy_compression_methods,
-            extensions: extensions,
+            legacy_version, // should be 0x0303 or 0x0301
+            random,
+            legacy_session_id,
+            cipher_suites,
+            legacy_compression_methods,
+            extensions,
         };
 
         Ok(res)

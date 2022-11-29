@@ -66,7 +66,7 @@ pub fn read_opt_varint<T>(reader: &mut T) -> ReadOptVarInt<T>
     where T : AsyncRead + Unpin
 {
     ReadOptVarInt {
-        reader: reader,
+        reader,
         decoder: U64Decoder::new(),
         num_bytes: 0,
     }

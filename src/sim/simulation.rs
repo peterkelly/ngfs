@@ -18,8 +18,8 @@ impl Simulation {
         let clock = Clock::new();
         Simulation {
             imp: Arc::new(Mutex::new(SimulationImpl {
-                clock: clock,
-                rng: rng,
+                clock,
+                rng,
             }))
         }
     }

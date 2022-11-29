@@ -428,7 +428,7 @@ pub struct PBufReader<'a> {
 
 impl<'a> PBufReader<'a> {
     pub fn new(data: &[u8]) -> PBufReader {
-        PBufReader { offset: 0, data: data }
+        PBufReader { offset: 0, data }
     }
 
     pub fn read_field(&mut self) -> Result<Option<FieldRef<'a>>, ReadError> {
@@ -452,10 +452,10 @@ impl<'a> PBufReader<'a> {
 
         Ok(Some(FieldRef {
             offset: start,
-            tag: tag,
-            field_number: field_number,
+            tag,
+            field_number,
             wire_type: wire_type as u8,
-            data: data,
+            data,
         }))
     }
 

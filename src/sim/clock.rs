@@ -48,7 +48,7 @@ impl Clock {
     pub fn wait_until(&self, target_time: u64) -> WaitUntil {
         WaitUntil {
             clock: Clock { imp: self.imp.clone() },
-            target_time: target_time,
+            target_time,
         }
     }
 

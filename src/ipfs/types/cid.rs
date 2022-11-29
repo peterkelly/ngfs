@@ -257,8 +257,8 @@ impl CID {
 
         Ok(CID {
             version: CIDVersion::CIDv1,
-            codec: codec,
-            hash_type: hash_type,
+            codec,
+            hash_type,
             hash: Vec::from(&cid_bytes[hash_start..hash_end]),
         })
     }
@@ -304,12 +304,7 @@ impl CIDPrefix {
             None => return Err(CIDParseError::InvalidHashSize),
         };
 
-        Ok(CIDPrefix {
-            version: version,
-            codec: codec,
-            hash_type: hash_type,
-            hash_size: hash_size,
-        })
+        Ok(CIDPrefix { version, codec, hash_type, hash_size })
     }
 }
 

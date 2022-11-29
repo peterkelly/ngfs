@@ -87,32 +87,32 @@ impl Frame {
             Flag::MessageReceiver => Frame {
                 stream_id: StreamId::Receiver(num),
                 op: FrameOp::Message,
-                data: data,
+                data,
             },
             Flag::MessageInitiator => Frame {
                 stream_id: StreamId::Initiator(num),
                 op: FrameOp::Message,
-                data: data,
+                data,
             },
             Flag::CloseReceiver => Frame {
                 stream_id: StreamId::Receiver(num),
                 op: FrameOp::Close,
-                data: data,
+                data,
             },
             Flag::CloseInitiator => Frame {
                 stream_id: StreamId::Initiator(num),
                 op: FrameOp::Close,
-                data: data,
+                data,
             },
             Flag::ResetReceiver => Frame {
                 stream_id: StreamId::Receiver(num),
                 op: FrameOp::Reset,
-                data: data,
+                data,
             },
             Flag::ResetInitiator => Frame {
                 stream_id: StreamId::Initiator(num),
                 op: FrameOp::Reset,
-                data: data,
+                data,
             },
         }
     }
@@ -134,7 +134,7 @@ impl FrameStream {
     pub fn new(transport: Pin<Box<dyn AsyncStream>>) -> Self
     {
         FrameStream {
-            transport: transport,
+            transport,
             incoming_data: BytesMut::new(),
             outgoing_data: BytesMut::new(),
             read_eof: false,
