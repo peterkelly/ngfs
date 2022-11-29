@@ -4,7 +4,6 @@
 // https://www.strozhevsky.com/free_docs/free_asn1_testsuite_descr.pdf
 
 use std::fmt;
-use std::error::Error;
 use std::ops::Range;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -218,7 +217,7 @@ pub enum TypeError {
     ExpectedBoolean(Range<usize>),
 }
 
-impl Error for TypeError {
+impl std::error::Error for TypeError {
 }
 
 impl fmt::Debug for TypeError {
