@@ -7,7 +7,6 @@
 
 use std::error::Error;
 use torrent::error;
-use torrent::ipfs::types::multibase::decode;
 use torrent::util::util::{BinaryData};
 use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
 use torrent::formats::protobuf::varint;
@@ -29,9 +28,9 @@ fn get_argument<'a>(args: &'a [String], index: usize, name: &str) -> Result<&'a 
 
 async fn cid_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let cid_str = get_argument(args, 0, "cid")?;
-    let _cid_bytes = decode(cid_str)?;
     let cid = CID::from_string(cid_str)?;
-    println!("{:#?}", cid);
+    println!("Plain: {}", cid);
+    println!("Debug: {:#?}", cid);
 
     Ok(())
 }

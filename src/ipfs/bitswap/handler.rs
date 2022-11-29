@@ -90,7 +90,7 @@ async fn bitswap_handler_inner(
             println!("cid_prefix = {:?}", cid_prefix);
             let cid = get_block_cid(&cid_prefix, &block.data)?;
             println!("cid = {:?}", cid);
-            println!("    = {}", cid.to_string());
+            println!("    = {}", cid);
             println!("data.len() = {}", data.len());
             // println!("data =\n{:#?}", Indent(&DebugHexDump(&block.data)));
             let node = PBNode::from_pb(&block.data)?;

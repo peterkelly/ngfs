@@ -2,7 +2,6 @@
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::module_inception)]
 #![allow(clippy::wrong_self_convention)]
-#![allow(clippy::inherent_to_string_shadow_display)]
 
 pub mod tls;
 pub mod libp2p;

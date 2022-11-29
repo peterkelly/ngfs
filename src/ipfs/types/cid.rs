@@ -5,14 +5,14 @@ use crate::formats::protobuf::varint;
 use super::multibase::{decode, decode_noprefix, encode, encode_noprefix, Base, DecodeError};
 use std::error::Error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CIDVersion {
     CIDv0,
     CIDv1,
 }
 
 // https://github.com/multiformats/multicodec/blob/master/table.csv
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MultiCodec {
     Raw,
     DagPB,
@@ -43,7 +43,7 @@ impl MultiCodec {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MultiHash {
     Sha1,
     Sha2256,
@@ -148,23 +148,19 @@ impl fmt::Debug for CID {
 
 impl fmt::Display for CID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        let bytes = self.to_bytes();
+        if Self::is_cid_v0(&bytes) {
+            write!(f, "{}", encode_noprefix(&bytes, Base::Base58BTC))
+        }
+        else {
+            write!(f, "{}", encode(&bytes, Base::Base32))
+        }
     }
 }
 
 impl CID {
     pub fn is_cid_v0(cid_bytes: &[u8]) -> bool {
         cid_bytes.len() == 34 && cid_bytes[0] == 0x12 && cid_bytes[1] == 0x20
-    }
-
-    pub fn to_string(&self) -> String {
-        let bytes = self.to_bytes();
-        if Self::is_cid_v0(&bytes) {
-            encode_noprefix(&bytes, Base::Base58BTC)
-        }
-        else {
-            encode(&bytes, Base::Base32)
-        }
     }
 
     pub fn from_string(cid_str: &str) -> Result<CID, CIDParseError> {
@@ -314,5 +310,38 @@ impl CIDPrefix {
             hash_type: hash_type,
             hash_size: hash_size,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CID, CIDVersion, MultiCodec, MultiHash};
+
+    #[test]
+    fn cid_from_string_v0() {
+        let s = "QmbWqxBEKC3P8tqsKc98xmWNzrzDtRLMiMPL8wBuTGsMnR";
+        let cid = CID::from_string(s).unwrap();
+        assert!(cid.version == CIDVersion::CIDv0);
+        assert!(cid.codec == MultiCodec::DagPB);
+        assert!(cid.hash_type == MultiHash::Sha2256);
+        assert!(cid.hash == [0xc3, 0xc4, 0x73, 0x3e, 0xc8, 0xaf, 0xfd, 0x06,
+                             0xcf, 0x9e, 0x9f, 0xf5, 0x0f, 0xfc, 0x6b, 0xcd,
+                             0x2e, 0xc8, 0x5a, 0x61, 0x70, 0x00, 0x4b, 0xb7,
+                             0x09, 0x66, 0x9c, 0x31, 0xde, 0x94, 0x39, 0x1a]);
+        assert!(format!("{}", cid) == s);
+    }
+
+    #[test]
+    fn cid_from_string_v1() {
+        let s = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+        let cid = CID::from_string(s).unwrap();
+        assert!(cid.version == CIDVersion::CIDv1);
+        assert!(cid.codec == MultiCodec::DagPB);
+        assert!(cid.hash_type == MultiHash::Sha2256);
+        assert!(cid.hash == [0xc3, 0xc4, 0x73, 0x3e, 0xc8, 0xaf, 0xfd, 0x06,
+                             0xcf, 0x9e, 0x9f, 0xf5, 0x0f, 0xfc, 0x6b, 0xcd,
+                             0x2e, 0xc8, 0x5a, 0x61, 0x70, 0x00, 0x4b, 0xb7,
+                             0x09, 0x66, 0x9c, 0x31, 0xde, 0x94, 0x39, 0x1a]);
+        assert!(format!("{}", cid) == s);
     }
 }
