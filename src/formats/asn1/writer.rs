@@ -1,5 +1,4 @@
-use std::error::Error;
-use crate::error;
+use std::io::Write;
 use super::value::{
     Class,
     Form,
@@ -8,14 +7,15 @@ use super::value::{
 };
 
 #[allow(clippy::needless_range_loop)]
-fn encode_length(length: usize, out: &mut Vec<u8>) {
+fn encode_length<W : Write>(length: usize, out: &mut W) -> Result<(), std::io::Error> {
     if length < 128 {
-        out.push(length as u8);
-        return;
+        out.write_all(&[length as u8])?;
+        return Ok(());
     }
 
-    let nbytes_offset = out.len();
-    out.push(0);
+    let mut enclen: Vec<u8> = Vec::new();
+    let nbytes_offset = enclen.len();
+    enclen.push(0);
 
     let be_bytes = length.to_be_bytes();
     let mut skip = 0;
@@ -25,26 +25,28 @@ fn encode_length(length: usize, out: &mut Vec<u8>) {
 
     let nbytes = be_bytes.len() - skip;
     if nbytes == 0 {
-        out[nbytes_offset] = 1;
-        out.push(0);
+        enclen[nbytes_offset] = 1;
+        enclen.push(0);
     }
     else {
-        out[nbytes_offset] = nbytes as u8;
+        enclen[nbytes_offset] = nbytes as u8;
         for i in skip..be_bytes.len() {
-            out.push(be_bytes[i]);
+            enclen.push(be_bytes[i]);
         }
     }
-    out[nbytes_offset] |= 0x80;
+    enclen[nbytes_offset] |= 0x80;
+    out.write_all(&enclen)?;
+    Ok(())
 }
 
-fn encode_identifier(
+fn encode_identifier<W : Write>(
     class: Class,
     form: Form,
     tag: u32,
-    out: &mut Vec<u8>,
-) -> Result<(), Box<dyn Error>> {
+    out: &mut W,
+) -> Result<(), std::io::Error> {
     if tag > 30 {
-        return Err(error!("Unsupported ASN1 value: tag {} is > 30", tag));
+        return Err(std::io::ErrorKind::InvalidData.into())
     }
     let class: u8 = match class {
         Class::Universal => 0,
@@ -58,20 +60,20 @@ fn encode_identifier(
     };
     let tag: u8 = tag as u8;
     let byte: u8 = (class << 6) | (form << 5) | tag;
-    out.push(byte);
+    out.write_all(&[byte])?;
     Ok(())
 }
 
-fn encode_raw(
-    out: &mut Vec<u8>,
+fn encode_raw<W : Write>(
+    out: &mut W,
     class: Class,
     form: Form,
     tag: u32,
     data: &[u8],
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), std::io::Error> {
     encode_identifier(class, form, tag, out)?;
-    encode_length(data.len(), out);
-    out.extend_from_slice(data);
+    encode_length(data.len(), out)?;
+    out.write_all(data)?;
     Ok(())
 }
 
@@ -88,14 +90,14 @@ fn write_var_u64(mut value: u64, data: &mut Vec<u8>) {
     data.extend_from_slice(&temp);
 }
 
-fn encode_item_list(items: &[Item], data: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
+fn encode_item_list<W : Write>(items: &[Item], data: &mut W) -> Result<(), std::io::Error> {
     for item in items {
         encode_item(item, data)?;
     }
     Ok(())
 }
 
-pub fn encode_item(item: &Item, out: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
+pub fn encode_item<W : Write>(item: &Item, out: &mut W) -> Result<(), std::io::Error> {
     match &item.value {
         Value::Boolean(_)            => {
             encode_raw(out, Class::Universal, Form::Primitive, 1, &[0])
@@ -170,7 +172,7 @@ pub fn encode_item(item: &Item, out: &mut Vec<u8>) -> Result<(), Box<dyn Error>>
             encode_raw(out, Class::Private, Form::Constructed, *tag, &data)
         }
         Value::Unknown(_, _)         => {
-            Err("Unknown: not implemented".into())
+            Err(std::io::ErrorKind::InvalidData.into())
         }
     }
 }
