@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use clap::{Clap, ArgEnum};
+use clap::{Parser};
 
 use std::error::Error;
 use std::fmt;
@@ -38,19 +38,19 @@ impl fmt::Display for ServerMode {
     }
 }
 
-#[derive(Clap, Clone, Debug)]
-#[clap(name="sock")]
+#[derive(Parser, Clone, Debug)]
+#[command(name="sock")]
 struct Opt {
-    #[clap(long, name = "read|write|echo")]
+    #[arg(long, name = "read|write|echo")]
     mode: ServerMode,
 
-    #[clap(long)]
+    #[arg(long)]
     read_buf_size: Option<usize>,
 
-    #[clap(long)]
+    #[arg(long)]
     read_delay_ms: Option<u64>,
 
-    #[clap(long)]
+    #[arg(long)]
     port: u16,
 }
 

@@ -7,7 +7,7 @@
 // #![allow(non_upper_case_globals)]
 
 use std::error::Error;
-use clap::{Clap, ValueHint};
+use clap::{Parser, Subcommand, ValueHint};
 use torrent::util::util::from_hex;
 use torrent::util::binary::BinaryReader;
 use torrent::error;
@@ -38,35 +38,35 @@ use torrent::crypto::x509::{
     X509_KEY_USAGE,
 };
 
-#[derive(Clap)]
-#[clap(name="x509")]
+#[derive(Parser)]
+#[command(name="x509")]
 struct Opt {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcmd: SubCommand,
 }
 
-#[derive(Clap)]
+#[derive(Subcommand)]
 enum SubCommand {
     Print(Print),
     Generate(Generate),
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Print {
-    #[clap(index = 1, value_name = "INFILE", value_hint=ValueHint::FilePath,
-        about = "DER-encoded file to read certificate from")]
+    #[arg(index = 1, value_name = "INFILE", value_hint=ValueHint::FilePath,
+        help = "DER-encoded file to read certificate from")]
     infile: String,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Generate {
-    #[clap(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE")]
     subject_private_key: String,
 
-    #[clap(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE")]
     signer_private_key: String,
 
-    #[clap(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE")]
     output: String,
 }
 

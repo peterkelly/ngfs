@@ -6,7 +6,7 @@
 // #![allow(unused_macros)]
 
 use std::error::Error;
-use clap::Clap;
+use clap::{Parser, Subcommand};
 use torrent::ipfs::types::multibase::{
     DecodeError,
     Base,
@@ -16,14 +16,14 @@ use torrent::ipfs::types::multibase::{
 };
 use torrent::error;
 
-#[derive(Clap)]
-#[clap(name="multibase")]
+#[derive(Parser)]
+#[command(name="multibase")]
 struct Opt {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcmd: SubCommand,
 }
 
-#[derive(Clap)]
+#[derive(Subcommand)]
 enum SubCommand {
     /// List available bases and their codes
     List,
@@ -35,17 +35,17 @@ enum SubCommand {
     Convert(Convert),
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Detect {
     value: String,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Decode {
     value: String,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Convert {
     to: String,
     value: String,

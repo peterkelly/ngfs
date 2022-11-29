@@ -16,7 +16,7 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 use std::pin::Pin;
-use clap::Clap;
+use clap::Parser;
 use tokio::net::{TcpStream};
 use tokio::io::AsyncWriteExt;
 use torrent::util::util::escape_string;
@@ -45,22 +45,22 @@ use torrent::ipfs::identify::identify_handler;
 use torrent::ipfs::bitswap::handler::{bitswap_handler, bitswap_handler_show};
 
 
-#[derive(Clap)]
-#[clap(name="ipfs")]
+#[derive(Parser)]
+#[command(name="ipfs")]
 struct Opt {
     #[clap(subcommand)]
     subcmd: SubCommand,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 enum SubCommand {
     Test,
     Show(Show),
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Show {
-    #[clap()]
+    #[arg()]
     cid: String,
 }
 

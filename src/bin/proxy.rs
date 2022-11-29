@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use clap::Clap;
+use clap::Parser;
 
 use std::error::Error;
 use std::time::Duration;
@@ -14,25 +14,25 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[derive(Clap, Clone, Debug)]
-#[clap(name="sock")]
+#[derive(Parser, Clone, Debug)]
+#[command(name="sock")]
 struct Opt {
-    #[clap(long)]
+    #[arg(long)]
     read_buf_size: Option<usize>,
 
-    #[clap(long)]
+    #[arg(long)]
     read_delay_ms: Option<u64>,
 
-    #[clap(long)]
+    #[arg(long)]
     write_buf_size: Option<usize>,
 
-    #[clap(long)]
+    #[arg(long)]
     write_delay_ms: Option<u64>,
 
-    #[clap(long)]
+    #[arg(long)]
     listen_port: u16,
 
-    #[clap(long)]
+    #[arg(long)]
     server_port: u16,
 }
 

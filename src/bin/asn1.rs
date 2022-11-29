@@ -7,25 +7,25 @@
 // #![allow(non_upper_case_globals)]
 
 use std::error::Error;
-use clap::{Clap, ValueHint};
+use clap::{Parser, ValueHint};
 use torrent::util::binary::BinaryReader;
 use torrent::error;
 use torrent::formats::asn1;
 use torrent::formats::asn1::writer::encode_item;
 use torrent::crypto::x509;
 
-#[derive(Clap, Debug)]
-#[clap(name = "asn1: Test for reading/writing ASN.1 DER files")]
+#[derive(Parser, Debug)]
+#[command(name = "asn1: Test for reading/writing ASN.1 DER files")]
 struct Opt {
-    #[clap(long, about = "Show byte ranges for each value")]
+    #[arg(long, help = "Show byte ranges for each value")]
     ranges: bool,
 
-    #[clap(index = 1, value_name = "INFILE", value_hint=ValueHint::FilePath,
-        about = "DER-encoded file to read from")]
+    #[arg(index = 1, value_name = "INFILE", value_hint=ValueHint::FilePath,
+        help = "DER-encoded file to read from")]
     input: String,
 
-    #[clap(value_name = "OUTFILE", long, value_hint=ValueHint::FilePath,
-        about = "Re-encode data structure from input and write to OUTFILE")]
+    #[arg(value_name = "OUTFILE", long, value_hint=ValueHint::FilePath,
+        help = "Re-encode data structure from input and write to OUTFILE")]
     output: Option<String>,
 }
 

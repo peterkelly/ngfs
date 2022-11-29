@@ -8,7 +8,7 @@
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use clap::{Clap, ValueHint};
+use clap::{Parser, ValueHint};
 use tokio::net::{TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::sleep;
@@ -23,19 +23,19 @@ use torrent::tls::protocol::client::{
     establish_connection,
 };
 
-#[derive(Clap, Debug)]
-#[clap(name="tls_client")]
+#[derive(Parser, Debug)]
+#[command(name="tls_client")]
 struct Opt {
-    #[clap(long, value_hint=ValueHint::FilePath)]
+    #[arg(long, value_hint=ValueHint::FilePath)]
     ca_cert: Option<PathBuf>,
 
-    #[clap(long, value_hint=ValueHint::FilePath)]
+    #[arg(long, value_hint=ValueHint::FilePath)]
     client_cert: Option<PathBuf>,
 
-    #[clap(long, value_hint=ValueHint::FilePath)]
+    #[arg(long, value_hint=ValueHint::FilePath)]
     client_key: Option<PathBuf>,
 
-    #[clap(long)]
+    #[arg(long)]
     address: Option<String>,
 }
 
