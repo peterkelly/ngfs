@@ -285,9 +285,9 @@ fn encode_base58(chars_vec: &mut Vec<char>, data: &[u8], alphabet: &[char; 58]) 
         }
 
         let mut carry: u16 = 0;
-        for i in 0..bytes.len() {
-            carry = (carry << 8) | (bytes[i] as u16);
-            bytes[i] = (carry / 58) as u8;
+        for b in &mut bytes {
+            carry = (carry << 8) | (*b as u16);
+            *b = (carry / 58) as u8;
             carry %= 58;
         }
         b58_bytes.push(carry as u8);

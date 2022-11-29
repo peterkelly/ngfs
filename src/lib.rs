@@ -1,5 +1,4 @@
 #![allow(clippy::redundant_field_names)]
-#![allow(clippy::needless_range_loop)]
 #![allow(clippy::module_inception)]
 #![allow(clippy::wrong_self_convention)]
 

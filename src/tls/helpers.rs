@@ -194,6 +194,7 @@ pub fn get_derived_prk(alg: HashAlgorithm, prbytes: &[u8], secret: &[u8]) -> Res
     Ok(alg.hkdf_extract(&salt_bytes, secret))
 }
 
+#[allow(clippy::needless_range_loop)]
 pub fn encrypt_traffic(
     traffic_secret: &EncryptionKey,
     sequence_no: u64,
@@ -225,6 +226,7 @@ pub fn encrypt_traffic(
     Ok(())
 }
 
+#[allow(clippy::needless_range_loop)]
 fn decrypt_traffic(
     traffic_secret: &EncryptionKey,
     sequence_no: u64,

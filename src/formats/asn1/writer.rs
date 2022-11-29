@@ -7,6 +7,7 @@ use super::value::{
     Item,
 };
 
+#[allow(clippy::needless_range_loop)]
 fn encode_length(length: usize, out: &mut Vec<u8>) {
     if length < 128 {
         out.push(length as u8);
