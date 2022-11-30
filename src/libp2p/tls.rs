@@ -3,7 +3,7 @@ use ring::signature::{RsaKeyPair, KeyPair};
 use crate::util::util::from_hex;
 use crate::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use crate::formats::asn1::writer::encode_item;
-use super::peer_id::encode_libp2p_public_key;
+use super::peer_id::PublicKey;
 use crate::crypto::x509;
 use crate::crypto::x509::{
     TBSCertificate,
@@ -70,12 +70,12 @@ pub fn generate_certificate(
 }
 
 fn generate_libp2p_ext(
-    libp2p_ext_public_key: &ed25519_dalek::PublicKey,
-    libp2p_ext_signature: &ed25519_dalek::Signature,
+    public_key: &ed25519_dalek::PublicKey,
+    signature: &ed25519_dalek::Signature,
 ) -> Result<Vec<u8>, GenerateError> {
     let libp2p_ext_item = Item::from(Value::Sequence(vec![
-        Item::from(Value::OctetString(encode_libp2p_public_key(libp2p_ext_public_key))),
-        Item::from(Value::OctetString(Vec::from(libp2p_ext_signature.to_bytes()))),
+        Item::from(Value::OctetString(PublicKey::from(public_key).to_pb())),
+        Item::from(Value::OctetString(Vec::from(signature.to_bytes()))),
     ]));
     let mut libp2p_ext_bytes: Vec<u8> = Vec::new();
     encode_item(&libp2p_ext_item, &mut libp2p_ext_bytes)?;
