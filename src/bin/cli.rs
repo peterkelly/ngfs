@@ -10,7 +10,6 @@ use torrent::util::util::{BinaryData};
 use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPB};
 use torrent::formats::protobuf::varint;
 use torrent::ipfs::types::cid::CID;
-use torrent::libp2p::secio::p2p_test;
 use torrent::libp2p::peer_id::PrivateKey;
 use rand::distributions::{Distribution, Uniform};
 
@@ -32,18 +31,6 @@ async fn cid_command(args: &[String]) -> Result<(), Box<dyn Error>> {
     println!("Plain: {}", cid);
     println!("Debug: {:#?}", cid);
 
-    Ok(())
-}
-
-async fn p2p_command(args: &[String]) -> Result<(), Box<dyn Error>> {
-    let server_addr = get_argument(args, 0, "server_addr")?;
-    match p2p_test(server_addr).await {
-        Ok(_) => {},
-        Err(e) => {
-            eprintln!("p2p_test failed: {}", e);
-            std::process::exit(1);
-        }
-    }
     Ok(())
 }
 
@@ -122,10 +109,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match command.as_str() {
         "cid" => {
             cid_command(&args[2..]).await?;
-            Ok(())
-        }
-        "p2p" => {
-            p2p_command(&args[2..]).await?;
             Ok(())
         }
         "varint" => {
