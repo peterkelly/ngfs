@@ -539,6 +539,45 @@ impl<'a> PBufReader<'a> {
     }
 }
 
+#[derive(Debug)]
+pub enum FromPBError {
+    Plain(&'static str),
+    Read(ReadError),
+    Decode(varint::DecodeError),
+    InvalidUTF8String(std::string::FromUtf8Error),
+    MissingField(&'static str),
+}
+
+impl std::error::Error for FromPBError {}
+
+impl fmt::Display for FromPBError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            FromPBError::Plain(e) => write!(f, "{}", e),
+            FromPBError::Read(e) => write!(f, "{}", e),
+            FromPBError::Decode(e) => write!(f, "{}", e),
+            FromPBError::InvalidUTF8String(e) => write!(f, "{}", e),
+            FromPBError::MissingField(e) => write!(f, "Missing field: {}", e),
+        }
+    }
+}
+
+impl From<ReadError> for FromPBError {
+    fn from(e: ReadError) -> Self {
+        FromPBError::Read(e)
+    }
+}
+
+impl From<FieldDataError> for FromPBError {
+    fn from(e: FieldDataError) -> Self {
+        match e {
+            FieldDataError::Plain(e) => FromPBError::Plain(e),
+            FieldDataError::Decode(e) => FromPBError::Decode(e),
+            FieldDataError::InvalidUTF8String(e) => FromPBError::InvalidUTF8String(e),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::util::util::from_hex;
