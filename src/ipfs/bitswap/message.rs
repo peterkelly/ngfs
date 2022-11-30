@@ -1,7 +1,5 @@
 use std::fmt;
-use std::error::Error;
-use crate::error;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPBError};
 use crate::ipfs::types::cid::{CID, RawCID};
 use crate::util::util::BinaryData;
 
@@ -38,7 +36,7 @@ impl Entry {
         writer.data
     }
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<Entry, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<Entry, FromPBError> {
 
         let mut opt_block: Option<Vec<u8>> = None;
         let mut priority: i32 = 1;
@@ -65,7 +63,7 @@ impl Entry {
                     match v {
                         0 => want_type = WantType::Block,
                         1 => want_type = WantType::Have,
-                        _ => return Err(error!("Invalid want_type: {}", v)),
+                        _ => return Err(FromPBError::Plain("Invalid want_type")),
                     }
                 }
                 5 => {
@@ -76,7 +74,7 @@ impl Entry {
 
         }
 
-        let block = opt_block.ok_or_else(|| error!("Missing field: block"))?;
+        let block = opt_block.ok_or(FromPBError::MissingField("block"))?;
         match CID::from_bytes(&block) {
             Ok(cid) => {
                 println!("Parsed CID: {:#?}", cid);
@@ -115,7 +113,7 @@ impl WantList {
         writer.data
     }
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<WantList, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<WantList, FromPBError> {
         let mut entries: Vec<Entry> = Vec::new();
         let mut full: bool = false;
 
@@ -156,7 +154,7 @@ impl Block {
         writer.data
     }
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<Block, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<Block, FromPBError> {
         let mut prefix: Option<Vec<u8>> = None;
         let mut data: Option<Vec<u8>> = None;
 
@@ -165,19 +163,19 @@ impl Block {
             println!("    Block: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
                 1 => match &prefix {
-                    Some(_) => return Err(error!("duplicate prefix")),
+                    Some(_) => return Err(FromPBError::DuplicateField("prefix")),
                     None => prefix = Some(Vec::from(field.data.to_bytes()?)),
                 },
                 2 => match &data {
-                    Some(_) => return Err(error!("duplicate data")),
+                    Some(_) => return Err(FromPBError::DuplicateField("data")),
                     None => data = Some(Vec::from(field.data.to_bytes()?)),
                 },
                 _ => (),
             }
         }
 
-        let prefix = prefix.ok_or_else(|| error!("Missing field: prefix"))?;
-        let data = data.ok_or_else(|| error!("Missing field: data"))?;
+        let prefix = prefix.ok_or(FromPBError::MissingField("prefix"))?;
+        let data = data.ok_or(FromPBError::MissingField("data"))?;
 
         Ok(Block {
             prefix,
@@ -208,7 +206,7 @@ pub struct BlockPresence {
 }
 
 impl BlockPresence {
-    pub fn from_pb(_raw_data: &[u8]) -> Result<BlockPresence, Box<dyn Error>> {
+    pub fn from_pb(_raw_data: &[u8]) -> Result<BlockPresence, FromPBError> {
         unimplemented!()
     }
 }
@@ -234,7 +232,7 @@ impl Message {
         writer.data
     }
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<Message, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<Message, FromPBError> {
         let mut wantlist: Option<WantList> = None;
         let mut blocks: Vec<Block> = Vec::new();
         let payload: Vec<Block> = Vec::new();
@@ -246,7 +244,7 @@ impl Message {
             println!("Message: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
                 1 => match &wantlist {
-                    Some(_) => return Err(error!("duplicate wantlist")),
+                    Some(_) => return Err(FromPBError::DuplicateField("wantlist")),
                     None => wantlist = Some(WantList::from_pb(field.data.to_bytes()?)?),
                 },
                 3 => blocks.push(Block::from_pb(field.data.to_bytes()?)?),

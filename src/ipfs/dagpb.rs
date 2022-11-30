@@ -1,9 +1,7 @@
 // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-pb.md
 
 use std::fmt;
-use std::error::Error;
-use crate::error;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPBError};
 use crate::ipfs::types::cid::CID;
 use crate::util::util::OptBinaryDataLen;
 
@@ -37,7 +35,7 @@ impl PBLink {
     }
 
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<PBLink, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<PBLink, FromPBError> {
         // TODO: Enforce ordering as per spec
         let mut hash: Option<Vec<u8>> = None;
         let mut name: Option<String> = None;
@@ -48,25 +46,25 @@ impl PBLink {
             // println!("    PBLink: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
                 1 => match &hash {
-                    Some(_) => return Err(error!("duplicate hash")),
+                    Some(_) => return Err(FromPBError::DuplicateField("hash")),
                     None => hash = Some(Vec::from(field.data.to_bytes()?)),
                 },
 
                 2 => match &name {
-                    Some(_) => return Err(error!("duplicate name")),
+                    Some(_) => return Err(FromPBError::DuplicateField("name")),
                     None => name = Some(field.data.to_string()?),
                 },
 
                 3 => match &tsize {
-                    Some(_) => return Err(error!("duplicate tsize")),
+                    Some(_) => return Err(FromPBError::DuplicateField("tsize")),
                     None => tsize = Some(field.data.to_uint64()?),
                 },
                 _ => (),
             }
         }
 
-        let hash = hash.ok_or_else(|| error!("Missing field: hash"))?;
-        let hash = CID::from_bytes(&hash)?;
+        let hash = hash.ok_or(FromPBError::MissingField("hash"))?;
+        let hash = CID::from_bytes(&hash).map_err(|_| FromPBError::Plain("Invalid cid"))?;
 
         Ok(PBLink { hash, name, tsize })
     }
@@ -98,7 +96,7 @@ impl PBNode {
         writer.data
     }
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<PBNode, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<PBNode, FromPBError> {
         // Zero length data block is considered valid
         if raw_data.is_empty() {
             return Ok(PBNode { links: vec![], bytes: None });
@@ -116,7 +114,7 @@ impl PBNode {
                     links.push(PBLink::from_pb(field.data.to_bytes()?)?);
                 },
                 1 => match &bytes {
-                    Some(_) => return Err(error!("duplicate bytes")),
+                    Some(_) => return Err(FromPBError::DuplicateField("bytes")),
                     None => bytes = Some(Vec::from(field.data.to_bytes()?)),
                 },
                 _ => (),

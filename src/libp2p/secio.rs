@@ -12,7 +12,7 @@ use rand::prelude::Rng;
 use crate::error;
 use crate::util::util::{BinaryData, escape_string};
 use super::peer_id::{KeyType, PublicKey};
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPBError};
 use crate::crypto::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
 use crate::formats::protobuf::varint;
 
@@ -42,7 +42,7 @@ struct Propose {
 }
 
 impl Propose {
-    fn from_pb(raw_data: &[u8]) -> Result<Propose, Box<dyn Error>> {
+    fn from_pb(raw_data: &[u8]) -> Result<Propose, FromPBError> {
         let mut reader = PBufReader::new(raw_data);
 
         let mut rand: Option<Vec<u8>> = None;
@@ -76,11 +76,11 @@ impl Propose {
             }
         }
 
-        let rand: Vec<u8> = rand.ok_or_else(|| error!("Missing field: rand"))?;
-        let pubkey: Vec<u8> = pubkey.ok_or_else(|| error!("Missing field: pubkey"))?;
-        let exchanges: String = exchanges.ok_or_else(|| error!("Missing field: exchanges"))?;
-        let ciphers: String = ciphers.ok_or_else(|| error!("Missing field: ciphers"))?;
-        let hashes: String = hashes.ok_or_else(|| error!("Missing field: hashes"))?;
+        let rand: Vec<u8> = rand.ok_or(FromPBError::MissingField("rand"))?;
+        let pubkey: Vec<u8> = pubkey.ok_or(FromPBError::MissingField("pubkey"))?;
+        let exchanges: String = exchanges.ok_or(FromPBError::MissingField("exchanges"))?;
+        let ciphers: String = ciphers.ok_or(FromPBError::MissingField("ciphers"))?;
+        let hashes: String = hashes.ok_or(FromPBError::MissingField("hashes"))?;
 
         Ok(Propose {
             rand,
@@ -119,7 +119,7 @@ struct Exchange {
 }
 
 impl Exchange {
-    fn from_pb(raw_data: &[u8]) -> Result<Exchange, Box<dyn Error>> {
+    fn from_pb(raw_data: &[u8]) -> Result<Exchange, FromPBError> {
         let mut reader = PBufReader::new(raw_data);
 
         let mut epubkey: Option<Vec<u8>> = None;
@@ -134,8 +134,8 @@ impl Exchange {
             }
         }
 
-        let epubkey: Vec<u8> = epubkey.ok_or_else(|| error!("Missing field: epubkey"))?;
-        let signature: Vec<u8> = signature.ok_or_else(|| error!("Missing field: signature"))?;
+        let epubkey: Vec<u8> = epubkey.ok_or(FromPBError::MissingField("epubkey"))?;
+        let signature: Vec<u8> = signature.ok_or(FromPBError::MissingField("signature"))?;
 
         Ok(Exchange {
             epubkey,
