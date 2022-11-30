@@ -3,7 +3,7 @@ use ring::signature::{RsaKeyPair, KeyPair};
 use crate::util::util::from_hex;
 use crate::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use crate::formats::asn1::writer::encode_item;
-use super::peer_id::PublicKey;
+use super::peer_id::{KeyType, PublicKey};
 use crate::crypto::x509;
 use crate::crypto::x509::{
     TBSCertificate,
@@ -73,8 +73,12 @@ fn generate_libp2p_ext(
     public_key: &ed25519_dalek::PublicKey,
     signature: &ed25519_dalek::Signature,
 ) -> Result<Vec<u8>, GenerateError> {
+    let pkey = PublicKey {
+        key_type: KeyType::Ed25519,
+        data: Vec::from(public_key.to_bytes()),
+    };
     let libp2p_ext_item = Item::from(Value::Sequence(vec![
-        Item::from(Value::OctetString(PublicKey::from(public_key).to_pb())),
+        Item::from(Value::OctetString(pkey.to_pb())),
         Item::from(Value::OctetString(Vec::from(signature.to_bytes()))),
     ]));
     let mut libp2p_ext_bytes: Vec<u8> = Vec::new();
