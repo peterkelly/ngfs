@@ -1,6 +1,5 @@
-use std::error::Error;
+use std::fmt;
 use ring::signature::{RsaKeyPair, KeyPair};
-use crate::error;
 use crate::util::util::from_hex;
 use crate::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use crate::formats::asn1::writer::encode_item;
@@ -26,10 +25,44 @@ use crate::crypto::x509::{
     X509_KEY_USAGE,
 };
 
+pub enum GenerateError {
+    Plain(&'static str),
+    IO(std::io::Error),
+}
+
+impl std::error::Error for GenerateError {}
+
+impl fmt::Display for GenerateError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            GenerateError::Plain(e) => write!(f, "{}", e),
+            GenerateError::IO(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl fmt::Debug for GenerateError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl From<&'static str> for GenerateError {
+    fn from(msg: &'static str) -> Self {
+        GenerateError::Plain(msg)
+    }
+}
+
+impl From<std::io::Error> for GenerateError {
+    fn from(e: std::io::Error) -> Self {
+        GenerateError::IO(e)
+    }
+}
+
 pub fn generate_certificate(
     rsa_key_pair: &ring::signature::RsaKeyPair,
     dalek_keypair: &ed25519_dalek::Keypair,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>, GenerateError> {
     let signature: ed25519_dalek::Signature = make_signature(rsa_key_pair, dalek_keypair)?;
     let libp2p_ext_bytes = generate_libp2p_ext(&dalek_keypair.public, &signature)?;
     let certificate: Vec<u8> = generate_certificate_inner(rsa_key_pair, &libp2p_ext_bytes)?;
@@ -39,7 +72,7 @@ pub fn generate_certificate(
 fn generate_libp2p_ext(
     libp2p_ext_public_key: &ed25519_dalek::PublicKey,
     libp2p_ext_signature: &ed25519_dalek::Signature,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>, GenerateError> {
     let libp2p_ext_item = Item::from(Value::Sequence(vec![
         Item::from(Value::OctetString(encode_libp2p_public_key(libp2p_ext_public_key))),
         Item::from(Value::OctetString(Vec::from(libp2p_ext_signature.to_bytes()))),
@@ -52,7 +85,7 @@ fn generate_libp2p_ext(
 fn make_signature(
     rsa_key_pair: &ring::signature::RsaKeyPair,
     dalek_keypair: &ed25519_dalek::Keypair,
-) -> Result<ed25519_dalek::Signature, Box<dyn Error>> {
+) -> Result<ed25519_dalek::Signature, GenerateError> {
     let p2p_subject_public_key_info = SubjectPublicKeyInfo {
         algorithm: AlgorithmIdentifier {
             algorithm: ObjectIdentifier(Vec::from(CRYPTO_RSA_ENCRYPTION)),
@@ -78,21 +111,21 @@ fn make_signature(
 fn generate_certificate_inner(
     certificate_key_pair: &RsaKeyPair,
     libp2p_ext_bytes: &[u8],
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>, GenerateError> {
 
     // TODO: Randomly generate these
     let serial_number = from_hex("00fece0a9eaa3eddc3")
-        .ok_or_else(|| error!("Invalid hex string: serial_number"))?;
+        .ok_or(GenerateError::Plain("Invalid hex string: serial_number"))?;
 
     let authority_key_identifier = from_hex(
         &format!("{}{}",
         "3050a143a441303f310b300906035504061302555331173015060355040a0c0e4d7920506572736f6e",
         "616c2043413117301506035504030c0e6d792e706572736f6e616c2e6361820900d7c3d885fa68751d"))
-        .ok_or_else(|| error!("Invalid hex string: authority_key_identifier"))?;
+        .ok_or(GenerateError::Plain("Invalid hex string: authority_key_identifier"))?;
     let basic_constraints = from_hex("3000")
-        .ok_or_else(|| error!("Invalid hex string: basic_constraints"))?;
+        .ok_or(GenerateError::Plain("Invalid hex string: basic_constraints"))?;
     let key_usage = from_hex("030204f0")
-        .ok_or_else(|| error!("Invalid hex string: key_usage"))?;
+        .ok_or(GenerateError::Plain("Invalid hex string: key_usage"))?;
 
 
     let subject_public_key: Vec<u8> = Vec::from(certificate_key_pair.public_key().as_ref());
@@ -170,7 +203,7 @@ fn generate_certificate_inner(
 
 fn sign_tbs_certificate(
     tbs_certificate: &x509::TBSCertificate,
-    signer_key_pair: &ring::signature::RsaKeyPair) -> Result<Vec<u8>, Box<dyn Error>> {
+    signer_key_pair: &ring::signature::RsaKeyPair) -> Result<Vec<u8>, GenerateError> {
 
 
     let mut encoded_tbs_certificate: Vec<u8> = Vec::new();
@@ -181,7 +214,7 @@ fn sign_tbs_certificate(
 
     let encoding = &ring::signature::RSA_PKCS1_SHA256;
     signer_key_pair.sign(encoding, &rng, &encoded_tbs_certificate, &mut signature)
-        .map_err(|e| error!("Signing failed: {}", e))?;
+        .map_err(|_| GenerateError::Plain("Signing failed"))?;
 
 
     let signature_algorithm = AlgorithmIdentifier {
@@ -200,7 +233,7 @@ fn wrap_signature(
     tbs_certificate: &TBSCertificate,
     signature_algorithm: &AlgorithmIdentifier,
     signature_value: &BitString,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>, GenerateError> {
     let item = Item::from(Value::Sequence(vec![
         tbs_certificate.to_asn1(),
         signature_algorithm.to_asn1(),
