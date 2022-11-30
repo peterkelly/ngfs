@@ -1,5 +1,4 @@
 use std::fmt;
-use std::error::Error;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::{BufMut};
 use crate::util::util::BinaryData;
@@ -172,7 +171,7 @@ impl fmt::Display for Addr {
 pub struct MultiAddr(pub Vec<Addr>);
 
 impl MultiAddr {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
         let mut addrs: Vec<Addr> = Vec::new();
         let mut offset = 0;
         while offset < bytes.len() {
@@ -180,7 +179,7 @@ impl MultiAddr {
             addrs.push(addr);
             offset += consumed;
         }
-        Ok(MultiAddr(addrs))
+        MultiAddr(addrs)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {

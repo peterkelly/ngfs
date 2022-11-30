@@ -1,9 +1,9 @@
 use std::fmt;
-use std::error::Error;
-use crate::error;
+// use std::error::Error;
+// use crate::error;
 use crate::util::util::BinaryData;
 use crate::libp2p::peer_id::PublicKey;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPBError};
 use super::multiaddr::MultiAddr;
 
 #[derive(Clone)]
@@ -27,7 +27,7 @@ pub struct Identify {
 }
 
 impl Identify {
-    pub fn from_pb(raw_data: &[u8]) -> Result<Identify, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<Identify, FromPBError> {
         let mut opt_protocol_version: Option<String> = None;
         let mut opt_agent_version: Option<String> = None;
         let mut opt_public_key: Option<PublicKey> = None;
@@ -40,35 +40,35 @@ impl Identify {
         while let Some(field) = reader.read_field()? {
             match field.field_number {
                 5 => match &opt_protocol_version {
-                    Some(_) => return Err(error!("duplicate protocol_version")),
+                    Some(_) => return Err(FromPBError::DuplicateField("protocol_version")),
                     None => opt_protocol_version = Some(field.data.to_string()?),
                 }
                 6 => match &opt_agent_version {
-                    Some(_) => return Err(error!("duplicate agent_version")),
+                    Some(_) => return Err(FromPBError::DuplicateField("agent_version")),
                     None => opt_agent_version = Some(field.data.to_string()?),
                 }
                 3 => protocols.push(field.data.to_string()?),
                 1 => match &opt_public_key {
-                    Some(_) => return Err(error!("duplicate public_key")),
+                    Some(_) => return Err(FromPBError::DuplicateField("public_key")),
                     None => opt_public_key = Some(PublicKey::from_pb(field.data.to_bytes()?)?),
                 }
-                2 => listen_addrs.push(MultiAddr::from_bytes(field.data.to_bytes()?)?),
+                2 => listen_addrs.push(MultiAddr::from_bytes(field.data.to_bytes()?)),
                 4 => match &opt_observed_addr {
-                    Some(_) => return Err(error!("duplicate observed_addr")),
-                    None => opt_observed_addr = Some(MultiAddr::from_bytes(field.data.to_bytes()?)?),
+                    Some(_) => return Err(FromPBError::DuplicateField("observed_addr")),
+                    None => opt_observed_addr = Some(MultiAddr::from_bytes(field.data.to_bytes()?)),
                 }
                 8 => match &signed_peer_record {
-                    Some(_) => return Err(error!("duplicate signed_peer_record")),
+                    Some(_) => return Err(FromPBError::DuplicateField("duplicate signed_peer_record")),
                     None => signed_peer_record = Some(SignedPeerRecord(Vec::from(field.data.to_bytes()?))),
                 }
                 _ => (),
             }
         }
 
-        let protocol_version = opt_protocol_version.ok_or_else(|| error!("Missing field: protocol_version"))?;
-        let agent_version = opt_agent_version.ok_or_else(|| error!("Missing field: agent_version"))?;
-        let public_key = opt_public_key.ok_or_else(|| error!("Missing field: public_key"))?;
-        let observed_addr = opt_observed_addr.ok_or_else(|| error!("Missing field: observed_addr"))?;
+        let protocol_version = opt_protocol_version.ok_or(FromPBError::MissingField("protocol_version"))?;
+        let agent_version = opt_agent_version.ok_or(FromPBError::MissingField("agent_version"))?;
+        let public_key = opt_public_key.ok_or(FromPBError::MissingField("public_key"))?;
+        let observed_addr = opt_observed_addr.ok_or(FromPBError::MissingField("observed_addr"))?;
 
         Ok(Identify {
             protocol_version,
