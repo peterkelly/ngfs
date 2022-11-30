@@ -11,7 +11,7 @@ use openssl::rsa::Rsa;
 use rand::prelude::Rng;
 use crate::util::util::{BinaryData, escape_string};
 use super::peer_id::{KeyType, PublicKey};
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPB, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, ToPB, FromPB, FromPBError};
 use crate::formats::protobuf::varint::DecodeError;
 use crate::crypto::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
 use crate::formats::protobuf::varint;
@@ -143,8 +143,8 @@ impl FromPB for Propose {
     }
 }
 
-impl Propose {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for Propose {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.rand);
         writer.write_bytes(2, &self.pubkey);
@@ -197,8 +197,8 @@ impl FromPB for Exchange {
     }
 }
 
-impl Exchange {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for Exchange {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.epubkey);
         writer.write_bytes(2, &self.signature);

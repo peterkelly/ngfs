@@ -1,7 +1,7 @@
 // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md
 
 use std::fmt;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, ToPB, FromPB, FromPBError};
 use crate::util::util::{BinaryData};
 
 #[derive(Debug, Clone)]
@@ -60,8 +60,8 @@ impl FromPB for PublicKey {
     }
 }
 
-impl PublicKey {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for PublicKey {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_uint64(1, self.key_type.clone() as u64);
         writer.write_bytes(2, &self.data);

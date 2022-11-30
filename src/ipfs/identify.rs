@@ -8,6 +8,7 @@ use crate::ipfs::node::IPFSNode;
 use crate::libp2p::peer_id::{PublicKey, KeyType};
 use crate::libp2p::multiaddr::{MultiAddr, Addr};
 use crate::libp2p::io::write_length_prefixed_data;
+use crate::formats::protobuf::protobuf::ToPB;
 
 async fn identify_handler_inner(
     node: Arc<IPFSNode>,

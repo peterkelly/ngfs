@@ -1,7 +1,7 @@
 // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-pb.md
 
 use std::fmt;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, ToPB, FromPB, FromPBError};
 use crate::ipfs::types::cid::CID;
 use crate::util::util::OptBinaryDataLen;
 
@@ -21,8 +21,8 @@ impl fmt::Debug for PBLink {
     }
 }
 
-impl PBLink {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for PBLink {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.hash.to_bytes());
         if let Some(name) = &self.name {
@@ -85,8 +85,8 @@ impl fmt::Debug for PBNode {
     }
 }
 
-impl PBNode {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for PBNode {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         for link in self.links.iter() {
             writer.write_bytes(2, &link.to_pb());

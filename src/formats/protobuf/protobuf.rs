@@ -543,6 +543,10 @@ pub trait FromPB : Sized {
     fn from_pb(raw_data: &[u8]) -> Result<Self, FromPBError>;
 }
 
+pub trait ToPB {
+    fn to_pb(&self) -> Vec<u8>;
+}
+
 #[derive(Debug)]
 pub enum FromPBError {
     Plain(&'static str),

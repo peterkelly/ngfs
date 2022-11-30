@@ -1,5 +1,5 @@
 use std::fmt;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, ToPB, FromPB, FromPBError};
 use crate::ipfs::types::cid::{CID, RawCID};
 use crate::util::util::BinaryData;
 
@@ -18,8 +18,8 @@ pub struct Entry {
     pub send_dont_have: bool, // default false
 }
 
-impl Entry {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for Entry {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.block.0);
         writer.write_int32(2, self.priority);
@@ -103,8 +103,8 @@ pub struct WantList {
     pub full: bool, // default false
 }
 
-impl WantList {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for WantList {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         for entry in self.entries.iter() {
             writer.write_bytes(1, &entry.to_pb());
@@ -150,8 +150,8 @@ pub struct Block {
     pub data: Vec<u8>,
 }
 
-impl Block {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for Block {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.prefix);
         writer.write_bytes(2, &self.data);
@@ -226,8 +226,8 @@ pub struct Message {
     pub pending_bytes: Option<u32>,
 }
 
-impl Message {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for Message {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         if let Some(wantlist) = &self.wantlist {
             writer.write_bytes(1, &wantlist.to_pb());

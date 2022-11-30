@@ -3,7 +3,7 @@ use std::fmt;
 // use crate::error;
 use crate::util::util::BinaryData;
 use crate::libp2p::peer_id::PublicKey;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, ToPB, FromPB, FromPBError};
 use super::multiaddr::MultiAddr;
 
 #[derive(Clone)]
@@ -82,8 +82,8 @@ impl FromPB for Identify {
     }
 }
 
-impl Identify {
-    pub fn to_pb(&self) -> Vec<u8> {
+impl ToPB for Identify {
+    fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.public_key.to_pb());
         for addr in self.listen_addrs.iter() {

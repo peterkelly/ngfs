@@ -1,6 +1,7 @@
 use std::fmt;
 use ring::signature::{RsaKeyPair, KeyPair};
 use crate::util::util::from_hex;
+use crate::formats::protobuf::protobuf::ToPB;
 use crate::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use crate::formats::asn1::writer::encode_item;
 use super::peer_id::{KeyType, PublicKey};
