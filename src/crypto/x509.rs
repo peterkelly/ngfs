@@ -1,10 +1,9 @@
 // https://tools.ietf.org/html/rfc5280
 
-use std::error::Error;
+use std::fmt;
 use crate::util::util::BinaryData;
 use crate::util::binary::BinaryReader;
-use crate::error;
-use crate::formats::asn1::value::{ObjectIdentifier, BitString, Integer, Value, Item};
+use crate::formats::asn1::value::{ObjectIdentifier, BitString, Integer, Value, Item, TypeError};
 use crate::formats::asn1::printer::ObjectRegistry;
 use crate::formats::asn1;
 
@@ -45,13 +44,50 @@ pub const CRYPTO_CURVE_PRIME256V1: [u64; 7] = [1, 2, 840, 10045, 3, 1, 7]; // ak
 //        signatureAlgorithm   AlgorithmIdentifier,
 //        signatureValue       BIT STRING  }
 
+#[derive(Debug)]
+pub enum ParseError {
+    Plain(&'static str),
+    Type(TypeError),
+    Reader(asn1::reader::Error),
+}
+
+impl std::error::Error for ParseError {}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParseError::Plain(e) => write!(f, "{}", e),
+            ParseError::Type(e) => write!(f, "{}", e),
+            ParseError::Reader(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl From<&'static str> for ParseError {
+    fn from(msg: &'static str) -> Self {
+        ParseError::Plain(msg)
+    }
+}
+
+impl From<TypeError> for ParseError {
+    fn from(e: TypeError) -> Self {
+        ParseError::Type(e)
+    }
+}
+
+impl From<asn1::reader::Error> for ParseError {
+    fn from(e: asn1::reader::Error) -> Self {
+        ParseError::Reader(e)
+    }
+}
+
 pub struct AlgorithmIdentifier {
     pub algorithm: ObjectIdentifier,
     pub parameters: Option<Item>,
 }
 
 impl AlgorithmIdentifier {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let mut it = item.as_sequence_iter()?;
 
         let elem = it.next().ok_or("Missing algorithm")?;
@@ -60,7 +96,7 @@ impl AlgorithmIdentifier {
         let parameters = it.next().cloned();
 
         if it.next().is_some() {
-            return Err(error!("Unexpected value"));
+            return Err("Unexpected value".into());
         }
 
         Ok(AlgorithmIdentifier {
@@ -99,13 +135,13 @@ pub struct Certificate {
 }
 
 impl Certificate {
-    pub fn from_bytes(data: &[u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         let mut certificate_reader = BinaryReader::new(data);
         let item = asn1::reader::read_item(&mut certificate_reader)?;
         Certificate::from_asn1(&item)
     }
 
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let elements = item.as_exact_sequence(3)?;
 
         let tbs_certificate = TBSCertificate::from_asn1(&elements[0])?;
@@ -115,7 +151,7 @@ impl Certificate {
                 bit_string.clone()
             }
             _ => {
-                return Err(error!("Certificate: Expected elements[2] to be a bit string"));
+                return Err("Certificate: Expected elements[2] to be a bit string".into());
             }
         };
 
@@ -143,16 +179,16 @@ pub enum Version {
 }
 
 impl Version {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let int_value = item.as_integer()?;
         if int_value.0.len() != 1 {
-            return Err(error!("Invalid version"));
+            return Err("Invalid version".into());
         }
         match int_value.0[0] {
             0 => Ok(Version::V1),
             1 => Ok(Version::V2),
             2 => Ok(Version::V3),
-            _ => Err(error!("Invalid version")),
+            _ => Err("Invalid version".into()),
         }
     }
 
@@ -171,7 +207,7 @@ pub struct RelativeDistinguishedName {
 }
 
 impl RelativeDistinguishedName {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let set_elements = item.as_exact_set(1)?;
         let elements = set_elements[0].as_exact_sequence(2)?;
         Ok(RelativeDistinguishedName {
@@ -195,7 +231,7 @@ pub struct Name {
 }
 
 impl Name {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let elements = item.as_sequence()?;
         let mut parts: Vec<RelativeDistinguishedName> = Vec::new();
         for elem in elements.iter() {
@@ -239,11 +275,11 @@ pub enum Time {
 }
 
 impl Time {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         match &item.value {
             Value::UTCTime(s) => Ok(Time::UTCTime(UTCTime { data: s.clone() })),
             Value::GeneralizedTime(s) => Ok(Time::GeneralizedTime(GeneralizedTime { data: s.clone() })),
-            _ => Err(error!("Expected a UTCTime or GeneralizedTime")),
+            _ => Err("Expected a UTCTime or GeneralizedTime".into()),
         }
     }
 
@@ -261,7 +297,7 @@ pub struct Validity {
 }
 
 impl Validity {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let elements = item.as_exact_sequence(2)?;
         let not_before = Time::from_asn1(&elements[0])?;
         let not_after = Time::from_asn1(&elements[1])?;
@@ -281,7 +317,7 @@ pub struct SubjectPublicKeyInfo {
 }
 
 impl SubjectPublicKeyInfo {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let elements = item.as_exact_sequence(2)?;
         let algorithm = AlgorithmIdentifier::from_asn1(&elements[0])?;
         let subject_public_key = elements[1].as_bit_string()?.clone();
@@ -314,7 +350,7 @@ pub struct Extension {
 }
 
 impl Extension {
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let mut it = item.as_sequence_iter()?;
         let mut element = it.next().ok_or("Missing element")?;
         let id = element.as_object_identifier()?.clone();
@@ -390,7 +426,7 @@ impl TBSCertificate {
         Item::from(Value::Sequence(items))
     }
 
-    pub fn from_asn1(item: &Item) -> Result<Self, Box<dyn Error>> {
+    pub fn from_asn1(item: &Item) -> Result<Self, ParseError> {
         let mut it = item.as_sequence_iter()?;
 
         let mut elem = it.next().ok_or("Missing version")?;
@@ -428,13 +464,13 @@ impl TBSCertificate {
                     }
                 }
                 _ => {
-                    return Err(error!("Unexpected value for extension"));
+                    return Err("Unexpected value for extension".into());
                 }
             }
         };
 
         if it.next().is_some() {
-            return Err(error!("Unexpected value"));
+            return Err("Unexpected value".into());
         }
 
         Ok(TBSCertificate {
