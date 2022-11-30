@@ -1,9 +1,7 @@
 // https://github.com/ipfs/specs/blob/master/UNIXFS.md
 
 use std::fmt;
-use std::error::Error;
-use crate::error;
-use crate::formats::protobuf::protobuf::PBufReader;
+use crate::formats::protobuf::protobuf::{PBufReader, FromPBError};
 
 #[derive(Debug)]
 pub enum DataType {
@@ -16,15 +14,15 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub fn from_u8(code: u8) -> Option<DataType> {
+    pub fn from_u64(code: u64) -> Result<DataType, FromPBError> {
         match code {
-            0 => Some(DataType::Raw),
-            1 => Some(DataType::Directory),
-            2 => Some(DataType::File),
-            3 => Some(DataType::Metadata),
-            4 => Some(DataType::Symlink),
-            5 => Some(DataType::HAMTShard),
-            _ => None,
+            0 => Ok(DataType::Raw),
+            1 => Ok(DataType::Directory),
+            2 => Ok(DataType::File),
+            3 => Ok(DataType::Metadata),
+            4 => Ok(DataType::Symlink),
+            5 => Ok(DataType::HAMTShard),
+            _ => Err(FromPBError::Plain("unknown data type")),
         }
     }
 
@@ -40,7 +38,6 @@ impl DataType {
     }
 }
 
-// #[derive(Debug)]
 pub struct Data {
     pub type_: DataType,         // 1
     pub data: Option<Vec<u8>>,   // 2
@@ -71,7 +68,7 @@ impl fmt::Debug for Data {
 }
 
 impl Data {
-    pub fn from_pb(raw_data: &[u8]) -> Result<Data, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<Data, FromPBError> {
         let mut opt_type_: Option<DataType> = None;
         let mut data: Option<Vec<u8>> = None;
         let mut filesize: Option<u64> = None;
@@ -83,48 +80,41 @@ impl Data {
 
         let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
-            // println!("    Data: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
                 1 => match &opt_type_ {
-                    Some(_) => return Err(error!("duplicate opt_type_")),
-                    None => {
-                        match DataType::from_u8(field.data.to_uint64()? as u8) {
-                            Some(type_) => opt_type_ = Some(type_),
-                            None => return Err(error!("unknown data type")),
-                        }
-                    }
+                    Some(_) => return Err(FromPBError::DuplicateField("type")),
+                    None => opt_type_ = Some(DataType::from_u64(field.data.to_uint64()?)?)
                 },
                 2 => match &data {
-                    Some(_) => return Err(error!("duplicate data")),
+                    Some(_) => return Err(FromPBError::DuplicateField("data")),
                     None => data = Some(Vec::from(field.data.to_bytes()?)),
                 },
                 3 => match &filesize {
-                    Some(_) => return Err(error!("duplicate filesize")),
+                    Some(_) => return Err(FromPBError::DuplicateField("filesize")),
                     None => filesize = Some(field.data.to_uint64()?),
                 },
                 4 => blocksizes.push(field.data.to_uint64()?),
                 5 => match &hash_type {
-                    Some(_) => return Err(error!("duplicate hash_type")),
+                    Some(_) => return Err(FromPBError::DuplicateField("hash_type")),
                     None => hash_type = Some(field.data.to_uint64()?),
                 },
                 6 => match &fanout {
-                    Some(_) => return Err(error!("duplicate fanout")),
+                    Some(_) => return Err(FromPBError::DuplicateField("fanout")),
                     None => fanout = Some(field.data.to_uint64()?),
                 },
                 7 => match &mode {
-                    Some(_) => return Err(error!("duplicate mode")),
+                    Some(_) => return Err(FromPBError::DuplicateField("mode")),
                     None => mode = Some(field.data.to_uint32()?),
                 },
                 8 => match &mtime {
-                    Some(_) => return Err(error!("duplicate mtime")),
+                    Some(_) => return Err(FromPBError::DuplicateField("duplicate mtime")),
                     None => mtime = Some(UnixTime::from_pb(field.data.to_bytes()?)?),
                 },
-
                 _ => (),
             }
         }
 
-        let type_ = opt_type_.ok_or_else(|| error!("Missing field: type"))?;
+        let type_ = opt_type_.ok_or(FromPBError::MissingField("type"))?;
         Ok(Data {
             type_,
             data,
@@ -151,27 +141,26 @@ pub struct UnixTime {
 }
 
 impl UnixTime {
-    pub fn from_pb(raw_data: &[u8]) -> Result<UnixTime, Box<dyn Error>> {
+    pub fn from_pb(raw_data: &[u8]) -> Result<UnixTime, FromPBError> {
         let mut seconds: Option<i64> = None;
         let mut fractional_nanoseconds: Option<u32> = None;
 
         let mut reader = PBufReader::new(raw_data);
         while let Some(field) = reader.read_field()? {
-            // println!("    UnixTime: field {} wire_type {}", field.field_number, field.wire_type);
             match field.field_number {
                 1 => match &seconds {
-                    Some(_) => return Err(error!("duplicate seconds")),
+                    Some(_) => return Err(FromPBError::DuplicateField("seconds")),
                     None => seconds = Some(field.data.to_int64()?),
                 },
                 2 => match &fractional_nanoseconds {
-                    Some(_) => return Err(error!("duplicate fractional_nanoseconds")),
+                    Some(_) => return Err(FromPBError::DuplicateField("fractional_nanoseconds")),
                     None => fractional_nanoseconds = Some(field.data.to_fixed32()?),
                 },
                 _ => (),
             }
         }
 
-        let seconds = seconds.ok_or_else(|| error!("Missing field: seconds"))?;
+        let seconds = seconds.ok_or(FromPBError::MissingField("seconds"))?;
         Ok(UnixTime { seconds, fractional_nanoseconds })
     }
 }

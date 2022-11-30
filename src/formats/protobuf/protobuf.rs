@@ -546,6 +546,7 @@ pub enum FromPBError {
     Decode(varint::DecodeError),
     InvalidUTF8String(std::string::FromUtf8Error),
     MissingField(&'static str),
+    DuplicateField(&'static str),
 }
 
 impl std::error::Error for FromPBError {}
@@ -558,6 +559,7 @@ impl fmt::Display for FromPBError {
             FromPBError::Decode(e) => write!(f, "{}", e),
             FromPBError::InvalidUTF8String(e) => write!(f, "{}", e),
             FromPBError::MissingField(e) => write!(f, "Missing field: {}", e),
+            FromPBError::DuplicateField(e) => write!(f, "Duplicate field: {}", e),
         }
     }
 }
