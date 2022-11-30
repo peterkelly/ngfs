@@ -1,5 +1,4 @@
-// use std::fmt;
-use std::error::Error;
+use std::fmt;
 use std::cmp::Ordering;
 use tokio::net::{lookup_host};
 use std::net::SocketAddr;
@@ -7,12 +6,13 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 // use native_tls;
 // use tokio_tls;
+use openssl::error::ErrorStack;
 use openssl::rsa::Rsa;
 use rand::prelude::Rng;
-use crate::error;
 use crate::util::util::{BinaryData, escape_string};
 use super::peer_id::{KeyType, PublicKey};
 use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPBError};
+use crate::formats::protobuf::varint::DecodeError;
 use crate::crypto::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
 use crate::formats::protobuf::varint;
 
@@ -26,6 +26,57 @@ use openssl::sha::Sha256;
 use openssl::symm::{Crypter, Cipher, Mode};
 // use openssl::ec::PointConversionForm;
 
+pub enum SecIOError {
+    Plain(&'static str),
+    String(String),
+}
+
+impl std::error::Error for SecIOError {}
+
+impl fmt::Display for SecIOError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SecIOError::Plain(e) => write!(f, "{}", e),
+            SecIOError::String(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl fmt::Debug for SecIOError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl From<std::io::Error> for SecIOError {
+    fn from(e: std::io::Error) -> Self {
+        SecIOError::String(format!("{}", e))
+    }
+}
+
+impl From<DecodeError> for SecIOError {
+    fn from(e: DecodeError) -> Self {
+        SecIOError::String(format!("{}", e))
+    }
+}
+
+impl From<ErrorStack> for SecIOError {
+    fn from(e: ErrorStack) -> Self {
+        SecIOError::String(format!("{}", e))
+    }
+}
+
+impl From<std::string::FromUtf8Error> for SecIOError {
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        SecIOError::String(format!("{}", e))
+    }
+}
+
+impl From<FromPBError> for SecIOError {
+    fn from(e: FromPBError) -> Self {
+        SecIOError::String(format!("{}", e))
+    }
+}
 
 enum Preference {
     Remote,
@@ -152,37 +203,37 @@ impl Exchange {
 }
 
 
-async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), Box<dyn Error>> {
+async fn send_string(stream: &mut TcpStream, tosend_str: &str) -> Result<(), SecIOError> {
     send_bytes(stream, tosend_str.as_bytes()).await?;
     println!("Sent {}", escape_string(tosend_str));
     Ok(())
 }
 
-async fn send_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+async fn send_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), SecIOError> {
     let mut tosend: Vec<u8> = Vec::new();
     varint::encode_usize(tosend_bytes.len(), &mut tosend);
     tosend.append(&mut Vec::from(tosend_bytes));
     let w = stream.write(&tosend).await?;
     // println!("Sent {} bytes", w);
     if w != tosend.len() {
-        return Err(error!("Only sent {} bytes of {}", w, tosend.len()));
+        return Err(SecIOError::String(format!("Only sent {} bytes of {}", w, tosend.len())));
     }
     Ok(())
 }
 
-async fn send_length_prefixed_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+async fn send_length_prefixed_bytes(stream: &mut TcpStream, tosend_bytes: &[u8]) -> Result<(), SecIOError> {
     let mut tosend: Vec<u8> = Vec::new();
     tosend.append(&mut Vec::from(&(tosend_bytes.len() as u32).to_be_bytes()[..]));
     tosend.append(&mut Vec::from(tosend_bytes));
     let w = stream.write(&tosend).await?;
     // println!("Sent {} bytes", w);
     if w != tosend.len() {
-        return Err(error!("Only sent {} bytes of {}", w, tosend.len()));
+        return Err(SecIOError::String(format!("Only sent {} bytes of {}", w, tosend.len())));
     }
     Ok(())
 }
 
-pub fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
+pub fn print_fields(data: &[u8]) -> Result<(), FromPBError> {
     let mut reader = PBufReader::new(data);
     while let Some(field) = reader.read_field()? {
         println!("offset 0x{:04x}, field_number {:2}, data {:?}",
@@ -199,23 +250,23 @@ pub fn print_fields(data: &[u8]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn recv_length_prefixed_binary(stream: &mut TcpStream) -> Result<Vec<u8>, Box<dyn Error>> {
+async fn recv_length_prefixed_binary(stream: &mut TcpStream) -> Result<Vec<u8>, SecIOError> {
     println!("recv_length_prefixed_binary");
     let mut length_buf: [u8; 4] = [0; 4];
     let r = stream.read(&mut length_buf).await?;
     if r != 4 {
-        return Err(error!("Insufficient data while reading message length"));
+        return Err(SecIOError::Plain("Insufficient data while reading message length"));
     }
     println!("length_buf = {:?}", length_buf);
     let msglen = u32::from_be_bytes(length_buf) as usize;
     println!("msglen = {}", msglen);
     if msglen >= 0x800000 {
-        return Err(error!("Message length {} exceeds allowed length", msglen));
+        return Err(SecIOError::String(format!("Message length {} exceeds allowed length", msglen)));
     }
     receive_exact(stream, msglen).await
 }
 
-async fn receive_exact(stream: &mut TcpStream, msglen: usize) -> Result<Vec<u8>, Box<dyn Error>> {
+async fn receive_exact(stream: &mut TcpStream, msglen: usize) -> Result<Vec<u8>, SecIOError> {
     let mut body: Vec<u8> = Vec::with_capacity(msglen as usize);
 
     let mut total_read  = 0;
@@ -239,7 +290,9 @@ async fn receive_exact(stream: &mut TcpStream, msglen: usize) -> Result<Vec<u8>,
     }
 
     if total_read != msglen {
-        return Err(error!("Insufficient data while reading message body; got {} bytes, expected {}", total_read, msglen));
+        return Err(SecIOError::String(format!(
+            "Insufficient data while reading message body; got {} bytes, expected {}",
+            total_read, msglen)));
     }
 
 
@@ -283,19 +336,19 @@ fn make_propose(rng: &mut impl Rng, pubkey: &PublicKey) -> Propose {
 
 const MAX_VARINT_BYTES: usize = 10;
 
-async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8>, Box<dyn Error>> {
+async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8>, SecIOError> {
     let mut length_bytes: Vec<u8> = Vec::new();
     loop {
         let mut single_buf: [u8; 1] = [0; 1];
         let r: usize = stream.read(&mut single_buf).await?;
         if r == 0 {
-            return Err(error!("Premature end of stream while reading varint length"));
+            return Err(SecIOError::Plain("Premature end of stream while reading varint length"));
         }
         let b = single_buf[0];
         // println!("b = 0x{:02x}", b);
         length_bytes.push(b);
         if length_bytes.len() > MAX_VARINT_BYTES {
-            return Err(error!("Length varint is too long"));
+            return Err(SecIOError::Plain("Length varint is too long"));
         }
         // if length_bytes.len() == 99 {
         //     break;
@@ -307,7 +360,7 @@ async fn receive_varint_length_prefixed(stream: &mut TcpStream) -> Result<Vec<u8
     }
     // println!("length_bytes = {}", BinaryData(&length_bytes));
     let mut offset = 0;
-    let length_varint = VarInt::read_from(&length_bytes, &mut offset).ok_or_else(|| error!("Invalid varint"))?;
+    let length_varint = VarInt::read_from(&length_bytes, &mut offset).ok_or(SecIOError::Plain("Invalid varint"))?;
     let length = length_varint.to_usize()?;
     // println!("length = {}", length);
 
@@ -334,7 +387,7 @@ fn print_propose(propose: &Propose, pubkey: &PublicKey) {
     }
 }
 
-pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
+pub async fn p2p_test(server_addr_str: &str) -> Result<(), SecIOError> {
     let mut rng = rand::thread_rng();
 
     // Generate out private key (our peer id can be derived from this)
@@ -344,7 +397,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     // Open the connection
     let peer_addr: SocketAddr = match lookup_host(server_addr_str).await?.next() {
         Some(v) => v,
-        None => return Err(error!("Cannot resolve host: {}", server_addr_str)),
+        None => return Err(SecIOError::String(format!("Cannot resolve host: {}", server_addr_str))),
     };
 
     println!("Before opening connection");
@@ -432,7 +485,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     println!("oh2 = {}", BinaryData(&oh2));
 
     let preference: Preference = match oh1_raw.cmp(&oh2_raw) {
-        Ordering::Equal => return Err(error!("Talking to self")),
+        Ordering::Equal => return Err(SecIOError::Plain("Talking to self")),
         Ordering::Less => Preference::Remote,
         Ordering::Greater => Preference::Local,
     };
@@ -467,7 +520,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     remote_verifier.update(&local_propose_bytes)?;
     remote_verifier.update(&remote_exchange.epubkey)?;
     if !remote_verifier.verify(&remote_exchange.signature)? {
-        return Err(error!("Invalid signature for remote exchange message"));
+        return Err(SecIOError::Plain("Invalid signature for remote exchange message"));
     }
 
 
@@ -636,7 +689,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     let msg_parts = recv_length_prefixed_binary(&mut stream).await?;
     println!("Received: {}", BinaryData(&msg_parts));
     if msg_parts.len() < SHA256_DIGEST_SIZE {
-        return Err(error!("Encrypted data is smaller than digest size"));
+        return Err(SecIOError::Plain("Encrypted data is smaller than digest size"));
     }
     let message_enc = &msg_parts[..msg_parts.len() - SHA256_DIGEST_SIZE];
     let message_mac = &msg_parts[msg_parts.len() - SHA256_DIGEST_SIZE..];
@@ -656,7 +709,7 @@ pub async fn p2p_test(server_addr_str: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Result<(), Box<dyn Error>> {
+fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Result<(), SecIOError> {
     let cipher: Cipher = Cipher::aes_256_ctr();
     let block_size = cipher.block_size();
     let mut decrypter = Crypter::new(cipher, Mode::Decrypt, &keys.cipher_key, Some(&keys.iv))?;
@@ -675,7 +728,7 @@ fn test_decryption(message_enc: &[u8], message_mac: &[u8], keys: &AESKey) -> Res
     println!("    computed_mac = ({} bytes) {}", computed_mac.len(), BinaryData(&computed_mac));
 
     if message_mac != computed_mac {
-        return Err(error!("MAC mismatch"));
+        return Err(SecIOError::Plain("MAC mismatch"));
     }
 
     Ok(())

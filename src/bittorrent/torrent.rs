@@ -1,10 +1,46 @@
 use std::fmt;
-use std::error::Error;
 use sha1::{Sha1, Digest};
 use crate::formats::bencoding;
-use crate::formats::bencoding::{Value};
-use crate::error;
+use crate::formats::bencoding::ParseError;
+use crate::formats::bencoding::{Value, ValueError};
 use crate::util::util::BinaryData;
+
+pub enum TorrentError {
+    String(String),
+    Value(ValueError),
+    Parse(ParseError),
+}
+
+impl std::error::Error for TorrentError {}
+
+impl fmt::Display for TorrentError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TorrentError::String(e) => write!(f, "{}", e),
+            TorrentError::Value(e) => write!(f, "{}", e),
+            TorrentError::Parse(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl fmt::Debug for TorrentError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl From<ValueError> for TorrentError {
+    fn from(e: ValueError) -> Self {
+        TorrentError::Value(e)
+    }
+}
+
+impl From<ParseError> for TorrentError {
+    fn from(e: ParseError) -> Self {
+        TorrentError::Parse(e)
+    }
+}
+
 
 pub struct InfoHash {
     pub data: [u8; 20],
@@ -51,7 +87,7 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    fn parse_announce_list(be_announce_list_value: &Value) -> Result<Vec<TrackerGroup>, Box<dyn Error>> {
+    fn parse_announce_list(be_announce_list_value: &Value) -> Result<Vec<TrackerGroup>, TorrentError> {
         let mut groups: Vec<TrackerGroup> = Vec::new();
         let be_announce_list = be_announce_list_value.as_list()?;
         for be_group_value in be_announce_list.items.iter() {
@@ -66,7 +102,7 @@ impl Torrent {
         Ok(groups)
     }
 
-    fn parse_files(be_files_value: &Value) -> Result<Vec<TorrentFile>, Box<dyn Error>> {
+    fn parse_files(be_files_value: &Value) -> Result<Vec<TorrentFile>, TorrentError> {
         let mut files: Vec<TorrentFile> = Vec::new();
         let be_files_list = be_files_value.as_list()?;
         for be_file_value in be_files_list.items.iter() {
@@ -88,7 +124,7 @@ impl Torrent {
         Ok(files)
     }
 
-    pub fn from_bytes(data: &[u8]) -> Result<Torrent, Box<dyn Error>> {
+    pub fn from_bytes(data: &[u8]) -> Result<Torrent, TorrentError> {
         let value = bencoding::parse(data)?;
         let root = value.as_dictionary()?;
         let info = root.get_required("info")?.as_dictionary()?;
@@ -103,7 +139,9 @@ impl Torrent {
         let piece_length = info.get_required("piece length")?.as_integer()?.value;
         let pieces_data = &info.get_required("pieces")?.as_byte_string()?.data;
         if pieces_data.len() % 20 != 0 {
-            return Err(error!("Pieces data is {} bytes, which is not a multiple of 20", pieces_data.len()));
+            return Err(TorrentError::String(format!(
+                "Pieces data is {} bytes, which is not a multiple of 20",
+                pieces_data.len())));
         }
 
         let mut pieces = Vec::<PieceHash>::new();

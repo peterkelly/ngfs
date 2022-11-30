@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::fmt;
 use crate::util::util::BinaryData;
 
@@ -9,10 +8,7 @@ pub struct ValueError {
     data: ValueErrorData,
 }
 
-impl Error for ValueError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None
-    }
+impl std::error::Error for ValueError {
 }
 
 #[derive(Debug)]
@@ -119,8 +115,8 @@ impl Value {
 }
 
 impl Value {
-    pub fn as_string(&self) -> Result<String, Box<dyn Error>> {
-        Ok(self.as_byte_string()?.as_string()?)
+    pub fn as_string(&self) -> Result<String, ValueError> {
+        self.as_byte_string()?.as_string()
     }
 
     pub fn as_byte_string(&self) -> Result<&ByteString, ValueError> {

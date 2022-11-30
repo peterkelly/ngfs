@@ -208,7 +208,7 @@ impl<'a> BinaryReader<'a> {
             res.push(T::from_binary(&mut inner)?);
             let new_offset = inner.offset;
             if old_offset == new_offset {
-                return Err(BinaryError::NothingConsumed { offset: old_offset }.into())
+                return Err(BinaryError::NothingConsumed { offset: old_offset })
             }
         }
         Ok(res)
