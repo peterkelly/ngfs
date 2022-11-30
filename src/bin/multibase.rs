@@ -14,7 +14,6 @@ use torrent::ipfs::types::multibase::{
     encode_noprefix,
     decode,
 };
-use torrent::error;
 
 #[derive(Parser)]
 #[command(name="multibase")]
@@ -73,7 +72,7 @@ fn decode_cmd(args: &Decode) -> Result<(), Box<dyn Error>> {
 }
 
 fn convert(args: &Convert) -> Result<(), Box<dyn Error>> {
-    let to_base = Base::for_name(&args.to).ok_or_else(|| error!("Unknown base: {}", args.to))?;
+    let to_base = Base::for_name(&args.to).ok_or_else(|| format!("Unknown base: {}", args.to))?;
     let binary = decode(&args.value)?;
     println!("{}", encode(&binary, to_base));
     Ok(())

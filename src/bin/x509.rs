@@ -10,7 +10,6 @@ use std::error::Error;
 use clap::{Parser, Subcommand, ValueHint};
 use torrent::util::util::from_hex;
 use torrent::util::binary::BinaryReader;
-use torrent::error;
 use torrent::formats::asn1;
 use torrent::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use torrent::formats::asn1::writer::encode_item;
@@ -83,21 +82,21 @@ use ring::signature::{RsaKeyPair, KeyPair};
 fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
     // pub serial_number: Integer,
     let serial_number = from_hex("00fece0a9eaa3eddc3")
-        .ok_or_else(|| error!("Invalid hex string: serial_number"))?;
+        .ok_or("Invalid hex string: serial_number")?;
 
     let authority_key_identifier = from_hex(
         &format!("{}{}",
         "3050a143a441303f310b300906035504061302555331173015060355040a0c0e4d7920506572736f6e",
         "616c2043413117301506035504030c0e6d792e706572736f6e616c2e6361820900d7c3d885fa68751d"))
-        .ok_or_else(|| error!("Invalid hex string: authority_key_identifier"))?;
+        .ok_or("Invalid hex string: authority_key_identifier")?;
     let basic_constraints = from_hex("3000")
-        .ok_or_else(|| error!("Invalid hex string: basic_constraints"))?;
+        .ok_or("Invalid hex string: basic_constraints")?;
     let key_usage = from_hex("030204f0")
-        .ok_or_else(|| error!("Invalid hex string: key_usage"))?;
+        .ok_or("Invalid hex string: key_usage")?;
 
 
     let subject_key_pair = std::fs::read(&subcmd.subject_private_key)
-        .map_err(|e| error!("{}: {}", subcmd.subject_private_key, e))?;
+        .map_err(|e| format!("{}: {}", subcmd.subject_private_key, e))?;
     println!("Got subject_key_pair");
     let subject_key_pair = RsaKeyPair::from_der(&subject_key_pair)?;
     println!("Got subject_key_pair");
@@ -106,7 +105,7 @@ fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
 
 
     let signer_key_pair_bytes = std::fs::read(&subcmd.signer_private_key)
-        .map_err(|e| error!("{}: {}", subcmd.signer_private_key, e))?;
+        .map_err(|e| format!("{}: {}", subcmd.signer_private_key, e))?;
     println!("Got signer_key_pair");
     let signer_key_pair = RsaKeyPair::from_der(&signer_key_pair_bytes)?;
     // println!("Got signer_key_pair");
@@ -178,7 +177,7 @@ fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
     };
 
     let output_data = sign_tbs_certificate(&tbs_certificate, &signer_key_pair)?;
-    std::fs::write(&subcmd.output, &output_data).map_err(|e| error!("{}: {}", subcmd.output, e))?;
+    std::fs::write(&subcmd.output, &output_data).map_err(|e| format!("{}: {}", subcmd.output, e))?;
     println!("Wrote {}", subcmd.output);
 
     Ok(())
@@ -198,7 +197,7 @@ fn sign_tbs_certificate(
     let encoding = &ring::signature::RSA_PKCS1_SHA256;
     // let encoding = &ring::signature::RSA_PSS_SHA256; // bad
     signer_key_pair.sign(encoding, &rng, &encoded_tbs_certificate, &mut signature)
-        .map_err(|e| error!("Signing failed: {}", e))?;
+        .map_err(|e| format!("Signing failed: {}", e))?;
 
 
     let signature_algorithm = AlgorithmIdentifier {

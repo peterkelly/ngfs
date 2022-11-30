@@ -6,7 +6,6 @@
 // #![allow(unused_macros)]
 
 use std::error::Error;
-use torrent::error;
 use torrent::util::util::{BinaryData};
 use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
 use torrent::formats::protobuf::varint;
@@ -21,7 +20,7 @@ fn get_argument<'a>(args: &'a [String], index: usize, name: &str) -> Result<&'a 
             Ok(command)
         }
         None => {
-            Err(error!("Missing argument: {}", name))
+            Err(format!("Missing argument: {}", name).into())
         }
     }
 }
@@ -67,11 +66,11 @@ async fn varint_command(_args: &[String]) -> Result<(), Box<dyn Error>> {
                     println!("{:10} 0x{:016x} OK", i, value);
                 }
                 else {
-                    return Err(error!("0x{:016x} != 0x{:016x}", value, decoded_value));
+                    return Err(format!("0x{:016x} != 0x{:016x}", value, decoded_value).into());
                 }
             }
             None => {
-                return Err(error!("0x{:016x} INVALID", value));
+                return Err(format!("0x{:016x} INVALID", value).into());
             }
         }
     }
@@ -142,7 +141,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         _ => {
-            Err(error!("Unknown command: {}", command))?
+            Err(format!("Unknown command: {}", command))?
         }
     }
 }

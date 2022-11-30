@@ -39,7 +39,6 @@ use torrent::tls::protocol::client::{
     establish_connection,
 };
 use torrent::util::io::AsyncStream;
-use torrent::error;
 use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
 use torrent::ipfs::identify::identify_handler;
 use torrent::libp2p::identify::Identify;
@@ -193,7 +192,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match multistream_select(&mut socket, b"/tls/1.0.0\n").await? {
         SelectResponse::Accepted => (),
         SelectResponse::Unsupported => {
-            return Err(error!("/tls/1.0.0 is unsupported").into());
+            return Err("/tls/1.0.0 is unsupported".into());
         }
     }
     println!("Negotiated TLS");
@@ -214,7 +213,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match multistream_select(&mut conn, b"/mplex/6.7.0\n").await? {
         SelectResponse::Accepted => (),
         SelectResponse::Unsupported => {
-            return Err(error!("/mplex/6.7.0 is unsupported").into());
+            return Err("/mplex/6.7.0 is unsupported".into());
         }
     }
     println!("Negotiated /mplex/6.7.0");
@@ -273,7 +272,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("bitswap protocol accepted");
                 },
                 Ok(SelectResponse::Unsupported) => {
-                    return Err(error!("bitswap protocol accepted").into());
+                    return Err("bitswap protocol unsupported".into());
                 }
                 Err(e) => {
                     return Err(e.into());
@@ -290,7 +289,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("identify protocol accepted");
                 },
                 Ok(SelectResponse::Unsupported) => {
-                    return Err(error!("identify protocol accepted").into());
+                    return Err("identify protocol unsupported".into());
                 }
                 Err(e) => {
                     return Err(e.into());

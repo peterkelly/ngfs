@@ -9,7 +9,6 @@
 use std::error::Error;
 use clap::{Parser, ValueHint};
 use torrent::util::binary::BinaryReader;
-use torrent::error;
 use torrent::formats::asn1;
 use torrent::formats::asn1::writer::encode_item;
 use torrent::crypto::x509;
@@ -48,7 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(output) = opt.output {
         let mut output_data: Vec<u8> = Vec::new();
         encode_item(&item, &mut output_data)?;
-        std::fs::write(&output, &output_data).map_err(|e| error!("{}: {}", output, e))?;
+        std::fs::write(&output, &output_data).map_err(|e| format!("{}: {}", output, e))?;
         println!("Wrote {}", output);
     }
 

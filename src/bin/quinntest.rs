@@ -21,7 +21,6 @@ use torrent::libp2p::tls::generate_certificate;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use torrent::error;
 use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
 use torrent::ipfs::bitswap::handler::{bitswap_handler, bitswap_handler_show};
 
@@ -244,7 +243,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("bitswap protocol accepted");
         },
         Ok(SelectResponse::Unsupported) => {
-            return Err(error!("bitswap protocol accepted").into());
+            return Err("bitswap protocol unsupported".into());
         }
         Err(e) => {
             return Err(e.into());

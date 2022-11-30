@@ -13,7 +13,6 @@ use tokio::net::{TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::sleep;
 use std::time::Duration;
-use torrent::error;
 use torrent::util::util::{vec_with_len, DebugHexDump, Indent};
 use torrent::tls::protocol::client::{
     EstablishedConnection,
@@ -69,10 +68,10 @@ fn parse_args(opt: &Opt) -> Result<ClientConfig, Box<dyn Error>> {
             }
         }
         (Some(_), None) => {
-            return Err(error!("--client-cert option requires --client-key"));
+            return Err("--client-cert option requires --client-key".into());
         }
         (None, Some(_)) => {
-            return Err(error!("--client-key option requires --client-cert"));
+            return Err("--client-key option requires --client-cert".into());
         }
         _ => {
             ClientAuth::None
