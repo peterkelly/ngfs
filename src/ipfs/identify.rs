@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 use crate::util::io::AsyncStream;
 use crate::libp2p::identify::Identify;
 use crate::ipfs::node::IPFSNode;
-use crate::libp2p::secio::{PublicKey, KeyType};
+use crate::libp2p::peer_id::{PublicKey, KeyType};
 use crate::libp2p::multiaddr::{MultiAddr, Addr};
 use crate::libp2p::io::write_length_prefixed_data;
 

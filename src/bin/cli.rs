@@ -11,7 +11,8 @@ use torrent::util::util::{BinaryData};
 use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
 use torrent::formats::protobuf::varint;
 use torrent::ipfs::types::cid::CID;
-use torrent::libp2p::secio::{p2p_test, PrivateKey};
+use torrent::libp2p::secio::p2p_test;
+use torrent::libp2p::peer_id::PrivateKey;
 use rand::distributions::{Distribution, Uniform};
 
 fn get_argument<'a>(args: &'a [String], index: usize, name: &str) -> Result<&'a String, Box<dyn Error>> {

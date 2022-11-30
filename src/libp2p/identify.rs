@@ -2,7 +2,7 @@ use std::fmt;
 use std::error::Error;
 use crate::error;
 use crate::util::util::BinaryData;
-use crate::libp2p::secio::PublicKey;
+use crate::libp2p::peer_id::PublicKey;
 use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter};
 use super::multiaddr::MultiAddr;
 
