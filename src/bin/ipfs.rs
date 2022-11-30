@@ -43,6 +43,7 @@ use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
 use torrent::ipfs::identify::identify_handler;
 use torrent::libp2p::identify::Identify;
 use torrent::ipfs::bitswap::handler::{bitswap_handler, bitswap_handler_show};
+use torrent::formats::protobuf::protobuf::FromPB;
 
 
 #[derive(Parser)]

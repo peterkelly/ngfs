@@ -1,7 +1,7 @@
 // https://github.com/ipfs/specs/blob/master/UNIXFS.md
 
 use std::fmt;
-use crate::formats::protobuf::protobuf::{PBufReader, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, FromPB, FromPBError};
 
 #[derive(Debug)]
 pub enum DataType {
@@ -67,8 +67,8 @@ impl fmt::Debug for Data {
     }
 }
 
-impl Data {
-    pub fn from_pb(raw_data: &[u8]) -> Result<Data, FromPBError> {
+impl FromPB for Data {
+    fn from_pb(raw_data: &[u8]) -> Result<Data, FromPBError> {
         let mut opt_type_: Option<DataType> = None;
         let mut data: Option<Vec<u8>> = None;
         let mut filesize: Option<u64> = None;
@@ -126,7 +126,6 @@ impl Data {
             mtime,
         })
     }
-
 }
 
 #[derive(Debug)]
@@ -140,8 +139,8 @@ pub struct UnixTime {
     pub fractional_nanoseconds: Option<u32>, // 2
 }
 
-impl UnixTime {
-    pub fn from_pb(raw_data: &[u8]) -> Result<UnixTime, FromPBError> {
+impl FromPB for UnixTime {
+    fn from_pb(raw_data: &[u8]) -> Result<UnixTime, FromPBError> {
         let mut seconds: Option<i64> = None;
         let mut fractional_nanoseconds: Option<u32> = None;
 

@@ -7,7 +7,7 @@
 
 use std::error::Error;
 use torrent::util::util::{BinaryData};
-use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt};
+use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPB};
 use torrent::formats::protobuf::varint;
 use torrent::ipfs::types::cid::CID;
 use torrent::libp2p::secio::p2p_test;

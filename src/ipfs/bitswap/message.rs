@@ -1,5 +1,5 @@
 use std::fmt;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
 use crate::ipfs::types::cid::{CID, RawCID};
 use crate::util::util::BinaryData;
 
@@ -35,8 +35,10 @@ impl Entry {
         }
         writer.data
     }
+}
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<Entry, FromPBError> {
+impl FromPB for Entry {
+    fn from_pb(raw_data: &[u8]) -> Result<Entry, FromPBError> {
 
         let mut opt_block: Option<Vec<u8>> = None;
         let mut priority: i32 = 1;
@@ -112,8 +114,10 @@ impl WantList {
         }
         writer.data
     }
+}
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<WantList, FromPBError> {
+impl FromPB for WantList {
+    fn from_pb(raw_data: &[u8]) -> Result<WantList, FromPBError> {
         let mut entries: Vec<Entry> = Vec::new();
         let mut full: bool = false;
 
@@ -153,8 +157,10 @@ impl Block {
         writer.write_bytes(2, &self.data);
         writer.data
     }
+}
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<Block, FromPBError> {
+impl FromPB for Block {
+    fn from_pb(raw_data: &[u8]) -> Result<Block, FromPBError> {
         let mut prefix: Option<Vec<u8>> = None;
         let mut data: Option<Vec<u8>> = None;
 
@@ -205,8 +211,8 @@ pub struct BlockPresence {
     pub type_: BlockPresenceType,
 }
 
-impl BlockPresence {
-    pub fn from_pb(_raw_data: &[u8]) -> Result<BlockPresence, FromPBError> {
+impl FromPB for BlockPresence {
+    fn from_pb(_raw_data: &[u8]) -> Result<BlockPresence, FromPBError> {
         unimplemented!()
     }
 }
@@ -231,8 +237,10 @@ impl Message {
         }
         writer.data
     }
+}
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<Message, FromPBError> {
+impl FromPB for Message {
+    fn from_pb(raw_data: &[u8]) -> Result<Message, FromPBError> {
         let mut wantlist: Option<WantList> = None;
         let mut blocks: Vec<Block> = Vec::new();
         let payload: Vec<Block> = Vec::new();

@@ -3,6 +3,7 @@ use std::error::Error;
 use super::dagpb::PBNode;
 use super::unixfs::{Data, DataType};
 use crate::ipfs::types::cid::CID;
+use crate::formats::protobuf::protobuf::FromPB;
 use std::collections::HashSet;
 
 pub enum Node {

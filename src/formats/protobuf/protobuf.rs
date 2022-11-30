@@ -539,6 +539,10 @@ impl<'a> PBufReader<'a> {
     }
 }
 
+pub trait FromPB : Sized {
+    fn from_pb(raw_data: &[u8]) -> Result<Self, FromPBError>;
+}
+
 #[derive(Debug)]
 pub enum FromPBError {
     Plain(&'static str),

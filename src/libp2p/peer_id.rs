@@ -1,7 +1,7 @@
 // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md
 
 use std::fmt;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
 use crate::util::util::{BinaryData};
 
 #[derive(Debug, Clone)]
@@ -39,8 +39,8 @@ impl fmt::Debug for PublicKey {
     }
 }
 
-impl PublicKey {
-    pub fn from_pb(raw_data: &[u8]) -> Result<PublicKey, FromPBError> {
+impl FromPB for PublicKey {
+    fn from_pb(raw_data: &[u8]) -> Result<PublicKey, FromPBError> {
         let mut key_type: Option<KeyType> = None;
         let mut data: Option<Vec<u8>> = None;
 
@@ -58,7 +58,9 @@ impl PublicKey {
             data: data.ok_or(FromPBError::MissingField("data"))?,
         })
     }
+}
 
+impl PublicKey {
     pub fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_uint64(1, self.key_type.clone() as u64);
@@ -72,8 +74,8 @@ pub struct PrivateKey {
     pub data: Vec<u8>,
 }
 
-impl PrivateKey {
-    pub fn from_pb(raw_data: &[u8]) -> Result<PrivateKey, FromPBError> {
+impl FromPB for PrivateKey {
+    fn from_pb(raw_data: &[u8]) -> Result<PrivateKey, FromPBError> {
         let k = PublicKey::from_pb(raw_data)?;
         Ok(PrivateKey { key_type: k.key_type, data: k.data })
     }

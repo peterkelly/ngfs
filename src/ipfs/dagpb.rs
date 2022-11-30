@@ -1,7 +1,7 @@
 // https://github.com/ipld/specs/blob/master/block-layer/codecs/dag-pb.md
 
 use std::fmt;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
 use crate::ipfs::types::cid::CID;
 use crate::util::util::OptBinaryDataLen;
 
@@ -33,9 +33,10 @@ impl PBLink {
         }
         writer.data
     }
+}
 
-
-    pub fn from_pb(raw_data: &[u8]) -> Result<PBLink, FromPBError> {
+impl FromPB for PBLink {
+    fn from_pb(raw_data: &[u8]) -> Result<PBLink, FromPBError> {
         // TODO: Enforce ordering as per spec
         let mut hash: Option<Vec<u8>> = None;
         let mut name: Option<String> = None;
@@ -95,8 +96,10 @@ impl PBNode {
         }
         writer.data
     }
+}
 
-    pub fn from_pb(raw_data: &[u8]) -> Result<PBNode, FromPBError> {
+impl FromPB for PBNode {
+    fn from_pb(raw_data: &[u8]) -> Result<PBNode, FromPBError> {
         // Zero length data block is considered valid
         if raw_data.is_empty() {
             return Ok(PBNode { links: vec![], bytes: None });

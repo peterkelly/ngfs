@@ -3,7 +3,7 @@ use std::fmt;
 // use crate::error;
 use crate::util::util::BinaryData;
 use crate::libp2p::peer_id::PublicKey;
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, FromPB, FromPBError};
 use super::multiaddr::MultiAddr;
 
 #[derive(Clone)]
@@ -26,8 +26,8 @@ pub struct Identify {
     pub signed_peer_record: Option<SignedPeerRecord>, // 8
 }
 
-impl Identify {
-    pub fn from_pb(raw_data: &[u8]) -> Result<Identify, FromPBError> {
+impl FromPB for Identify {
+    fn from_pb(raw_data: &[u8]) -> Result<Identify, FromPBError> {
         let mut opt_protocol_version: Option<String> = None;
         let mut opt_agent_version: Option<String> = None;
         let mut opt_public_key: Option<PublicKey> = None;
@@ -80,7 +80,9 @@ impl Identify {
             signed_peer_record,
         })
     }
+}
 
+impl Identify {
     pub fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.public_key.to_pb());

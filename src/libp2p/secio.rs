@@ -11,7 +11,7 @@ use openssl::rsa::Rsa;
 use rand::prelude::Rng;
 use crate::util::util::{BinaryData, escape_string};
 use super::peer_id::{KeyType, PublicKey};
-use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPBError};
+use crate::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPB, FromPBError};
 use crate::formats::protobuf::varint::DecodeError;
 use crate::crypto::hmac::{HmacSha256, SHA256_DIGEST_SIZE};
 use crate::formats::protobuf::varint;
@@ -92,7 +92,7 @@ struct Propose {
     hashes: Vec<String>,
 }
 
-impl Propose {
+impl FromPB for Propose {
     fn from_pb(raw_data: &[u8]) -> Result<Propose, FromPBError> {
         let mut reader = PBufReader::new(raw_data);
 
@@ -141,7 +141,9 @@ impl Propose {
             hashes: hashes.split(',').map(String::from).collect(),
         })
     }
+}
 
+impl Propose {
     pub fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.rand);
@@ -169,7 +171,7 @@ struct Exchange {
     signature: Vec<u8>,
 }
 
-impl Exchange {
+impl FromPB for Exchange {
     fn from_pb(raw_data: &[u8]) -> Result<Exchange, FromPBError> {
         let mut reader = PBufReader::new(raw_data);
 
@@ -193,7 +195,9 @@ impl Exchange {
             signature,
         })
     }
+}
 
+impl Exchange {
     pub fn to_pb(&self) -> Vec<u8> {
         let mut writer = PBufWriter::new();
         writer.write_bytes(1, &self.epubkey);

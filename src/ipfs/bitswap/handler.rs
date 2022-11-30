@@ -15,6 +15,7 @@ use super::block::get_block_cid;
 use crate::ipfs::dagpb::PBNode;
 use crate::ipfs::unixfs::{Data as UnixFsData};
 use crate::ipfs::fs::Node;
+use crate::formats::protobuf::protobuf::FromPB;
 
 async fn bitswap_handler_inner(
     _node: Arc<IPFSNode>,
