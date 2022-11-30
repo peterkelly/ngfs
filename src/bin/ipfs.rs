@@ -42,6 +42,7 @@ use torrent::util::io::AsyncStream;
 use torrent::error;
 use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
 use torrent::ipfs::identify::identify_handler;
+use torrent::libp2p::identify::Identify;
 use torrent::ipfs::bitswap::handler::{bitswap_handler, bitswap_handler_show};
 
 
@@ -56,6 +57,7 @@ struct Opt {
 enum SubCommand {
     Test,
     Show(Show),
+    Identify,
 }
 
 #[derive(Parser)]
@@ -280,6 +282,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             bitswap_handler_show(node.clone(), Box::pin(stream), args.cid.clone());
         }
+        SubCommand::Identify => {
+            let mut stream = connector.connect(None).await?;
+            multistream_handshake(&mut stream).await?;
+            match multistream_select(&mut stream, ID_PROTOCOL).await {
+                Ok(SelectResponse::Accepted) => {
+                    println!("identify protocol accepted");
+                },
+                Ok(SelectResponse::Unsupported) => {
+                    return Err(error!("identify protocol accepted").into());
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+
+            identify_client(Box::pin(stream))
+        }
     }
 
     loop {
@@ -288,4 +307,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     // Ok(())
 
+}
+
+fn identify_client(stream: Pin<Box<dyn AsyncStream>>) {
+    println!("[identify] starting");
+    tokio::spawn(async move {
+        match identify_client_inner(stream).await {
+            Ok(()) => {
+                println!("[identify] finished");
+            },
+            Err(e) => {
+                println!("[identify] error: {}", e);
+            }
+        }
+    });
+}
+
+async fn identify_client_inner(mut stream: Pin<Box<dyn AsyncStream>>) -> Result<(), Box<dyn Error>> {
+
+    let data = match read_opt_length_prefixed_data(&mut stream).await? {
+        Some(data) => data,
+        None => {
+            println!("[identify] peer closed connection");
+            return Ok(());
+        }
+    };
+
+    println!("Received {} bytes of data", data.len());
+    let ident = Identify::from_pb(&data)?;
+    println!("{:#?}", ident);
+
+    Ok(())
 }
