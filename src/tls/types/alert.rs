@@ -1,5 +1,4 @@
-use std::error::Error;
-use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
+use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary, BinaryError};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum AlertLevel {
@@ -28,7 +27,7 @@ impl AlertLevel {
 
 impl FromBinary for AlertLevel {
     type Output = AlertLevel;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         Ok(AlertLevel::from_raw(reader.read_u8()?))
     }
 }
@@ -142,7 +141,7 @@ impl AlertDescription {
 
 impl FromBinary for AlertDescription {
     type Output = AlertDescription;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         Ok(AlertDescription::from_raw(reader.read_u8()?))
     }
 }
@@ -197,7 +196,7 @@ impl Alert {
 
 impl FromBinary for Alert {
     type Output = Alert;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let level = reader.read_item::<AlertLevel>()?;
         let description = reader.read_item::<AlertDescription>()?;
         Ok(Alert { level, description })

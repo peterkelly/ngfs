@@ -3,7 +3,7 @@ use std::fmt;
 pub trait FromBinary {
     type Output;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self::Output, Box<dyn std::error::Error>>;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self::Output, BinaryError>;
 }
 
 pub trait ToBinary {
@@ -11,6 +11,10 @@ pub trait ToBinary {
 }
 
 pub enum BinaryError {
+    Plain(&'static str),
+    String(String),
+    Other(Box<dyn std::error::Error>),
+    InvalidUTF8String(std::string::FromUtf8Error),
     UnexpectedEOF { offset: usize, expected: usize },
     SizeOverflow { offset: usize, requested: usize },
     ExpectedEOF { offset: usize, remaining: usize },
@@ -18,9 +22,19 @@ pub enum BinaryError {
     ValueTooLarge,
 }
 
+impl From<std::string::FromUtf8Error> for BinaryError {
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        BinaryError::InvalidUTF8String(e)
+    }
+}
+
 impl fmt::Display for BinaryError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            BinaryError::Plain(e) => write!(f, "{}", e),
+            BinaryError::String(e) => write!(f, "{}", e),
+            BinaryError::Other(e) => write!(f, "{}", e),
+            BinaryError::InvalidUTF8String(e) => write!(f, "{}", e),
             BinaryError::UnexpectedEOF { offset, expected } => {
                 write!(f, "Unexpcted EOF at offset {}; expected {} bytes", offset, expected)
             }
@@ -167,26 +181,26 @@ impl<'a> BinaryReader<'a> {
         self.read_fixed(len)
     }
 
-    pub fn read_item<T : FromBinary<Output = T>>(&mut self) -> Result<T, Box<dyn std::error::Error>> {
+    pub fn read_item<T : FromBinary<Output = T>>(&mut self) -> Result<T, BinaryError> {
         T::from_binary(self)
     }
 
-    pub fn read_len8_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+    pub fn read_len8_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, BinaryError> {
         let len = self.read_u8()? as usize;
         self.read_fixed_list(len)
     }
 
-    pub fn read_len16_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+    pub fn read_len16_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, BinaryError> {
         let len = self.read_u16()? as usize;
         self.read_fixed_list(len)
     }
 
-    pub fn read_len24_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+    pub fn read_len24_list<T : FromBinary<Output = T>>(&mut self) -> Result<Vec<T>, BinaryError> {
         let len = self.read_u24()? as usize;
         self.read_fixed_list(len)
     }
 
-    fn read_fixed_list<T : FromBinary<Output = T>>(&mut self, len: usize) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+    fn read_fixed_list<T : FromBinary<Output = T>>(&mut self, len: usize) -> Result<Vec<T>, BinaryError> {
         let mut inner = self.read_nested(len)?;
         let mut res: Vec<T> = Vec::new();
         while inner.remaining() > 0 {

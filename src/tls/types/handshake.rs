@@ -1,7 +1,5 @@
-use std::error::Error;
 use std::fmt;
-use crate::util::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary};
-use crate::error;
+use crate::util::binary::{BinaryReader, FromBinary, BinaryWriter, ToBinary, BinaryError};
 use crate::util::util::{DebugHexDump, BinaryData};
 use crate::crypto::x509;
 use super::extension::*;
@@ -24,7 +22,7 @@ pub enum Handshake {
 impl FromBinary for Handshake {
     type Output = Self;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let handshake_type = reader.read_u8()?;
         Self::from_binary2(reader, handshake_type)
     }
@@ -47,7 +45,7 @@ impl Handshake {
         }
     }
 
-    pub fn from_binary2(reader: &mut BinaryReader, handshake_type: u8) -> Result<Self, Box<dyn Error>> {
+    pub fn from_binary2(reader: &mut BinaryReader, handshake_type: u8) -> Result<Self, BinaryError> {
         let length = reader.read_u24()? as usize;
         match handshake_type {
             1 => Ok(Handshake::ClientHello(reader.read_item()?)),
@@ -127,7 +125,7 @@ pub enum CipherSuite {
 
 impl FromBinary for CipherSuite {
     type Output = Self;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         match reader.read_u16()? {
             0x1301 => Ok(CipherSuite::TLS_AES_128_GCM_SHA256),
             0x1302 => Ok(CipherSuite::TLS_AES_256_GCM_SHA384),
@@ -177,7 +175,7 @@ pub struct ClientHello {
 
 impl FromBinary for ClientHello {
     type Output = ClientHello;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let legacy_version = reader.read_u16()?;
         let random_slice = reader.read_fixed(32)?;
         let mut random: [u8; 32] = Default::default();
@@ -267,7 +265,7 @@ impl fmt::Debug for ServerHello {
 impl FromBinary for ServerHello {
     type Output = ServerHello;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let legacy_version = reader.read_u16()?;
         let random_slice = reader.read_fixed(32)?;
         let mut random: [u8; 32] = Default::default();
@@ -295,8 +293,8 @@ pub struct EndOfEarlyData {
 impl FromBinary for EndOfEarlyData {
     type Output = EndOfEarlyData;
 
-    fn from_binary(_reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
-        Err(error!("EndOfEarlyData::from_binary(): Not implemented"))
+    fn from_binary(_reader: &mut BinaryReader) -> Result<Self, BinaryError> {
+        Err(BinaryError::Plain("EndOfEarlyData::from_binary(): Not implemented"))
     }
 }
 
@@ -308,7 +306,7 @@ pub struct EncryptedExtensions {
 impl FromBinary for EncryptedExtensions {
     type Output = EncryptedExtensions;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let extensions = Extension::read_extensions(reader, ExtensionContext::ServerHello)?;
         Ok(EncryptedExtensions { extensions })
     }
@@ -323,7 +321,7 @@ pub struct CertificateRequest {
 impl FromBinary for CertificateRequest {
     type Output = CertificateRequest;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let certificate_request_context = reader.read_len8_bytes()?.to_vec();
 
         let mut extensions: Vec<Extension> = Vec::new();
@@ -350,9 +348,9 @@ pub struct CertificateEntry {
 impl FromBinary for CertificateEntry {
     type Output = CertificateEntry;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let data = reader.read_len24_bytes()?.to_vec();
-        let certificate = x509::Certificate::from_bytes(&data)?;
+        let certificate = x509::Certificate::from_bytes(&data).map_err(|e| BinaryError::String(format!("{}", e)))?;
 
         let mut extensions: Vec<Extension> = Vec::new();
         let extensions_len = reader.read_u16()? as usize;
@@ -395,7 +393,7 @@ pub struct Certificate {
 impl FromBinary for Certificate {
     type Output = Certificate;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let certificate_request_context = reader.read_len8_bytes()?.to_vec();
         let certificate_list = reader.read_len24_list::<CertificateEntry>()?;
 
@@ -423,7 +421,7 @@ pub struct CertificateVerify {
 impl FromBinary for CertificateVerify {
     type Output = CertificateVerify;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let algorithm = reader.read_item::<SignatureScheme>()?;
         let signature = reader.read_len16_bytes()?.to_vec();
         Ok(CertificateVerify { algorithm, signature })
@@ -446,7 +444,7 @@ pub struct Finished {
 impl FromBinary for Finished {
     type Output = Finished;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         Ok(Finished { verify_data: reader.remaining_data().to_vec() })
     }
 }
@@ -470,7 +468,7 @@ pub struct NewSessionTicket {
 impl FromBinary for NewSessionTicket {
     type Output = NewSessionTicket;
 
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let ticket_lifetime = reader.read_u32()?;
         let ticket_age_add = reader.read_u32()?;
         let ticket_nonce = reader.read_len8_bytes()?.to_vec();
@@ -506,7 +504,7 @@ pub struct KeyUpdate {
 impl FromBinary for KeyUpdate {
     type Output = KeyUpdate;
 
-    fn from_binary(_reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(_reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         unimplemented!()
     }
 }

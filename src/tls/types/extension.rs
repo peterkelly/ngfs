@@ -1,7 +1,5 @@
-use std::error::Error;
 use std::fmt;
-use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary};
-use crate::error;
+use crate::util::binary::{BinaryReader, BinaryWriter, FromBinary, ToBinary, BinaryError};
 use crate::util::util::{BinaryData, escape_string};
 
 pub struct ProtocolName {
@@ -10,7 +8,7 @@ pub struct ProtocolName {
 
 impl FromBinary for ProtocolName {
     type Output = ProtocolName;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let name_len = reader.read_u8()? as usize;
         let name_data = reader.read_fixed(name_len)?;
         Ok(ProtocolName { data: name_data.to_vec() })
@@ -106,7 +104,7 @@ impl fmt::Debug for SignatureScheme {
 
 impl FromBinary for SignatureScheme {
     type Output = SignatureScheme;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         Ok(SignatureScheme::from_raw(reader.read_u16()?))
     }
 }
@@ -148,7 +146,7 @@ pub enum ServerName {
 
 impl FromBinary for ServerName {
     type Output = ServerName;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let name_type = reader.read_u8()?;
         let name_len = reader.read_u16()? as usize;
         let mut name_reader = reader.read_nested(name_len)?;
@@ -220,7 +218,7 @@ pub enum NamedGroup {
 
 impl FromBinary for NamedGroup {
     type Output = NamedGroup;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let code = reader.read_u16()?;
         match code {
             0x0017 => Ok(NamedGroup::Secp256r1),
@@ -311,7 +309,7 @@ pub enum NamedCurve {
 
 impl FromBinary for NamedCurve {
     type Output = NamedCurve;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let code = reader.read_u16()?;
         match code {
             1 => Ok(NamedCurve::Sect163k1),
@@ -396,7 +394,7 @@ pub enum ECPointFormat {
 
 impl FromBinary for ECPointFormat {
     type Output = ECPointFormat;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let code = reader.read_u8()?;
         match code {
             0 => Ok(ECPointFormat::Uncompressed),
@@ -427,7 +425,7 @@ pub enum PskKeyExchangeMode {
 
 impl FromBinary for PskKeyExchangeMode {
     type Output = PskKeyExchangeMode;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let code = reader.read_u8()?;
         match code {
             0 => Ok(PskKeyExchangeMode::PskKe),
@@ -465,7 +463,7 @@ pub struct KeyShareEntry {
 
 impl FromBinary for KeyShareEntry {
     type Output = KeyShareEntry;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let group = reader.read_item::<NamedGroup>()?;
         let key_exchange_len = reader.read_u16()? as usize;
         let key_exchange = reader.read_fixed(key_exchange_len)?.to_vec();
@@ -499,7 +497,7 @@ impl fmt::Debug for DistinguishedName {
 
 impl FromBinary for DistinguishedName {
     type Output = DistinguishedName;
-    fn from_binary(reader: &mut BinaryReader) -> Result<Self, Box<dyn Error>> {
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
         let data = reader.read_len16_bytes()?.to_vec();
         Ok(DistinguishedName { data })
     }
@@ -536,7 +534,7 @@ impl Extension {
     pub fn read_extensions(
         reader: &mut BinaryReader,
         ctx: ExtensionContext,
-    ) -> Result<Vec<Extension>, Box<dyn Error>> {
+    ) -> Result<Vec<Extension>, BinaryError> {
         let mut extensions: Vec<Extension> = Vec::new();
         let extensions_len = reader.read_u16()? as usize;
         let mut extensions_reader = reader.read_nested(extensions_len)?;
@@ -546,7 +544,7 @@ impl Extension {
         Ok(extensions)
     }
 
-    pub fn from_binary2(reader: &mut BinaryReader, ctx: ExtensionContext) -> Result<Self, Box<dyn Error>> {
+    pub fn from_binary2(reader: &mut BinaryReader, ctx: ExtensionContext) -> Result<Self, BinaryError> {
         let extension_type = reader.read_u16()?;
         let extension_len = reader.read_u16()? as usize;
         let mut nested_reader = reader.read_nested(extension_len)?;
@@ -561,7 +559,7 @@ impl Extension {
                     _ => {
                         // Should be empty
                         if extension_len > 0 {
-                            Err(error!("Expected empty extension data"))
+                            Err(BinaryError::Plain("Expected empty extension data"))
                         }
                         else {
                             Ok(Extension::ServerName(Vec::new()))
@@ -621,7 +619,7 @@ impl Extension {
                         Ok(Extension::KeyShareClientHello(entries))
                     }
                     ExtensionContext::Certificate => {
-                        Err("KeyShare extension not supported in certificates".into())
+                        Err(BinaryError::Plain("KeyShare extension not supported in certificates"))
                     }
                 }
             }
