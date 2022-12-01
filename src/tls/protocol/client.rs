@@ -199,7 +199,9 @@ async fn send_client_certificate(
         ],
     });
     send_handshake(&handshake, Some(transcript), stream).await?;
-    let thash: Vec<u8> = hash_alg.hash(transcript);
+    let mut hasher = hash_alg.make_hasher();
+    hasher.update(transcript);
+    let thash = hasher.finalize();
     let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
     let signature = rsa_sign(client_key_data, &verify_input, signature_scheme, rng)?;
     let handshake = Handshake::CertificateVerify(CertificateVerify {
@@ -344,7 +346,9 @@ impl EncryptedHandshake {
         &mut self,
         stream: &mut EncryptedStream,
     ) -> Result<HashAndHandshake, TLSError> {
-        let hash = stream.encryption.ciphers.hash_alg.hash(&self.transcript);
+        let mut hasher = stream.encryption.ciphers.hash_alg.make_hasher();
+        hasher.update(&self.transcript);
+        let hash = hasher.finalize();
         let handshake = self.receive_handshake(stream).await?;
         Ok(HashAndHandshake {
             hash,
@@ -613,7 +617,9 @@ async fn do_phase_two(
         }
     }
 
-    let new_thash: Vec<u8> = ciphers.hash_alg.hash(&conn.transcript); // TODO: use conn.new_thash?
+    let mut hasher = ciphers.hash_alg.make_hasher();
+    hasher.update(&conn.transcript); // TODO: use conn.new_thash?
+    let new_thash = hasher.finalize();
 
     // let mut bad_new_thash = new_thash.clone();
     // bad_new_thash.push(0);

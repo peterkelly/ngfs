@@ -83,7 +83,11 @@ impl TrafficSecrets {
     pub fn derive_from(ciphers: &Ciphers, transcript: &[u8], prk: &[u8], label: &str) -> Result<Self, CryptError> {
         let client_label = format!("c {} traffic", label);
         let server_label = format!("s {} traffic", label);
-        let thash = ciphers.hash_alg.hash(transcript);
+
+        let mut hasher = ciphers.hash_alg.make_hasher();
+        hasher.update(transcript);
+        let thash = hasher.finalize();
+
         Ok(TrafficSecrets {
             client: EncryptionKey::new(
                 derive_secret(ciphers.hash_alg, prk, client_label.as_bytes(), &thash)?,
@@ -180,7 +184,7 @@ pub fn get_server_hello_x25519_shared_secret(
 }
 
 fn empty_transcript_hash(alg: HashAlgorithm) -> Vec<u8> {
-    alg.hash(&[])
+    alg.make_hasher().finalize()
 }
 
 pub fn get_zero_prk(alg: HashAlgorithm) -> Vec<u8> {

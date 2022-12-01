@@ -47,11 +47,11 @@ impl HashAlgorithm {
         }
     }
 
-    pub fn hash(&self, input: &[u8]) -> Vec<u8> {
+    pub fn make_hasher(&self) -> Hasher {
         match self {
-            HashAlgorithm::SHA256 => hash::<Sha256>(input),
-            HashAlgorithm::SHA384 => hash::<Sha384>(input),
-            HashAlgorithm::SHA512 => hash::<Sha512>(input),
+            HashAlgorithm::SHA256 => Hasher::SHA256(Sha256::new()),
+            HashAlgorithm::SHA384 => Hasher::SHA384(Sha384::new()),
+            HashAlgorithm::SHA512 => Hasher::SHA512(Sha512::new()),
         }
     }
 
@@ -88,10 +88,29 @@ impl HashAlgorithm {
     }
 }
 
-fn hash<D : Digest>(input: &[u8]) -> Vec<u8> {
-    let mut digest = D::new();
-    digest.update(input);
-    digest.finalize().to_vec()
+#[derive(Clone)]
+pub enum Hasher {
+    SHA256(Sha256),
+    SHA384(Sha384),
+    SHA512(Sha512),
+}
+
+impl Hasher {
+    pub fn update(&mut self, input: &[u8]) {
+        match self {
+            Hasher::SHA256(h) => Digest::update(h, input),
+            Hasher::SHA384(h) => Digest::update(h, input),
+            Hasher::SHA512(h) => Digest::update(h, input),
+        }
+    }
+
+    pub fn finalize(&self) -> Vec<u8> {
+        match self.clone() {
+            Hasher::SHA256(h) => Digest::finalize(h).to_vec(),
+            Hasher::SHA384(h) => Digest::finalize(h).to_vec(),
+            Hasher::SHA512(h) => Digest::finalize(h).to_vec(),
+        }
+    }
 }
 
 fn hkdf_expand<D>(prk: &[u8], info: &[u8],  okm: &mut [u8]) -> Result<(), CryptError>
