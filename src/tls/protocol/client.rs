@@ -12,6 +12,7 @@ use super::stream::{
     EncryptedStream,
 };
 use super::super::helpers::{
+    Transcript,
     Ciphers,
     TrafficSecrets,
     get_server_hello_x25519_shared_secret,
@@ -178,8 +179,7 @@ async fn send_finished(
 }
 
 async fn send_client_certificate(
-    hash_alg: HashAlgorithm,
-    transcript: &mut Vec<u8>,
+    transcript: &mut Transcript,
     client_cert_data: &[u8],
     client_key_data: &[u8],
     signature_scheme: SignatureScheme,
@@ -199,9 +199,7 @@ async fn send_client_certificate(
         ],
     });
     send_handshake(&handshake, Some(transcript), stream).await?;
-    let mut hasher = hash_alg.make_hasher();
-    hasher.update(transcript);
-    let thash = hasher.finalize();
+    let thash = transcript.get_hash();
     let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
     let signature = rsa_sign(client_key_data, &verify_input, signature_scheme, rng)?;
     let handshake = Handshake::CertificateVerify(CertificateVerify {
@@ -214,7 +212,7 @@ async fn send_client_certificate(
 
 async fn send_handshake(
     handshake: &Handshake,
-    transcript: Option<&mut Vec<u8>>,
+    transcript: Option<&mut Transcript>,
     stream: &mut EncryptedStream,
 ) -> Result<(), TLSError> {
     let mut conn_to_send = BytesMut::new();
@@ -316,19 +314,23 @@ struct HashAndHandshake {
 }
 
 pub struct EncryptedHandshake {
-    transcript: Vec<u8>,
+    transcript: Transcript,
     config: ClientConfig,
 }
 
 impl EncryptedHandshake {
     pub fn new(
         config: ClientConfig,
-        transcript: Vec<u8>,
+        transcript: Transcript,
     ) -> Self {
         EncryptedHandshake {
             transcript,
             config,
         }
+    }
+
+    pub fn transcript_hash(&self) -> Vec<u8> {
+        self.transcript.get_hash()
     }
 
     async fn receive_handshake(
@@ -346,9 +348,7 @@ impl EncryptedHandshake {
         &mut self,
         stream: &mut EncryptedStream,
     ) -> Result<HashAndHandshake, TLSError> {
-        let mut hasher = stream.encryption.ciphers.hash_alg.make_hasher();
-        hasher.update(&self.transcript);
-        let hash = hasher.finalize();
+        let hash = self.transcript.get_hash();
         let handshake = self.receive_handshake(stream).await?;
         Ok(HashAndHandshake {
             hash,
@@ -425,15 +425,18 @@ pub async fn establish_connection<T: 'static>(
         &mut initial_transcript).await?;
     let server_hello = receive_server_hello(&mut plaintext_stream, &mut initial_transcript).await?;
 
-    let henc = get_handshake_encryption(&initial_transcript, &server_hello, private_key)?;
+    let ciphers = Ciphers::from_server_hello(&server_hello)?;
+    let transcript = Transcript::new(initial_transcript, ciphers.hash_alg);
+    let henc = get_handshake_encryption(&ciphers, &transcript, &server_hello, private_key)?;
     let prk = henc.prk;
+
 
     let encryption = Encryption {
         traffic_secrets: henc.traffic_secrets,
-        ciphers: henc.ciphers,
+        ciphers,
     };
 
-    let mut conn = EncryptedHandshake::new(config, initial_transcript);
+    let mut conn = EncryptedHandshake::new(config, transcript);
     let mut enc_stream = EncryptedStream::new(plaintext_stream, encryption);
     let sm = receive_server_messages(&mut conn, &mut enc_stream).await?;
     let p2 = do_phase_two(&mut conn, &prk, &sm, &mut enc_stream).await?;
@@ -448,20 +451,19 @@ pub async fn establish_connection<T: 'static>(
 struct HandshakeEncryption {
     prk: Vec<u8>,
     traffic_secrets: TrafficSecrets,
-    ciphers: Ciphers,
 }
 
 fn get_handshake_encryption(
-    transcript: &[u8],
+    ciphers: &Ciphers,
+    transcript: &Transcript,
     server_hello: &ServerHello,
     private_key: EphemeralPrivateKey,
 ) -> Result<HandshakeEncryption, TLSError> {
-    let ciphers = Ciphers::from_server_hello(server_hello)?;
     let secret = get_server_hello_x25519_shared_secret(private_key, server_hello)
         .ok_or(TLSError::GetSharedSecretFailed)?;
     let prk = get_derived_prk(ciphers.hash_alg, &get_zero_prk(ciphers.hash_alg), &secret)?;
-    let traffic_secrets = TrafficSecrets::derive_from(&ciphers, transcript, &prk, "hs")?;
-    Ok(HandshakeEncryption { traffic_secrets, ciphers, prk })
+    let traffic_secrets = TrafficSecrets::derive_from(ciphers, transcript, &prk, "hs")?;
+    Ok(HandshakeEncryption { traffic_secrets, prk })
 }
 
 struct ServerMessages {
@@ -604,7 +606,6 @@ async fn do_phase_two(
 
             let rng = SystemRandom::new();
             send_client_certificate(
-                ciphers.hash_alg, // hash_alg: HashAlgorithm,
                 &mut conn.transcript, // transcript: &mut Vec<u8>,
                 client_cert, // client_cert_data: &[u8],
                 client_key, // client_key_data: &[u8],
@@ -617,15 +618,11 @@ async fn do_phase_two(
         }
     }
 
-    let mut hasher = ciphers.hash_alg.make_hasher();
-    hasher.update(&conn.transcript); // TODO: use conn.new_thash?
-    let new_thash = hasher.finalize();
-
     // let mut bad_new_thash = new_thash.clone();
     // bad_new_thash.push(0);
     send_finished(
         ciphers.hash_alg,
-        &new_thash,
+        &conn.transcript_hash(),
         stream).await?;
 
     Ok(Encryption {

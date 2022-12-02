@@ -1,7 +1,7 @@
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::signature::{RsaEncoding, RsaKeyPair, VerificationAlgorithm};
 use ring::rand::SecureRandom;
-use crate::crypto::crypt::{HashAlgorithm, AeadAlgorithm, CryptError};
+use crate::crypto::crypt::{HashAlgorithm, AeadAlgorithm, CryptError, Hasher};
 use crate::util::util::{vec_with_len};
 use super::types::handshake::{
     // ClientHello,
@@ -22,6 +22,28 @@ use super::types::record::{
 use super::error::{
     TLSError,
 };
+
+pub struct Transcript {
+    hasher: Hasher,
+}
+
+impl Transcript {
+    pub fn new(raw_data: Vec<u8>, hash_alg: HashAlgorithm) -> Self {
+        let mut hasher = hash_alg.make_hasher();
+        hasher.update(&raw_data);
+        Transcript {
+            hasher,
+        }
+    }
+
+    pub fn update(&mut self, data: &[u8]) {
+        self.hasher.update(data);
+    }
+
+    pub fn get_hash(&self) -> Vec<u8> {
+        self.hasher.finalize()
+    }
+}
 
 #[derive(Clone)] // TODO: Avoid need for clone
 pub struct EncryptionKey {
@@ -80,13 +102,11 @@ pub struct TrafficSecrets {
 }
 
 impl TrafficSecrets {
-    pub fn derive_from(ciphers: &Ciphers, transcript: &[u8], prk: &[u8], label: &str) -> Result<Self, CryptError> {
+    pub fn derive_from(ciphers: &Ciphers, transcript: &Transcript, prk: &[u8], label: &str) -> Result<Self, CryptError> {
         let client_label = format!("c {} traffic", label);
         let server_label = format!("s {} traffic", label);
 
-        let mut hasher = ciphers.hash_alg.make_hasher();
-        hasher.update(transcript);
-        let thash = hasher.finalize();
+        let thash = transcript.get_hash();
 
         Ok(TrafficSecrets {
             client: EncryptionKey::new(

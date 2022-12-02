@@ -14,6 +14,7 @@ use super::super::types::record::{
 use crate::util::util::{vec_with_len};
 use super::super::error::TLSError;
 use super::super::helpers::{
+    Transcript,
     EncryptionKey,
     Ciphers,
     TrafficSecrets,
@@ -33,7 +34,7 @@ pub fn encrypt_record(
     content_type: ContentType,
     traffic_secret: &EncryptionKey,
     client_sequence_no: u64,
-    transcript: Option<&mut Vec<u8>>,
+    transcript: Option<&mut Transcript>,
 ) -> Result<(), TLSError> {
     if data_ref.len() > MAX_PLAINTEXT_RECORD_SIZE {
         return Err(TLSError::InvalidPlaintextRecord);
@@ -42,7 +43,7 @@ pub fn encrypt_record(
     let mut data = data_ref.to_vec();
 
     if let Some(transcript) = transcript {
-        transcript.extend_from_slice(&data);
+        transcript.update(&data);
     }
     data.push(content_type.to_raw());
     encrypt_traffic(
@@ -272,7 +273,7 @@ impl EncryptedStream {
 
     pub fn receive_message<'a, 'b>(
         &'a mut self,
-        transcript: Option<&'b mut Vec<u8>>,
+        transcript: Option<&'b mut Transcript>,
     ) -> ReceiveEncryptedMessage<'a, 'b> {
         ReceiveEncryptedMessage::new(
             &mut self.plaintext.inner,
@@ -285,7 +286,7 @@ impl EncryptedStream {
     pub fn poll_receive_encrypted_message(
         &mut self,
         cx: &mut Context<'_>,
-        transcript: Option<&mut Vec<u8>>,
+        transcript: Option<&mut Transcript>,
     ) -> Poll<Result<Option<Message>, TLSError>> {
         poll_receive_encrypted_message(
             cx,
@@ -302,7 +303,7 @@ pub struct ReceiveEncryptedMessage<'a, 'b> {
     incoming_data: &'a mut BytesMut,
     server_sequence_no: &'a mut u64,
     encryption: &'a Encryption,
-    transcript: Option<&'b mut Vec<u8>>
+    transcript: Option<&'b mut Transcript>
 }
 
 impl ReceiveEncryptedMessage<'_, '_> {
@@ -311,7 +312,7 @@ impl ReceiveEncryptedMessage<'_, '_> {
         incoming_data: &'a mut BytesMut,
         server_sequence_no: &'a mut u64,
         encryption: &'a Encryption,
-        transcript: Option<&'b mut Vec<u8>>
+        transcript: Option<&'b mut Transcript>
     ) -> ReceiveEncryptedMessage<'a, 'b> {
         ReceiveEncryptedMessage {
             reader,
@@ -327,7 +328,7 @@ impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
     type Output = Result<Option<Message>, TLSError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let direct = Pin::into_inner(self);
-        let transcript: Option<&mut Vec<u8>> = match &mut direct.transcript {
+        let transcript: Option<&mut Transcript> = match &mut direct.transcript {
             Some(v) => Some(v),
             None => None,
         };
@@ -347,7 +348,7 @@ fn poll_receive_encrypted_message(
     incoming_data: &mut BytesMut,
     server_sequence_no: &mut u64,
     encryption: &Encryption,
-    transcript: Option<&mut Vec<u8>>
+    transcript: Option<&mut Transcript>
 ) -> Poll<Result<Option<Message>, TLSError>> {
     match poll_receive_record_ignore_cc(cx, reader, incoming_data) {
         Poll::Pending => Poll::Pending,
@@ -362,7 +363,7 @@ fn poll_receive_encrypted_message(
                 &plaintext.raw)?;
             *server_sequence_no += 1;
             if let Some(transcript) = transcript {
-                 transcript.extend_from_slice(&message_raw);
+                 transcript.update(&message_raw);
             }
             Poll::Ready(Ok(Some(message)))
         }
