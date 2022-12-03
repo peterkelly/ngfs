@@ -2,6 +2,7 @@ use std::fmt;
 use sha2::{Sha256, Digest as Sha2Digest};
 use blake2::Blake2b;
 use crate::ipfs::types::cid::{CID, CIDPrefix, MultiHash};
+use typenum::consts::U32;
 
 pub struct GetBlockCIDError(&'static str);
 
@@ -35,7 +36,7 @@ pub fn get_block_cid(prefix: &CIDPrefix, data: &[u8]) -> Result<CID, GetBlockCID
             })
         }
         MultiHash::Blake2b256 => {
-            let mut hasher = Blake2b::new();
+            let mut hasher = Blake2b::<U32>::new();
             hasher.update(data);
             Ok(CID {
                 version: prefix.version,

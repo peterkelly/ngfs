@@ -1,7 +1,8 @@
 use crypto::digest::Digest;
 use hkdf::Hkdf;
 use sha2::{Sha256, Sha384, Sha512};
-use hmac::{Hmac, Mac, NewMac};
+use hmac::{Hmac, Mac};
+use generic_array::GenericArray;
 use super::error::CryptError;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -89,7 +90,12 @@ impl HashAlgorithm {
                 let mut mac = Hmac::<Sha256>::new_from_slice(key)
                     .map_err(|_| CryptError::InvalidKeyLength)?;
                 mac.update(data);
-                match mac.verify(expected) {
+
+                // let exp: GenericArray<T, 12> = GenericArray::from_slice(data);
+                // let y: () = exp;
+
+
+                match mac.verify(GenericArray::from_slice(expected)) {
                     Ok(_) => Ok(true),
                     Err(_) => Ok(false),
                 }
@@ -99,7 +105,7 @@ impl HashAlgorithm {
                 let mut mac = Hmac::<Sha384>::new_from_slice(key)
                     .map_err(|_| CryptError::InvalidKeyLength)?;
                 mac.update(data);
-                match mac.verify(expected) {
+                match mac.verify(GenericArray::from_slice(expected)) {
                     Ok(_) => Ok(true),
                     Err(_) => Ok(false),
                 }
@@ -109,7 +115,7 @@ impl HashAlgorithm {
                 let mut mac = Hmac::<Sha512>::new_from_slice(key)
                     .map_err(|_| CryptError::InvalidKeyLength)?;
                 mac.update(data);
-                match mac.verify(expected) {
+                match mac.verify(GenericArray::from_slice(expected)) {
                     Ok(_) => Ok(true),
                     Err(_) => Ok(false),
                 }

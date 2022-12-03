@@ -157,7 +157,7 @@ fn make_client_config(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut rng = rand::rngs::OsRng {};
+    let mut rng = rand_old::rngs::OsRng {};
     let dalek_keypair: ed25519_dalek::Keypair = ed25519_dalek::Keypair::generate(&mut rng);
     // let mut registry = ServiceRegistry::new();
     // registry.add(ID_PROTOCOL_STR, Box::new(&identify_handler));

@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use crypto::aead::{AeadInPlace, AeadCore, Key, Nonce, NewAead};
+use crypto::aead::{AeadInPlace, AeadCore, Key, Nonce, KeyInit};
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use generic_array::typenum::Unsigned;
 use super::error::CryptError;
@@ -15,7 +15,7 @@ pub enum AeadAlgorithm {
 }
 
 
-fn try_key_from_slice<AEAD : NewAead>(key: &[u8]) -> Result<&Key<AEAD>, CryptError> {
+fn try_key_from_slice<AEAD : KeyInit>(key: &[u8]) -> Result<&Key<AEAD>, CryptError> {
     if key.len() != AEAD::KeySize::USIZE {
         Err(CryptError::InvalidKeyLength)
     }
@@ -33,9 +33,9 @@ fn try_nonce_from_slice<AEAD: AeadCore>(nonce: &[u8]) -> Result<&Nonce<AEAD>, Cr
     }
 }
 
-struct AEADCommon<AEAD> (PhantomData<AEAD>) where AEAD : AeadInPlace + NewAead;
+struct AEADCommon<AEAD> (PhantomData<AEAD>) where AEAD : AeadInPlace + KeyInit;
 
-impl<AEAD> AEADCommon<AEAD> where AEAD : AeadInPlace + NewAead {
+impl<AEAD> AEADCommon<AEAD> where AEAD : AeadInPlace + KeyInit {
     fn key_len() -> usize {
         AEAD::KeySize::USIZE
     }
