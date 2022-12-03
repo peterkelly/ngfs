@@ -155,18 +155,19 @@ async fn accept_loop(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8_bytes: ring::pkcs8::Document = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)?;
+    let host_keypair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8_bytes.as_ref())?;
 
-    let mut rng = rand_old::rngs::OsRng {};
-    let dalek_keypair: ed25519_dalek::Keypair = ed25519_dalek::Keypair::generate(&mut rng);
-    let node = Arc::new(IPFSNode::new(dalek_keypair));
+    let client_key = openssl::rsa::Rsa::generate(2048)?.private_key_to_der()?;
+    let rsa_key_pair = ring::signature::RsaKeyPair::from_der(&client_key)?;
+    let certificate = generate_certificate(&rsa_key_pair, &host_keypair)?;
+
+    let node = Arc::new(IPFSNode::new(host_keypair));
     let mut registry = ServiceRegistry::new();
     registry.add(ID_PROTOCOL_STR, Box::new(&identify_handler));
     registry.add(BITSWAP_PROTOCOL_STR, Box::new(&bitswap_handler));
     let registry = Arc::new(registry);
-
-    let client_key = openssl::rsa::Rsa::generate(2048)?.private_key_to_der()?;
-    let rsa_key_pair = ring::signature::RsaKeyPair::from_der(&client_key)?;
-    let certificate = generate_certificate(&rsa_key_pair, &node.dalek_keypair)?;
 
     println!("Generated certificate");
 

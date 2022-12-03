@@ -1,5 +1,5 @@
 use std::fmt;
-use ring::signature::{RsaKeyPair, KeyPair};
+use ring::signature::KeyPair;
 use crate::util::util::from_hex;
 use crate::formats::protobuf::protobuf::ToPB;
 use crate::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
@@ -61,26 +61,26 @@ impl From<std::io::Error> for GenerateError {
 }
 
 pub fn generate_certificate(
-    rsa_key_pair: &ring::signature::RsaKeyPair,
-    dalek_keypair: &ed25519_dalek::Keypair,
+    x509_keypair: &ring::signature::RsaKeyPair,
+    host_keypair: &ring::signature::Ed25519KeyPair,
 ) -> Result<Vec<u8>, GenerateError> {
-    let signature: ed25519_dalek::Signature = make_signature(rsa_key_pair, dalek_keypair)?;
-    let libp2p_ext_bytes = generate_libp2p_ext(&dalek_keypair.public, &signature)?;
-    let certificate: Vec<u8> = generate_certificate_inner(rsa_key_pair, &libp2p_ext_bytes)?;
+    let signature: ring::signature::Signature = make_signature(x509_keypair, host_keypair)?;
+    let libp2p_ext_bytes = generate_libp2p_ext(host_keypair.public_key().as_ref(), &signature)?;
+    let certificate: Vec<u8> = generate_certificate_inner(x509_keypair, &libp2p_ext_bytes)?;
     Ok(certificate)
 }
 
 fn generate_libp2p_ext(
-    public_key: &ed25519_dalek::PublicKey,
-    signature: &ed25519_dalek::Signature,
+    public_key: &[u8],
+    signature: &ring::signature::Signature,
 ) -> Result<Vec<u8>, GenerateError> {
     let pkey = PublicKey {
         key_type: KeyType::Ed25519,
-        data: Vec::from(public_key.to_bytes()),
+        data: Vec::from(public_key),
     };
     let libp2p_ext_item = Item::from(Value::Sequence(vec![
         Item::from(Value::OctetString(pkey.to_pb())),
-        Item::from(Value::OctetString(Vec::from(signature.to_bytes()))),
+        Item::from(Value::OctetString(Vec::from(signature.as_ref()))),
     ]));
     let mut libp2p_ext_bytes: Vec<u8> = Vec::new();
     encode_item(&libp2p_ext_item, &mut libp2p_ext_bytes)?;
@@ -88,9 +88,9 @@ fn generate_libp2p_ext(
 }
 
 fn make_signature(
-    rsa_key_pair: &ring::signature::RsaKeyPair,
-    dalek_keypair: &ed25519_dalek::Keypair,
-) -> Result<ed25519_dalek::Signature, GenerateError> {
+    x509_keypair: &ring::signature::RsaKeyPair,
+    host_keypair: &ring::signature::Ed25519KeyPair,
+) -> Result<ring::signature::Signature, GenerateError> {
     let p2p_subject_public_key_info = SubjectPublicKeyInfo {
         algorithm: AlgorithmIdentifier {
             algorithm: ObjectIdentifier(Vec::from(CRYPTO_RSA_ENCRYPTION)),
@@ -98,7 +98,7 @@ fn make_signature(
         },
         subject_public_key: BitString {
             unused_bits: 0,
-            bytes: Vec::from(rsa_key_pair.public_key().as_ref()),
+            bytes: Vec::from(x509_keypair.public_key().as_ref()),
         },
     };
     let p2p_subject_public_key_info_item = p2p_subject_public_key_info.to_asn1();
@@ -109,12 +109,12 @@ fn make_signature(
     let mut signature_input: Vec<u8> = Vec::new();
     signature_input.extend_from_slice(b"libp2p-tls-handshake:");
     signature_input.extend_from_slice(&p2p_subject_public_key_info_bytes);
-    let signature: ed25519_dalek::Signature = ed25519_dalek::Signer::sign(dalek_keypair, &signature_input);
+    let signature: ring::signature::Signature = host_keypair.sign(&signature_input);
     Ok(signature)
 }
 
 fn generate_certificate_inner(
-    certificate_key_pair: &RsaKeyPair,
+    x509_keypair: &ring::signature::RsaKeyPair,
     libp2p_ext_bytes: &[u8],
 ) -> Result<Vec<u8>, GenerateError> {
 
@@ -133,7 +133,7 @@ fn generate_certificate_inner(
         .ok_or(GenerateError::Plain("Invalid hex string: key_usage"))?;
 
 
-    let subject_public_key: Vec<u8> = Vec::from(certificate_key_pair.public_key().as_ref());
+    let subject_public_key: Vec<u8> = Vec::from(x509_keypair.public_key().as_ref());
 
 
 
@@ -202,23 +202,22 @@ fn generate_certificate_inner(
         ],
     };
 
-    let output_data = sign_tbs_certificate(&tbs_certificate, certificate_key_pair)?;
+    let output_data = sign_tbs_certificate(&tbs_certificate, x509_keypair)?;
     Ok(output_data)
 }
 
 fn sign_tbs_certificate(
     tbs_certificate: &x509::TBSCertificate,
-    signer_key_pair: &ring::signature::RsaKeyPair) -> Result<Vec<u8>, GenerateError> {
-
-
+    x509_keypair: &ring::signature::RsaKeyPair,
+) -> Result<Vec<u8>, GenerateError> {
     let mut encoded_tbs_certificate: Vec<u8> = Vec::new();
     encode_item(&tbs_certificate.to_asn1(), &mut encoded_tbs_certificate)?;
 
-    let mut signature = vec![0; signer_key_pair.public_modulus_len()];
+    let mut signature = vec![0; x509_keypair.public_modulus_len()];
     let rng = ring::rand::SystemRandom::new();
 
     let encoding = &ring::signature::RSA_PKCS1_SHA256;
-    signer_key_pair.sign(encoding, &rng, &encoded_tbs_certificate, &mut signature)
+    x509_keypair.sign(encoding, &rng, &encoded_tbs_certificate, &mut signature)
         .map_err(|_| GenerateError::Plain("Signing failed"))?;
 
 

@@ -1,17 +1,18 @@
 use std::sync::Arc;
 use std::pin::Pin;
+use ring::signature::Ed25519KeyPair;
 use crate::util::io::AsyncStream;
 use crate::ipfs::bitswap::bitswap::Bitswap;
 
 pub struct IPFSNode {
-    pub dalek_keypair: ed25519_dalek::Keypair,
+    pub host_keypair: Ed25519KeyPair,
     pub bitswap: Bitswap,
 }
 
 impl IPFSNode {
-    pub fn new(dalek_keypair: ed25519_dalek::Keypair) -> Self {
+    pub fn new(host_keypair: Ed25519KeyPair) -> Self {
         IPFSNode {
-            dalek_keypair,
+            host_keypair,
             bitswap: Bitswap::new(),
         }
     }
