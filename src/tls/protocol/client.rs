@@ -60,6 +60,7 @@ use super::super::types::alert::{
 use super::super::error::{
     TLSError,
 };
+use super::client_state::ClientState;
 use crate::util::util::vec_with_len;
 use crate::crypto::crypt::HashAlgorithm;
 use crate::util::binary::{BinaryReader, BinaryWriter};
@@ -308,9 +309,9 @@ fn verify_transcript(
     )
 }
 
-struct HashAndHandshake {
-    hash: Vec<u8>,
-    handshake: Handshake,
+pub struct HashAndHandshake {
+    pub hash: Vec<u8>,
+    pub handshake: Handshake,
 }
 
 pub struct EncryptedHandshake {
@@ -362,7 +363,10 @@ async fn receive_plaintext_handshake(
     transcript: &mut Vec<u8>,
 ) -> Result<Option<Handshake>, TLSError> {
     match stream.receive_plaintext_message(transcript).await? {
-        Some(Message::Handshake(hs)) => Ok(Some(hs)),
+        Some(Message::Handshake(hs)) => {
+            println!("Received {} (plaintext)", hs.name());
+            Ok(Some(hs))
+        }
         Some(message) => Err(TLSError::UnexpectedMessage(message.name())),
         None => Err(TLSError::UnexpectedEOF),
     }
@@ -480,58 +484,26 @@ async fn receive_server_messages(
     conn: &mut EncryptedHandshake,
     stream: &mut EncryptedStream,
 ) -> Result<ServerMessages, TLSError> {
+    let mut cstate = ClientState::ReceivedServerHello;
     let mut hh: HashAndHandshake;
 
-    hh = conn.receive_hash_and_handshake(stream).await?;
-    let encrypted_extensions = match hh.handshake {
-        Handshake::EncryptedExtensions(v) => v,
-        _ => return Err(TLSError::UnexpectedMessage(hh.handshake.name())),
-    };
-
-    hh = conn.receive_hash_and_handshake(stream).await?;
-    let certificate_request = match hh.handshake {
-        Handshake::CertificateRequest(v) => {
-            hh = conn.receive_hash_and_handshake(stream).await?;
-            Some(v)
+    loop {
+        match cstate.check_finished() {
+            Ok(state) => {
+                return Ok(ServerMessages {
+                    encrypted_extensions: state.encrypted_extensions,
+                    certificate_request: state.certificate_request,
+                    certificate: state.certificate,
+                    certificate_verify: state.certificate_verify,
+                    finished: state.finished,
+                });
+            }
+            Err(state) => {
+                hh = conn.receive_hash_and_handshake(stream).await?;
+                cstate = state.on_hash_and_handshake(hh)?;
+            }
         }
-        _ => {
-            None
-        }
-    };
-
-    let certificate = match hh.handshake {
-        Handshake::Certificate(v) => {
-            hh = conn.receive_hash_and_handshake(stream).await?;
-            Some(v)
-        }
-        _ => {
-            None
-        }
-    };
-
-    let certificate_verify = match hh.handshake {
-        Handshake::CertificateVerify(v) => {
-            let r = Some((v, hh.hash));
-            hh = conn.receive_hash_and_handshake(stream).await?;
-            r
-        }
-        _ => {
-            None
-        }
-    };
-
-    let finished = match hh.handshake {
-        Handshake::Finished(v) => (v, hh.hash),
-        _ => return Err(TLSError::UnexpectedMessage(hh.handshake.name())),
-    };
-
-    Ok(ServerMessages {
-        encrypted_extensions,
-        certificate_request,
-        certificate,
-        certificate_verify,
-        finished,
-    })
+    }
 }
 
 async fn do_phase_two(
