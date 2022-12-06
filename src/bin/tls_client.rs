@@ -13,6 +13,7 @@ use tokio::net::{TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::sleep;
 use std::time::Duration;
+use torrent::crypto::pem::{decode_pem, decode_pem_with_label};
 use torrent::util::util::{vec_with_len, DebugHexDump, Indent};
 use torrent::tls::protocol::client::{
     EstablishedConnection,
@@ -44,15 +45,26 @@ fn parse_args(opt: &Opt) -> Result<ClientConfig, Box<dyn Error>> {
     let mut client_key: Option<Vec<u8>> = None;
 
     if let Some(filename) = &opt.ca_cert {
-        ca_cert = Some(fs::read(filename)?);
+        let pem_data = fs::read(filename)?;
+        let decoded = decode_pem_with_label(&pem_data, "CERTIFICATE")?;
+        ca_cert = Some(decoded);
     }
 
     if let Some(filename) = &opt.client_cert {
-        client_cert = Some(fs::read(filename)?);
+        let pem_data = fs::read(filename)?;
+        let decoded = decode_pem_with_label(&pem_data, "CERTIFICATE")?;
+        client_cert = Some(decoded);
     }
 
     if let Some(filename) = &opt.client_key {
-        client_key = Some(fs::read(filename)?);
+        let pem_data = fs::read(filename)?;
+        let (label, decoded) = decode_pem(&pem_data)?;
+        if label == "RSA PRIVATE KEY" {
+            client_key = Some(decoded);
+        }
+        else {
+            return Err(format!("Unknown key type: {}", label).into());
+        }
     }
 
     let server_auth = match &ca_cert {

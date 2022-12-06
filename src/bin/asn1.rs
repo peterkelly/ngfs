@@ -12,6 +12,7 @@ use torrent::util::binary::BinaryReader;
 use torrent::formats::asn1;
 use torrent::formats::asn1::writer::encode_item;
 use torrent::crypto::x509;
+use torrent::crypto::pem::decode_pem;
 
 #[derive(Parser, Debug)]
 #[command(name = "asn1: Test for reading/writing ASN.1 DER files")]
@@ -30,7 +31,10 @@ struct Opt {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
-    let data: Vec<u8> = std::fs::read(opt.input)?;
+    let mut data: Vec<u8> = std::fs::read(opt.input)?;
+    if Some(b'-') == data.first().copied() {
+        (_, data) = decode_pem(&data)?;
+    }
     let mut reader = BinaryReader::new(&data);
     let item = asn1::reader::read_item(&mut reader)?;
 

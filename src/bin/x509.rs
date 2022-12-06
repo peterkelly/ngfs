@@ -13,6 +13,7 @@ use torrent::util::binary::BinaryReader;
 use torrent::formats::asn1;
 use torrent::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use torrent::formats::asn1::writer::encode_item;
+use torrent::crypto::pem::{decode_pem_with_label, encode_pem};
 use torrent::crypto::x509::{
     Certificate,
     TBSCertificate,
@@ -95,8 +96,11 @@ fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
         .ok_or("Invalid hex string: key_usage")?;
 
 
-    let subject_key_pair = std::fs::read(&subcmd.subject_private_key)
+    let subject_key_pair_encoded = std::fs::read(&subcmd.subject_private_key)
         .map_err(|e| format!("{}: {}", subcmd.subject_private_key, e))?;
+    let subject_key_pair = decode_pem_with_label(
+        &subject_key_pair_encoded,
+        "RSA PRIVATE KEY")?;
     println!("Got subject_key_pair");
     let subject_key_pair = RsaKeyPair::from_der(&subject_key_pair)?;
     println!("Got subject_key_pair");
@@ -104,8 +108,11 @@ fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
 
 
 
-    let signer_key_pair_bytes = std::fs::read(&subcmd.signer_private_key)
+    let signer_key_pair_bytes_encoded = std::fs::read(&subcmd.signer_private_key)
         .map_err(|e| format!("{}: {}", subcmd.signer_private_key, e))?;
+    let signer_key_pair_bytes = decode_pem_with_label(
+        &signer_key_pair_bytes_encoded,
+        "RSA PRIVATE KEY")?;
     println!("Got signer_key_pair");
     let signer_key_pair = RsaKeyPair::from_der(&signer_key_pair_bytes)?;
     // println!("Got signer_key_pair");
@@ -177,7 +184,8 @@ fn generate(subcmd: &Generate) -> Result<(), Box<dyn Error>> {
     };
 
     let output_data = sign_tbs_certificate(&tbs_certificate, &signer_key_pair)?;
-    std::fs::write(&subcmd.output, &output_data).map_err(|e| format!("{}: {}", subcmd.output, e))?;
+    let output_pem = encode_pem(&output_data, "CERTIFICATE");
+    std::fs::write(&subcmd.output, &output_pem).map_err(|e| format!("{}: {}", subcmd.output, e))?;
     println!("Wrote {}", subcmd.output);
 
     Ok(())
@@ -230,8 +238,9 @@ fn wrap_signature(
 
 fn print(subcmd: &Print) -> Result<(), Box<dyn Error>> {
     // Read ASN.1 structure from file
-    let data: Vec<u8> = std::fs::read(&subcmd.infile)?;
-    let mut reader = BinaryReader::new(&data);
+    let encoded = std::fs::read(&subcmd.infile)?;
+    let decoded = decode_pem_with_label(&encoded, "CERTIFICATE")?;
+    let mut reader = BinaryReader::new(&decoded);
     let item = asn1::reader::read_item(&mut reader)?;
 
     // Parse ASN.1 structure to create certificate
