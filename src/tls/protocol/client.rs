@@ -470,14 +470,14 @@ fn get_handshake_encryption(
     Ok(HandshakeEncryption { traffic_secrets, prk })
 }
 
-struct ServerMessages {
+pub struct ServerMessages {
     #[allow(dead_code)]
-    encrypted_extensions: EncryptedExtensions,
+    pub encrypted_extensions: EncryptedExtensions,
     #[allow(dead_code)]
-    certificate_request: Option<CertificateRequest>,
-    certificate: Option<Certificate>,
-    certificate_verify: Option<(CertificateVerify, Vec<u8>)>,
-    finished: (Finished, Vec<u8>),
+    pub certificate_request: Option<CertificateRequest>,
+    pub certificate: Option<Certificate>,
+    pub certificate_verify: Option<(CertificateVerify, Vec<u8>)>,
+    pub finished: (Finished, Vec<u8>),
 }
 
 async fn receive_server_messages(
