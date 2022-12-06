@@ -443,11 +443,17 @@ pub async fn establish_connection<T: 'static>(
     let mut conn = EncryptedHandshake::new(config, transcript);
     let mut enc_stream = EncryptedStream::new(plaintext_stream, encryption);
     let sm = receive_server_messages(&mut conn, &mut enc_stream).await?;
-    let p2 = do_phase_two(&mut conn, &prk, &sm, &mut enc_stream).await?;
 
+    // Compute the new traffic secrets for application data, but don't use them yet.
+    let application_secrets = compute_application_secrets(&mut conn, &prk, &sm, &enc_stream.encryption)?;
+
+    // Send the client certificate and Finished messages, using the handshake traffic secrets
+    do_phase_two(&mut conn, &mut enc_stream).await?;
+
+    // Reset the encryption state for the stream to use the new traffic secrets
     enc_stream.client_sequence_no = 0;
     enc_stream.server_sequence_no = 0;
-    enc_stream.encryption = p2;
+    enc_stream.encryption.traffic_secrets = application_secrets;
 
     Ok(EstablishedConnection::new(enc_stream))
 }
@@ -506,21 +512,14 @@ async fn receive_server_messages(
     }
 }
 
-async fn do_phase_two(
+fn compute_application_secrets(
     conn: &mut EncryptedHandshake,
     prk: &[u8],
     sm: &ServerMessages,
-    stream: &mut EncryptedStream,
-) -> Result<Encryption, TLSError> {
-    let ciphers_copy = stream.encryption.ciphers.clone();
-    let secrets_copy = TrafficSecrets {
-        client: stream.encryption.traffic_secrets.client.clone(),
-        server: stream.encryption.traffic_secrets.server.clone(),
-    };
-
-
-    let ciphers = &ciphers_copy;
-    let secrets = &secrets_copy;
+    encryption: &Encryption,
+) -> Result<TrafficSecrets, TLSError> {
+    let ciphers = &encryption.ciphers;
+    let secrets = &encryption.traffic_secrets;
 
     let input_psk: &[u8] = &vec_with_len(ciphers.hash_alg.byte_len());
     let new_prk = get_derived_prk(ciphers.hash_alg, prk, input_psk)
@@ -570,6 +569,13 @@ async fn do_phase_two(
         }
     }
 
+    Ok(application_secrets)
+}
+
+async fn do_phase_two(
+    conn: &mut EncryptedHandshake,
+    stream: &mut EncryptedStream,
+) -> Result<(), TLSError> {
     // FIXME: Don't hard-code SignatureScheme
     match &conn.config.client_auth {
         ClientAuth::Certificate { cert, key } => {
@@ -593,14 +599,11 @@ async fn do_phase_two(
     // let mut bad_new_thash = new_thash.clone();
     // bad_new_thash.push(0);
     send_finished(
-        ciphers.hash_alg,
+        stream.encryption.ciphers.hash_alg,
         &conn.transcript_hash(),
         stream).await?;
 
-    Ok(Encryption {
-        traffic_secrets: application_secrets,
-        ciphers: ciphers.clone(),
-    })
+    Ok(())
 }
 
 enum ReadState {
