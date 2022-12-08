@@ -38,6 +38,7 @@ pub const CRYPTO_ECDSA_WITH_SHA256: [u64; 7] = [1, 2, 840, 10045, 4, 3, 2];
 pub const CRYPTO_ECDSA_WITH_SHA384: [u64; 7] = [1, 2, 840, 10045, 4, 3, 3];
 pub const CRYPTO_ECDSA_WITH_SHA512: [u64; 7] = [1, 2, 840, 10045, 4, 3, 4];
 pub const CRYPTO_CURVE_PRIME256V1: [u64; 7] = [1, 2, 840, 10045, 3, 1, 7]; // aka secp256r1
+pub const CRYPTO_ED25519: [u64; 4] = [1, 3, 101, 112];
 
 // Certificate  ::=  SEQUENCE  {
 //        tbsCertificate       TBSCertificate,
@@ -582,4 +583,5 @@ pub fn populate_registry(registry: &mut ObjectRegistry) {
     registry.add(&CRYPTO_ECDSA_WITH_SHA384, "ecdsa-with-SHA384");
     registry.add(&CRYPTO_ECDSA_WITH_SHA512, "ecdsa-with-SHA512");
     registry.add(&CRYPTO_CURVE_PRIME256V1, "prime256v1");
+    registry.add(&CRYPTO_ED25519, "ED25519");
 }

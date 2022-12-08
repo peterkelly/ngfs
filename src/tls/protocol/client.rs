@@ -21,6 +21,7 @@ use super::super::helpers::{
     verify_finished,
     derive_secret,
     rsa_sign,
+    ed25519_sign,
     rsa_verify,
 };
 use super::super::types::handshake::{
@@ -73,9 +74,15 @@ pub enum ServerAuth {
     SelfSigned,
 }
 
+#[derive(Clone)]
+pub enum ClientKey {
+    RSA(Vec<u8>),
+    EC(Vec<u8>),
+}
+
 pub enum ClientAuth {
     None,
-    Certificate { cert: Vec<u8>, key: Vec<u8> },
+    Certificate { cert: Vec<u8>, key: ClientKey },
 }
 
 pub struct ClientConfig {
@@ -182,9 +189,7 @@ async fn send_finished(
 async fn send_client_certificate(
     transcript: &mut Transcript,
     client_cert_data: &[u8],
-    client_key_data: &[u8],
-    signature_scheme: SignatureScheme,
-    rng: &dyn ring::rand::SecureRandom,
+    client_key: &ClientKey,
     stream: &mut EncryptedStream,
 ) -> Result<(), TLSError> {
     let client_cert = x509::Certificate::from_bytes(client_cert_data)
@@ -202,11 +207,22 @@ async fn send_client_certificate(
     send_handshake(&handshake, Some(transcript), stream).await?;
     let thash = transcript.get_hash();
     let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
-    let signature = rsa_sign(client_key_data, &verify_input, signature_scheme, rng)?;
-    let handshake = Handshake::CertificateVerify(CertificateVerify {
-        algorithm: signature_scheme,
-        signature,
-    });
+    let certificate_verify = match client_key {
+        ClientKey::RSA(client_key_data) => {
+            let rng = SystemRandom::new();
+            CertificateVerify {
+                algorithm: SignatureScheme::RsaPssRsaeSha256,
+                signature: rsa_sign(client_key_data, &verify_input, SignatureScheme::RsaPssRsaeSha256, &rng)?,
+            }
+        }
+        ClientKey::EC(client_key_data) => {
+            CertificateVerify {
+                algorithm: SignatureScheme::Ed25519,
+                signature: ed25519_sign(client_key_data, &verify_input)?,
+            }
+        }
+    };
+    let handshake = Handshake::CertificateVerify(certificate_verify);
     send_handshake(&handshake, Some(transcript), stream).await?;
     Ok(())
 }
@@ -267,6 +283,9 @@ fn verify_certificate(ca_raw: &[u8], target_raw: &[u8]) -> Result<(), TLSError> 
     }
     else if signature_algorithm.algorithm.0 == x509::CRYPTO_ECDSA_WITH_SHA256 {
         parameters = &ring::signature::ECDSA_P256_SHA256_ASN1;
+    }
+    else if signature_algorithm.algorithm.0 == x509::CRYPTO_ED25519 {
+        parameters = &ring::signature::ED25519;
     }
     else {
         return Err(TLSError::UnsupportedCertificateSignatureAlgorithm);
@@ -576,19 +595,15 @@ async fn do_phase_two(
     conn: &mut EncryptedHandshake,
     stream: &mut EncryptedStream,
 ) -> Result<(), TLSError> {
-    // FIXME: Don't hard-code SignatureScheme
     match &conn.config.client_auth {
         ClientAuth::Certificate { cert, key } => {
             let client_cert = cert;
             let client_key = key;
 
-            let rng = SystemRandom::new();
             send_client_certificate(
                 &mut conn.transcript, // transcript: &mut Vec<u8>,
                 client_cert, // client_cert_data: &[u8],
                 client_key, // client_key_data: &[u8],
-                SignatureScheme::RsaPssRsaeSha256, // signature_scheme: SignatureScheme,
-                &rng,
                 stream,
             ).await?;
         }

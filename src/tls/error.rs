@@ -33,6 +33,7 @@ pub enum TLSError {
     MissingCertificateMessage,
     MissingCertificateVerifyMessage,
     CACertificateUnavailable,
+    InvalidKey,
     IOError(std::io::ErrorKind),
 }
 

@@ -35,6 +35,7 @@ use torrent::libp2p::mplex::{Mplex, Acceptor};
 use torrent::tls::protocol::client::{
     ServerAuth,
     ClientAuth,
+    ClientKey,
     ClientConfig,
     establish_connection,
 };
@@ -174,7 +175,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config = ClientConfig {
         client_auth: ClientAuth::Certificate {
             cert: certificate,
-            key: client_key,
+            key: ClientKey::RSA(client_key),
         },
         server_auth: ServerAuth::SelfSigned,
         server_name: None,

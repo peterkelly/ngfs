@@ -19,6 +19,7 @@ use torrent::tls::protocol::client::{
     EstablishedConnection,
     ServerAuth,
     ClientAuth,
+    ClientKey,
     ClientConfig,
     establish_connection,
 };
@@ -42,7 +43,7 @@ struct Opt {
 fn parse_args(opt: &Opt) -> Result<ClientConfig, Box<dyn Error>> {
     let mut ca_cert: Option<Vec<u8>> = None;
     let mut client_cert: Option<Vec<u8>> = None;
-    let mut client_key: Option<Vec<u8>> = None;
+    let mut client_key: Option<ClientKey> = None;
 
     if let Some(filename) = &opt.ca_cert {
         let pem_data = fs::read(filename)?;
@@ -60,7 +61,11 @@ fn parse_args(opt: &Opt) -> Result<ClientConfig, Box<dyn Error>> {
         let pem_data = fs::read(filename)?;
         let (label, decoded) = decode_pem(&pem_data)?;
         if label == "RSA PRIVATE KEY" {
-            client_key = Some(decoded);
+            client_key = Some(ClientKey::RSA(decoded));
+        }
+        else if label == "PRIVATE KEY" {
+            // TODO: I think this could also be an RSA key, need to check content
+            client_key = Some(ClientKey::EC(decoded));
         }
         else {
             return Err(format!("Unknown key type: {}", label).into());

@@ -373,6 +373,13 @@ pub fn rsa_sign(
     Ok(signature)
 }
 
+pub fn ed25519_sign(key_data: &[u8], input: &[u8]) -> Result<Vec<u8>, TLSError> {
+    let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8_maybe_unchecked(key_data)
+        .map_err(|_| TLSError::InvalidKey)?;
+    let signature = key_pair.sign(input);
+    Ok(Vec::from(signature.as_ref()))
+}
+
 pub fn rsa_verify(
     scheme: SignatureScheme,
     key: &[u8],
@@ -384,6 +391,7 @@ pub fn rsa_verify(
         SignatureScheme::RsaPssRsaeSha256 => &ring::signature::RSA_PSS_2048_8192_SHA256,
         SignatureScheme::RsaPssRsaeSha384 => &ring::signature::RSA_PSS_2048_8192_SHA384,
         SignatureScheme::RsaPssRsaeSha512 => &ring::signature::RSA_PSS_2048_8192_SHA512,
+        SignatureScheme::Ed25519 => &ring::signature::ED25519,
         _ => return Err(TLSError::UnsupportedSignatureScheme),
     };
 
