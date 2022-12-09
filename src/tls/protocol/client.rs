@@ -328,81 +328,6 @@ fn verify_transcript(
     )
 }
 
-pub struct HashAndHandshake {
-    pub hash: Vec<u8>,
-    pub handshake: Handshake,
-}
-
-pub struct EncryptedHandshake {
-    transcript: Transcript,
-    config: ClientConfig,
-}
-
-impl EncryptedHandshake {
-    pub fn new(
-        config: ClientConfig,
-        transcript: Transcript,
-    ) -> Self {
-        EncryptedHandshake {
-            transcript,
-            config,
-        }
-    }
-
-    pub fn transcript_hash(&self) -> Vec<u8> {
-        self.transcript.get_hash()
-    }
-
-    async fn receive_handshake(
-        &mut self,
-        stream: &mut EncryptedStream,
-    ) -> Result<Handshake, TLSError> {
-        match stream.receive_message(Some(&mut self.transcript)).await? {
-            Some(Message::Handshake(hs)) => Ok(hs),
-            Some(message) => Err(TLSError::UnexpectedMessage(message.name())),
-            None => Err(TLSError::UnexpectedEOF),
-        }
-    }
-
-    async fn receive_hash_and_handshake(
-        &mut self,
-        stream: &mut EncryptedStream,
-    ) -> Result<HashAndHandshake, TLSError> {
-        let hash = self.transcript.get_hash();
-        let handshake = self.receive_handshake(stream).await?;
-        Ok(HashAndHandshake {
-            hash,
-            handshake,
-        })
-    }
-}
-
-async fn receive_plaintext_handshake(
-    stream: &mut PlaintextStream,
-    transcript: &mut Vec<u8>,
-) -> Result<Option<Handshake>, TLSError> {
-    match stream.receive_plaintext_message(transcript).await? {
-        Some(Message::Handshake(hs)) => {
-            println!("Received {} (plaintext)", hs.name());
-            Ok(Some(hs))
-        }
-        Some(message) => Err(TLSError::UnexpectedMessage(message.name())),
-        None => Err(TLSError::UnexpectedEOF),
-    }
-}
-
-async fn receive_server_hello(
-    stream: &mut PlaintextStream,
-    transcript: &mut Vec<u8>,
-) -> Result<ServerHello, TLSError> {
-    let handshake = receive_plaintext_handshake(stream, transcript).await?;
-    match handshake {
-        Some(Handshake::ServerHello(v)) => Ok(v),
-        Some(handshake) => Err(TLSError::UnexpectedMessage(handshake.name())),
-        None => Err(TLSError::UnexpectedEOF),
-    }
-}
-
 async fn write_plaintext_handshake(
     writer: &mut (impl AsyncWrite + Unpin),
     handshake: &Handshake,
@@ -446,10 +371,15 @@ pub async fn establish_connection<T: 'static>(
         &mut plaintext_stream.inner,
         &client_hello_handshake,
         &mut initial_transcript).await?;
-    let server_hello = receive_server_hello(&mut plaintext_stream, &mut initial_transcript).await?;
+    let message = plaintext_stream.receive_plaintext_message(&mut initial_transcript).await?;
+    let server_hello = match message {
+        Some(Message::Handshake(Handshake::ServerHello(server_hello))) => server_hello,
+        Some(message) => return Err(TLSError::UnexpectedMessage(message.name())),
+        None => return Err(TLSError::UnexpectedEOF),
+    };
 
     let ciphers = Ciphers::from_server_hello(&server_hello)?;
-    let transcript = Transcript::new(initial_transcript, ciphers.hash_alg);
+    let mut transcript = Transcript::new(initial_transcript, ciphers.hash_alg);
     let henc = get_handshake_encryption(&ciphers, &transcript, &server_hello, private_key)?;
     let prk = henc.prk;
 
@@ -459,15 +389,20 @@ pub async fn establish_connection<T: 'static>(
         ciphers,
     };
 
-    let mut conn = EncryptedHandshake::new(config, transcript);
     let mut enc_stream = EncryptedStream::new(plaintext_stream, encryption);
-    let sm = receive_server_messages(&mut conn, &mut enc_stream).await?;
+    let sm = receive_server_messages(&mut transcript, &mut enc_stream).await?;
 
     // Compute the new traffic secrets for application data, but don't use them yet.
-    let application_secrets = compute_application_secrets(&mut conn, &prk, &sm, &enc_stream.encryption)?;
+    let application_secrets = compute_application_secrets(
+        &transcript, &config,
+        &prk, &sm, &enc_stream.encryption)?;
 
     // Send the client certificate and Finished messages, using the handshake traffic secrets
-    do_phase_two(&mut conn, &mut enc_stream).await?;
+    if let ClientAuth::Certificate { cert, key } = &config.client_auth {
+        send_client_certificate(&mut transcript, cert, key, &mut enc_stream).await?;
+    }
+
+    send_finished(enc_stream.encryption.ciphers.hash_alg, &transcript.get_hash(), &mut enc_stream).await?;
 
     // Reset the encryption state for the stream to use the new traffic secrets
     enc_stream.client_sequence_no = 0;
@@ -506,33 +441,43 @@ pub struct ServerMessages {
 }
 
 async fn receive_server_messages(
-    conn: &mut EncryptedHandshake,
+    transcript: &mut Transcript,
     stream: &mut EncryptedStream,
 ) -> Result<ServerMessages, TLSError> {
     let mut cstate = ClientState::ReceivedServerHello;
-    let mut hh: HashAndHandshake;
 
     loop {
-        match cstate.check_finished() {
-            Ok(state) => {
-                return Ok(ServerMessages {
-                    encrypted_extensions: state.encrypted_extensions,
-                    certificate_request: state.certificate_request,
-                    certificate: state.certificate,
-                    certificate_verify: state.certificate_verify,
-                    finished: state.finished,
-                });
+        if let ClientState::ReceivedFinished {
+                encrypted_extensions,
+                certificate_request,
+                certificate,
+                certificate_verify,
+                finished,
+        } = cstate {
+            return Ok(ServerMessages {
+                encrypted_extensions,
+                certificate_request,
+                certificate,
+                certificate_verify,
+                finished,
+            })
+        }
+
+        let hash = transcript.get_hash();
+        let message = stream.receive_message(Some(transcript)).await?;
+        match message {
+            Some(Message::Handshake(handshake)) => {
+                cstate = cstate.on_hash_and_handshake(hash, handshake)?;
             }
-            Err(state) => {
-                hh = conn.receive_hash_and_handshake(stream).await?;
-                cstate = state.on_hash_and_handshake(hh)?;
-            }
+            Some(message) => return Err(TLSError::UnexpectedMessage(message.name())),
+            None => return Err(TLSError::UnexpectedEOF),
         }
     }
 }
 
 fn compute_application_secrets(
-    conn: &mut EncryptedHandshake,
+    transcript: &Transcript,
+    config: &ClientConfig,
     prk: &[u8],
     sm: &ServerMessages,
     encryption: &Encryption,
@@ -544,7 +489,7 @@ fn compute_application_secrets(
     let new_prk = get_derived_prk(ciphers.hash_alg, prk, input_psk)
         .map_err(TLSError::Internal)?;
 
-    let application_secrets = TrafficSecrets::derive_from(ciphers, &conn.transcript, &new_prk, "ap")?;
+    let application_secrets = TrafficSecrets::derive_from(ciphers, transcript, &new_prk, "ap")?;
     // let mut bad_finished = Finished { verify_data: finished.verify_data.clone() };
     // bad_finished.verify_data.push(0);
     let (finished, finished_thash) = &sm.finished;
@@ -567,7 +512,7 @@ fn compute_application_secrets(
     let server_cert_raw: &[u8] = &first_cert_entry.data;
     let server_cert: &x509::Certificate = &first_cert_entry.certificate;
 
-    let ca_cert: &[u8] = match &conn.config.server_auth {
+    let ca_cert: &[u8] = match &config.server_auth {
         ServerAuth::None => return Err(TLSError::CACertificateUnavailable),
         ServerAuth::CertificateAuthority(v) => v,
         ServerAuth::SelfSigned => server_cert_raw,
@@ -589,36 +534,6 @@ fn compute_application_secrets(
     }
 
     Ok(application_secrets)
-}
-
-async fn do_phase_two(
-    conn: &mut EncryptedHandshake,
-    stream: &mut EncryptedStream,
-) -> Result<(), TLSError> {
-    match &conn.config.client_auth {
-        ClientAuth::Certificate { cert, key } => {
-            let client_cert = cert;
-            let client_key = key;
-
-            send_client_certificate(
-                &mut conn.transcript, // transcript: &mut Vec<u8>,
-                client_cert, // client_cert_data: &[u8],
-                client_key, // client_key_data: &[u8],
-                stream,
-            ).await?;
-        }
-        ClientAuth::None => {
-        }
-    }
-
-    // let mut bad_new_thash = new_thash.clone();
-    // bad_new_thash.push(0);
-    send_finished(
-        stream.encryption.ciphers.hash_alg,
-        &conn.transcript_hash(),
-        stream).await?;
-
-    Ok(())
 }
 
 enum ReadState {

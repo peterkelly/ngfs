@@ -7,7 +7,6 @@ use super::super::types::handshake::{
     Finished,
 };
 use super::super::error::TLSError;
-use super::client::{HashAndHandshake, ServerMessages};
 
 pub enum ClientState {
     ReceivedServerHello,
@@ -39,41 +38,22 @@ pub enum ClientState {
 }
 
 impl ClientState {
-    pub fn check_finished(self) -> Result<ServerMessages, ClientState> {
-        match self {
-            ClientState::ReceivedFinished {
-                encrypted_extensions,
-                certificate_request,
-                certificate,
-                certificate_verify,
-                finished,
-            } => Ok(ServerMessages {
-                encrypted_extensions,
-                certificate_request,
-                certificate,
-                certificate_verify,
-                finished,
-            }),
-            _ => Err(self)
-        }
-    }
-
-    pub fn on_hash_and_handshake(self, hh: HashAndHandshake) -> Result<Self, TLSError> {
+    pub fn on_hash_and_handshake(self, hash: Vec<u8>, handshake: Handshake) -> Result<Self, TLSError> {
         use ClientState::*;
         use Handshake::*;
         match self {
             ReceivedServerHello => {
-                match hh.handshake {
+                match handshake {
                     EncryptedExtensions(encrypted_extensions) => {
                         Ok(ReceivedEncryptedExtensions {
                             encrypted_extensions
                         })
                     }
-                    _ => Err(TLSError::UnexpectedMessage(hh.handshake.name())),
+                    _ => Err(TLSError::UnexpectedMessage(handshake.name())),
                 }
             }
             ReceivedEncryptedExtensions { encrypted_extensions } => {
-                match hh.handshake {
+                match handshake {
                     CertificateRequest(certificate_request) => Ok(ReceivedCertificateRequest {
                         encrypted_extensions,
                         certificate_request,
@@ -87,23 +67,23 @@ impl ClientState {
                         encrypted_extensions,
                         certificate_request: None,
                         certificate: None,
-                        certificate_verify: (v, hh.hash),
+                        certificate_verify: (v, hash),
                     }),
                     Finished(v) => Ok(ReceivedFinished {
                         encrypted_extensions,
                         certificate_request: None,
                         certificate: None,
                         certificate_verify: None,
-                        finished: (v, hh.hash),
+                        finished: (v, hash),
                     }),
-                    _ => Err(TLSError::UnexpectedMessage(hh.handshake.name())),
+                    _ => Err(TLSError::UnexpectedMessage(handshake.name())),
                 }
             }
             ReceivedCertificateRequest {
                 encrypted_extensions,
                 certificate_request,
             } => {
-                match hh.handshake {
+                match handshake {
                     Certificate(certificate) => Ok(ReceivedCertificate {
                         encrypted_extensions,
                         certificate_request: Some(certificate_request),
@@ -113,16 +93,16 @@ impl ClientState {
                         encrypted_extensions,
                         certificate_request: Some(certificate_request),
                         certificate: None,
-                        certificate_verify: (v, hh.hash),
+                        certificate_verify: (v, hash),
                     }),
                     Finished(v) => Ok(ReceivedFinished {
                         encrypted_extensions,
                         certificate_request: Some(certificate_request),
                         certificate: None,
                         certificate_verify: None,
-                        finished: (v, hh.hash),
+                        finished: (v, hash),
                     }),
-                    _ => Err(TLSError::UnexpectedMessage(hh.handshake.name())),
+                    _ => Err(TLSError::UnexpectedMessage(handshake.name())),
                 }
             }
             ReceivedCertificate {
@@ -130,21 +110,21 @@ impl ClientState {
                 certificate_request,
                 certificate,
             } => {
-                match hh.handshake {
+                match handshake {
                     CertificateVerify(v) => Ok(ReceivedCertificateVerify {
                         encrypted_extensions,
                         certificate_request,
                         certificate: Some(certificate),
-                        certificate_verify: (v, hh.hash),
+                        certificate_verify: (v, hash),
                     }),
                     Finished(v) => Ok(ReceivedFinished {
                         encrypted_extensions,
                         certificate_request,
                         certificate: Some(certificate),
                         certificate_verify: None,
-                        finished: (v, hh.hash),
+                        finished: (v, hash),
                     }),
-                    _ => Err(TLSError::UnexpectedMessage(hh.handshake.name())),
+                    _ => Err(TLSError::UnexpectedMessage(handshake.name())),
                 }
             }
             ReceivedCertificateVerify {
@@ -153,19 +133,19 @@ impl ClientState {
                 certificate,
                 certificate_verify,
             } => {
-                match hh.handshake {
+                match handshake {
                     Finished(v) => Ok(ReceivedFinished {
                         encrypted_extensions,
                         certificate_request,
                         certificate,
                         certificate_verify: Some(certificate_verify),
-                        finished: (v, hh.hash),
+                        finished: (v, hash),
                     }),
-                    _ => Err(TLSError::UnexpectedMessage(hh.handshake.name())),
+                    _ => Err(TLSError::UnexpectedMessage(handshake.name())),
                 }
             }
             ReceivedFinished { .. } => {
-                Err(TLSError::UnexpectedMessage(hh.handshake.name()))
+                Err(TLSError::UnexpectedMessage(handshake.name()))
             }
         }
     }
