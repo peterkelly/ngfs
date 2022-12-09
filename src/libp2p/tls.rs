@@ -16,8 +16,9 @@ use crate::crypto::x509::{
     Time,
     UTCTime,
     RelativeDistinguishedName,
-    CRYPTO_SHA_256_WITH_RSA_ENCRYPTION,
-    CRYPTO_RSA_ENCRYPTION,
+    // CRYPTO_SHA_256_WITH_RSA_ENCRYPTION,
+    // CRYPTO_RSA_ENCRYPTION,
+    CRYPTO_ED25519,
     X509_COUNTRY_NAME,
     X509_ORGANIZATION_NAME,
     X509_COMMON_NAME,
@@ -61,7 +62,7 @@ impl From<std::io::Error> for GenerateError {
 }
 
 pub fn generate_certificate(
-    x509_keypair: &ring::signature::RsaKeyPair,
+    x509_keypair: &ring::signature::Ed25519KeyPair,
     host_keypair: &ring::signature::Ed25519KeyPair,
 ) -> Result<Vec<u8>, GenerateError> {
     let signature: ring::signature::Signature = make_signature(x509_keypair, host_keypair)?;
@@ -88,13 +89,13 @@ fn generate_libp2p_ext(
 }
 
 fn make_signature(
-    x509_keypair: &ring::signature::RsaKeyPair,
+    x509_keypair: &ring::signature::Ed25519KeyPair,
     host_keypair: &ring::signature::Ed25519KeyPair,
 ) -> Result<ring::signature::Signature, GenerateError> {
     let p2p_subject_public_key_info = SubjectPublicKeyInfo {
         algorithm: AlgorithmIdentifier {
-            algorithm: ObjectIdentifier(Vec::from(CRYPTO_RSA_ENCRYPTION)),
-            parameters: Some(Item::from(Value::Null)),
+            algorithm: ObjectIdentifier(Vec::from(CRYPTO_ED25519)),
+            parameters: None,
         },
         subject_public_key: BitString {
             unused_bits: 0,
@@ -114,7 +115,7 @@ fn make_signature(
 }
 
 fn generate_certificate_inner(
-    x509_keypair: &ring::signature::RsaKeyPair,
+    x509_keypair: &ring::signature::Ed25519KeyPair,
     libp2p_ext_bytes: &[u8],
 ) -> Result<Vec<u8>, GenerateError> {
 
@@ -135,14 +136,12 @@ fn generate_certificate_inner(
 
     let subject_public_key: Vec<u8> = Vec::from(x509_keypair.public_key().as_ref());
 
-
-
     let tbs_certificate = TBSCertificate {
         version: Version::V3,
         serial_number: Integer(serial_number),
         signature: AlgorithmIdentifier {
-            algorithm: ObjectIdentifier(Vec::from(CRYPTO_SHA_256_WITH_RSA_ENCRYPTION)),
-            parameters: Some(Item::from(Value::Null)),
+            algorithm: ObjectIdentifier(Vec::from(CRYPTO_ED25519)),
+            parameters: None,
         },
         issuer: Name { parts: vec![
             RelativeDistinguishedName {
@@ -168,8 +167,8 @@ fn generate_certificate_inner(
             } ] },
         subject_public_key_info: SubjectPublicKeyInfo {
             algorithm: AlgorithmIdentifier {
-                algorithm: ObjectIdentifier(Vec::from(CRYPTO_RSA_ENCRYPTION)),
-                parameters: Some(Item::from(Value::Null)),
+                algorithm: ObjectIdentifier(Vec::from(CRYPTO_ED25519)),
+                parameters: None,
             },
             subject_public_key: BitString {
                 unused_bits: 0,
@@ -208,26 +207,19 @@ fn generate_certificate_inner(
 
 fn sign_tbs_certificate(
     tbs_certificate: &x509::TBSCertificate,
-    x509_keypair: &ring::signature::RsaKeyPair,
+    x509_keypair: &ring::signature::Ed25519KeyPair,
 ) -> Result<Vec<u8>, GenerateError> {
     let mut encoded_tbs_certificate: Vec<u8> = Vec::new();
     encode_item(&tbs_certificate.to_asn1(), &mut encoded_tbs_certificate)?;
 
-    let mut signature = vec![0; x509_keypair.public_modulus_len()];
-    let rng = ring::rand::SystemRandom::new();
-
-    let encoding = &ring::signature::RSA_PKCS1_SHA256;
-    x509_keypair.sign(encoding, &rng, &encoded_tbs_certificate, &mut signature)
-        .map_err(|_| GenerateError::Plain("Signing failed"))?;
-
-
+    let signature = x509_keypair.sign(&encoded_tbs_certificate);
     let signature_algorithm = AlgorithmIdentifier {
-        algorithm: ObjectIdentifier(Vec::from(CRYPTO_SHA_256_WITH_RSA_ENCRYPTION)),
-        parameters: Some(Item::from(Value::Null)),
+        algorithm: ObjectIdentifier(Vec::from(CRYPTO_ED25519)),
+        parameters: None,
     };
     let signature_value = BitString {
         unused_bits: 0,
-        bytes: signature,
+        bytes: Vec::from(signature.as_ref()),
     };
 
     wrap_signature(tbs_certificate, &signature_algorithm, &signature_value)

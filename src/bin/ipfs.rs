@@ -160,9 +160,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let pkcs8_bytes: ring::pkcs8::Document = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)?;
     let host_keypair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8_bytes.as_ref())?;
 
-    let client_key = openssl::rsa::Rsa::generate(2048)?.private_key_to_der()?;
-    let rsa_key_pair = ring::signature::RsaKeyPair::from_der(&client_key)?;
-    let certificate = generate_certificate(&rsa_key_pair, &host_keypair)?;
+    let client_key = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)?;
+    let x509_key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(client_key.as_ref())?;
+    let certificate = generate_certificate(&x509_key_pair, &host_keypair)?;
 
     let node = Arc::new(IPFSNode::new(host_keypair));
     let mut registry = ServiceRegistry::new();
@@ -175,7 +175,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config = ClientConfig {
         client_auth: ClientAuth::Certificate {
             cert: certificate,
-            key: ClientKey::RSA(client_key),
+            key: ClientKey::EC(Vec::from(client_key.as_ref())),
         },
         server_auth: ServerAuth::SelfSigned,
         server_name: None,
