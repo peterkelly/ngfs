@@ -1,6 +1,6 @@
 use std::fmt;
 use ring::signature::KeyPair;
-use crate::util::util::from_hex;
+use chrono::{DateTime, Utc, Duration};
 use crate::formats::protobuf::protobuf::ToPB;
 use crate::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
 use crate::formats::asn1::writer::encode_item;
@@ -14,17 +14,10 @@ use crate::crypto::x509::{
     Validity,
     SubjectPublicKeyInfo,
     Time,
-    UTCTime,
+    GeneralizedTime,
     RelativeDistinguishedName,
-    // CRYPTO_SHA_256_WITH_RSA_ENCRYPTION,
-    // CRYPTO_RSA_ENCRYPTION,
     CRYPTO_ED25519,
-    X509_COUNTRY_NAME,
-    X509_ORGANIZATION_NAME,
-    X509_COMMON_NAME,
-    X509_AUTHORITY_KEY_IDENTIFIER,
-    X509_BASIC_CONSTRAINTS,
-    X509_KEY_USAGE,
+    X509_SERIAL_NUMBER,
 };
 
 pub enum GenerateError {
@@ -118,53 +111,32 @@ fn generate_certificate_inner(
     x509_keypair: &ring::signature::Ed25519KeyPair,
     libp2p_ext_bytes: &[u8],
 ) -> Result<Vec<u8>, GenerateError> {
-
-    // TODO: Randomly generate these
-    let serial_number = from_hex("00fece0a9eaa3eddc3")
-        .ok_or(GenerateError::Plain("Invalid hex string: serial_number"))?;
-
-    let authority_key_identifier = from_hex(
-        &format!("{}{}",
-        "3050a143a441303f310b300906035504061302555331173015060355040a0c0e4d7920506572736f6e",
-        "616c2043413117301506035504030c0e6d792e706572736f6e616c2e6361820900d7c3d885fa68751d"))
-        .ok_or(GenerateError::Plain("Invalid hex string: authority_key_identifier"))?;
-    let basic_constraints = from_hex("3000")
-        .ok_or(GenerateError::Plain("Invalid hex string: basic_constraints"))?;
-    let key_usage = from_hex("030204f0")
-        .ok_or(GenerateError::Plain("Invalid hex string: key_usage"))?;
-
-
     let subject_public_key: Vec<u8> = Vec::from(x509_keypair.public_key().as_ref());
+    let subject_name = Name { parts: vec![
+            RelativeDistinguishedName {
+                id: ObjectIdentifier(Vec::from(X509_SERIAL_NUMBER)),
+                value: Item::from(Value::PrintableString(String::from("1"))),
+            },
+        ]};
+    let issuer_name = subject_name.clone();
+
+    let now: DateTime<Utc> = Utc::now();
+    let not_before = (now - Duration::hours(1)).format("%Y%m%d%H%M%SZ").to_string();
+    let not_after = (now + Duration::hours(10 * 365 * 24)).format("%Y%m%d%H%M%SZ").to_string();
 
     let tbs_certificate = TBSCertificate {
         version: Version::V3,
-        serial_number: Integer(serial_number),
+        serial_number: Integer(vec![1]),
         signature: AlgorithmIdentifier {
             algorithm: ObjectIdentifier(Vec::from(CRYPTO_ED25519)),
             parameters: None,
         },
-        issuer: Name { parts: vec![
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_COUNTRY_NAME)),
-                value: Item::from(Value::PrintableString(String::from("US"))),
-            },
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_ORGANIZATION_NAME)),
-                value: Item::from(Value::UTF8String(String::from("My Personal CA"))),
-            },
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_COMMON_NAME)),
-                value: Item::from(Value::UTF8String(String::from("my.personal.ca"))),
-            } ] },
+        issuer: issuer_name,
         validity: Validity {
-            not_before: Time::UTCTime(UTCTime { data: String::from("210515162539Z") }),
-            not_after: Time::UTCTime(UTCTime {  data: String::from("240312162539Z") }),
+            not_before: Time::GeneralizedTime(GeneralizedTime { data: not_before }),
+            not_after: Time::GeneralizedTime(GeneralizedTime { data: not_after }),
         },
-        subject: Name { parts: vec![
-            RelativeDistinguishedName {
-                id: ObjectIdentifier(Vec::from(X509_COMMON_NAME)),
-                value: Item::from(Value::UTF8String(String::from("client"))),
-            } ] },
+        subject: subject_name,
         subject_public_key_info: SubjectPublicKeyInfo {
             algorithm: AlgorithmIdentifier {
                 algorithm: ObjectIdentifier(Vec::from(CRYPTO_ED25519)),
@@ -178,21 +150,6 @@ fn generate_certificate_inner(
         issuer_unique_id: None,
         subject_unique_id: None,
         extensions: vec![
-            x509::Extension {
-                id: ObjectIdentifier(Vec::from(X509_AUTHORITY_KEY_IDENTIFIER)),
-                critical: false,
-                data: authority_key_identifier,
-            },
-            x509::Extension {
-                id: ObjectIdentifier(Vec::from(X509_BASIC_CONSTRAINTS)),
-                critical: false,
-                data: basic_constraints,
-            },
-            x509::Extension {
-                id: ObjectIdentifier(Vec::from(X509_KEY_USAGE)),
-                critical: false,
-                data: key_usage,
-            },
             x509::Extension {
                 id: ObjectIdentifier(Vec::from([1, 3, 6, 1, 4, 1, 53594, 1, 1])),
                 critical: true,

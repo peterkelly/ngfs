@@ -144,7 +144,7 @@ pub fn encode_item<W : Write>(item: &Item, out: &mut W) -> Result<(), std::io::E
             encode_raw(out, Class::Universal, Form::Primitive, 23, s.as_bytes())
         }
         Value::GeneralizedTime(s)    => {
-            encode_raw(out, Class::Universal, Form::Primitive, 23, s.as_bytes())
+            encode_raw(out, Class::Universal, Form::Primitive, 24, s.as_bytes())
         }
         Value::Sequence(items)           => {
             let mut data: Vec<u8> = Vec::new();

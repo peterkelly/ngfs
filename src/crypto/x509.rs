@@ -10,6 +10,7 @@ use crate::formats::asn1;
 pub const X509_COMMON_NAME: [u64; 4] = [2, 5, 4, 3]; // [other identifier: cn]
 pub const X509_SURNAME: [u64; 4] = [2, 5, 4, 4]; // [other identifier: sn]
 pub const X509_COUNTRY_NAME: [u64; 4] = [2, 5, 4, 6]; // [other identifier: c]
+pub const X509_SERIAL_NUMBER: [u64; 4] = [2, 5, 4, 5];
 pub const X509_LOCALITY_NAME: [u64; 4] = [2, 5, 4, 7]; // [other identifiers: locality, l]
 pub const X509_STATE_OR_PROVINCE_NAME: [u64; 4] = [2, 5, 4, 8]; // [other identifier: st]
 pub const X509_STREET_ADDRESS: [u64; 4] = [2, 5, 4, 9]; // [other identifier: street]
@@ -202,6 +203,7 @@ impl Version {
     }
 }
 
+#[derive(Clone)]
 pub struct RelativeDistinguishedName {
     pub id: ObjectIdentifier,
     pub value: Item,
@@ -227,6 +229,7 @@ impl RelativeDistinguishedName {
     }
 }
 
+#[derive(Clone)]
 pub struct Name {
     pub parts: Vec<RelativeDistinguishedName>,
 }
@@ -266,7 +269,7 @@ pub struct GeneralizedTime {
 
 impl GeneralizedTime {
     pub fn to_asn1(&self) -> Item {
-        Item::from(Value::UTCTime(self.data.clone()))
+        Item::from(Value::GeneralizedTime(self.data.clone()))
     }
 }
 
@@ -556,6 +559,7 @@ pub fn print_certificate(reg: &ObjectRegistry, certificate: &Certificate) {
 pub fn populate_registry(registry: &mut ObjectRegistry) {
     registry.add2(&X509_COMMON_NAME, "commonName", "cn");
     registry.add2(&X509_SURNAME, "surname", "sn");
+    registry.add(&X509_SERIAL_NUMBER, "serialNumber");
     registry.add2(&X509_COUNTRY_NAME, "countryName", "c");
     registry.add2(&X509_LOCALITY_NAME, "localityName", "l");
     registry.add2(&X509_STATE_OR_PROVINCE_NAME, "stateOrProvinceName", "st");
