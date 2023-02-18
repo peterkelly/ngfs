@@ -1,2 +1,1 @@
-pub mod quic;
-pub mod protocol;
+pub mod spec;
