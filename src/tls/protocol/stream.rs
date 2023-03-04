@@ -249,7 +249,7 @@ fn poll_receive_record_ignore_cc(
 pub struct PlaintextStream {
     pub inner: Pin<Box<dyn AsyncStream>>,
     pub receiver: RecordReceiver,
-    pub outgoing_encrypted: BytesMut,
+    pub outgoing: BytesMut,
     pub write_state: WriteState,
 }
 
@@ -258,7 +258,7 @@ impl PlaintextStream {
         PlaintextStream {
             inner,
             receiver,
-            outgoing_encrypted: BytesMut::new(),
+            outgoing: BytesMut::new(),
             write_state: WriteState::Active,
         }
     }
@@ -275,14 +275,14 @@ impl PlaintextStream {
     }
 
     pub fn poll_drain(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
-        while !self.outgoing_encrypted.is_empty() {
+        while !self.outgoing.is_empty() {
             match AsyncWrite::poll_write(
                 Pin::new(&mut self.inner),
                 cx,
-                &self.outgoing_encrypted,
+                &self.outgoing,
             ) {
                 Poll::Ready(Ok(w)) => {
-                    self.outgoing_encrypted.advance(w);
+                    self.outgoing.advance(w);
                 }
                 Poll::Ready(Err(e)) => {
                     let tls_e: TLSError = TLSError::IOError(e.kind());

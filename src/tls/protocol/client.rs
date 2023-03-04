@@ -67,7 +67,6 @@ use super::super::error::{
 };
 use super::client_state::ClientState;
 use crate::util::util::vec_with_len;
-use crate::crypto::crypt::HashAlgorithm;
 use crate::util::binary::{BinaryReader, BinaryWriter};
 use crate::formats::asn1;
 use crate::crypto::x509;
@@ -176,21 +175,21 @@ enum Endpoint {
 }
 
 fn send_finished_noflush(
-    hash_alg: HashAlgorithm,
-    new_transcript_hash: &[u8],
+    transcript: &Transcript,
     stream: &mut EncryptedStream,
 ) -> Result<(), TLSError> {
+    let encryption = &stream.encryption;
     let finished_key = derive_secret(
-        hash_alg,
-        &stream.encryption.traffic_secrets.client.raw,
+        encryption.ciphers.hash_alg,
+        &encryption.traffic_secrets.client.raw,
         b"finished", &[])?;
-    let verify_data = hash_alg.hmac_sign(&finished_key, new_transcript_hash)?;
+    let verify_data = encryption.ciphers.hash_alg.hmac_sign(&finished_key, &transcript.get_hash())?;
     let client_finished = Handshake::Finished(Finished { verify_data });
-    send_handshake_noflush(&client_finished, None, stream)?;
+    append_handshake(&client_finished, None, stream)?;
     Ok(())
 }
 
-fn send_certificate_noflush(
+fn append_certificate(
     transcript: &mut Transcript,
     client_cert_data: &[u8],
     stream: &mut EncryptedStream,
@@ -207,11 +206,11 @@ fn send_certificate_noflush(
             }
         ],
     });
-    send_handshake_noflush(&handshake, Some(transcript), stream)?;
+    append_handshake(&handshake, Some(transcript), stream)?;
     Ok(())
 }
 
-fn send_verify_noflush(
+fn append_verify(
     transcript: &mut Transcript,
     client_key: &ClientKey,
     stream: &mut EncryptedStream,
@@ -234,11 +233,11 @@ fn send_verify_noflush(
         }
     };
     let handshake = Handshake::CertificateVerify(certificate_verify);
-    send_handshake_noflush(&handshake, Some(transcript), stream)?;
+    append_handshake(&handshake, Some(transcript), stream)?;
     Ok(())
 }
 
-fn send_handshake_noflush(
+fn append_handshake(
     handshake: &Handshake,
     transcript: Option<&mut Transcript>,
     stream: &mut EncryptedStream,
@@ -247,7 +246,7 @@ fn send_handshake_noflush(
     writer.write_item(handshake).map_err(|_| TLSError::MessageEncodingFailed)?;
     let finished_bytes: Vec<u8> = Vec::from(writer);
     encrypt_record(
-        &mut stream.plaintext.outgoing_encrypted,
+        &mut stream.plaintext.outgoing,
         &finished_bytes,         // to_encrypt
         ContentType::Handshake, // content_type
         &stream.encryption.traffic_secrets.client,        // traffic_secret
@@ -351,7 +350,7 @@ fn append_plaintext_handshake(
     };
 
     transcript.extend_from_slice(record.fragment);
-    record.encode(&mut stream.outgoing_encrypted);
+    record.encode(&mut stream.outgoing);
     Ok(())
 }
 
@@ -495,9 +494,7 @@ struct BeforeReceiveServerHello {
 
 impl BeforeReceiveServerHello {
     async fn do_step(mut self) -> ECState {
-        match self.plaintext_stream.receive_plaintext_message(
-            &mut self.initial_transcript,
-        ).await {
+        match self.plaintext_stream.receive_plaintext_message(&mut self.initial_transcript).await {
             Ok(opt_message) => self.on_opt_message(opt_message),
             Err(e) => self.on_error(e),
         }
@@ -540,23 +537,23 @@ impl BeforeReceiveServerHello {
 
         ECState::BeforeReceiveServerMessages(BeforeReceiveServerMessages {
             config: self.config,
-            enc_stream,
-            transcript,
-            prk,
+            stream: enc_stream,
+            transcript: transcript,
+            prk: prk,
         })
     }
 }
 
 struct BeforeReceiveServerMessages {
     config: ClientConfig,
-    enc_stream: EncryptedStream,
+    stream: EncryptedStream,
     transcript: Transcript,
     prk: Vec<u8>,
 }
 
 impl BeforeReceiveServerMessages {
     async fn do_step(mut self) -> ECState {
-        match receive_server_messages(&mut self.transcript, &mut self.enc_stream).await {
+        match receive_server_messages(&mut self.transcript, &mut self.stream).await {
             Ok(sm) => self.on_server_messages(sm),
             Err(e) => self.on_error(e),
         }
@@ -570,49 +567,43 @@ impl BeforeReceiveServerMessages {
         // Compute the new traffic secrets for application data, but don't use them yet.
         let application_secrets: TrafficSecrets = match compute_application_secrets(
             &self.transcript, &self.config,
-            &self.prk, &sm, &self.enc_stream.encryption) {
+            &self.prk, &sm, &self.stream.encryption) {
             Ok(r) => r,
             Err(e) => return ECState::Error(e),
         };
 
         // Send the client certificate and Finished messages, using the handshake traffic secrets
         if let ClientAuth::Certificate { cert, key } = &self.config.client_auth {
-            match send_certificate_noflush(&mut self.transcript, cert, &mut self.enc_stream) {
+            match append_certificate(&mut self.transcript, cert, &mut self.stream) {
                 Ok(()) => (),
                 Err(e) => return ECState::Error(e),
             };
-            match send_verify_noflush(&mut self.transcript, key, &mut self.enc_stream) {
+            match append_verify(&mut self.transcript, key, &mut self.stream) {
                 Ok(()) => (),
                 Err(e) => return ECState::Error(e),
             };
         }
 
+        match send_finished_noflush(&self.transcript, &mut self.stream) {
+            Ok(()) => (),
+            Err(e) => return self.on_error(e),
+        };
+
         ECState::BeforeSendFinished(BeforeSendFinished {
-            enc_stream: self.enc_stream,
+            stream: self.stream,
             application_secrets: application_secrets,
-            transcript: self.transcript,
         })
     }
 }
 
 struct BeforeSendFinished {
-    enc_stream: EncryptedStream,
+    stream: EncryptedStream,
     application_secrets: TrafficSecrets,
-    transcript: Transcript,
 }
 
 impl BeforeSendFinished {
     async fn do_step(mut self) -> ECState {
-        match send_finished_noflush(
-            self.enc_stream.encryption.ciphers.hash_alg,
-            &self.transcript.get_hash(),
-            &mut self.enc_stream,
-        ) {
-            Ok(()) => (),
-            Err(e) => return self.on_error(e),
-        };
-
-        match self.enc_stream.plaintext.flush().await {
+        match self.stream.plaintext.flush().await {
             Ok(()) => (),
             Err(e) => return self.on_error(e),
         };
@@ -626,11 +617,11 @@ impl BeforeSendFinished {
 
     fn on_data_sent(mut self) -> ECState {
         // Reset the encryption state for the stream to use the new traffic secrets
-        self.enc_stream.client_sequence_no = 0;
-        self.enc_stream.server_sequence_no = 0;
-        self.enc_stream.encryption.traffic_secrets = self.application_secrets;
+        self.stream.client_sequence_no = 0;
+        self.stream.server_sequence_no = 0;
+        self.stream.encryption.traffic_secrets = self.application_secrets;
 
-        ECState::Done(ECStateDone { conn: EstablishedConnection::new(self.enc_stream) })
+        ECState::Done(ECStateDone { conn: EstablishedConnection::new(self.stream) })
     }
 }
 
@@ -779,7 +770,7 @@ impl EstablishedConnection {
 
     fn append_record(&mut self, data: &[u8], content_type: ContentType) -> Result<(), TLSError> {
         match encrypt_record(
-            &mut self.stream.plaintext.outgoing_encrypted,
+            &mut self.stream.plaintext.outgoing,
             data,
             content_type,
             &self.stream.encryption.traffic_secrets.client,
