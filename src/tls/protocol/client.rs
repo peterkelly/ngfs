@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use bytes::{BytesMut, Buf};
-use ring::agreement::{EphemeralPrivateKey, X25519};
+use ring::agreement::{EphemeralPrivateKey, PublicKey, X25519};
 use ring::rand::{SystemRandom, SecureRandom};
 use super::stream::{
     Encryption,
@@ -186,10 +186,9 @@ async fn send_finished(
     Ok(())
 }
 
-async fn send_client_certificate(
+async fn send_certificate(
     transcript: &mut Transcript,
     client_cert_data: &[u8],
-    client_key: &ClientKey,
     stream: &mut EncryptedStream,
 ) -> Result<(), TLSError> {
     let client_cert = x509::Certificate::from_bytes(client_cert_data)
@@ -205,6 +204,14 @@ async fn send_client_certificate(
         ],
     });
     send_handshake(&handshake, Some(transcript), stream).await?;
+    Ok(())
+}
+
+async fn send_verify(
+    transcript: &mut Transcript,
+    client_key: &ClientKey,
+    stream: &mut EncryptedStream,
+) -> Result<(), TLSError> {
     let thash = transcript.get_hash();
     let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
     let certificate_verify = match client_key {
@@ -357,59 +364,289 @@ pub async fn establish_connection<T: 'static>(
 ) -> Result<EstablishedConnection, TLSError>
     where T : AsyncRead + AsyncWrite + Send
 {
-    let private_key = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
+    let mut state = make_initial_state(transport, config, protocol_names)?;
+    loop {
+        match state {
+            ECState::Done(s) => return Ok(s.conn),
+            ECState::Error(e) => return Err(e),
+            _ => state = state.step().await,
+        }
+    }
+}
+
+enum ECState {
+    BeforeSendClientHello(BeforeSendClientHello),
+    BeforeReceiveServerHello(BeforeReceiveServerHello),
+    BeforeReceiveServerMessages(BeforeReceiveServerMessages),
+    BeforeSendCertificateAndVerify(BeforeSendCertificateAndVerify),
+    BeforeSendFinished(BeforeSendFinished),
+    Done(ECStateDone),
+    Error(TLSError),
+}
+
+impl ECState {
+    async fn step(self) -> ECState {
+        match self {
+            ECState::BeforeSendClientHello(s) => {
+                s.do_step().await
+            }
+            ECState::BeforeReceiveServerHello(s) => {
+                s.do_step().await
+            }
+            ECState::BeforeReceiveServerMessages(s) => {
+                s.do_step().await
+            }
+            ECState::BeforeSendCertificateAndVerify(s) => {
+                s.do_step().await
+            }
+            ECState::BeforeSendFinished(s) => {
+                s.do_step().await
+            }
+            ECState::Done(sdone) => {
+                ECState::Done(sdone)
+            }
+            ECState::Error(e) => {
+                ECState::Error(e)
+            }
+        }
+    }
+}
+
+fn make_initial_state<T: 'static>(
+    transport: Pin<Box<T>>,
+    config: ClientConfig,
+    protocol_names: &[&str],
+) -> Result<ECState, TLSError>
+    where T : AsyncRead + AsyncWrite + Send
+{
+    let private_key: EphemeralPrivateKey = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
         .map_err(|_| TLSError::EphemeralPrivateKeyGenerationFailed)?;
-    let public_key = private_key.compute_public_key()
+    let public_key: PublicKey = private_key.compute_public_key()
         .map_err(|_| TLSError::ComputePublicKeyFailed)?;
-    let client_hello = make_client_hello(public_key.as_ref(), config.server_name.as_ref(),
-                                         protocol_names)?;
-    let client_hello_handshake = Handshake::ClientHello(client_hello);
+    let client_hello: ClientHello = make_client_hello(
+        public_key.as_ref(),
+        config.server_name.as_ref(),
+        protocol_names,
+    )?;
+    let client_hello_handshake: Handshake = Handshake::ClientHello(client_hello);
 
-    let mut initial_transcript: Vec<u8> = Vec::new();
-    let mut plaintext_stream = PlaintextStream::new(transport, BytesMut::new());
-    write_plaintext_handshake(
-        &mut plaintext_stream.inner,
-        &client_hello_handshake,
-        &mut initial_transcript).await?;
-    let message = plaintext_stream.receive_plaintext_message(&mut initial_transcript).await?;
-    let server_hello = match message {
-        Some(Message::Handshake(Handshake::ServerHello(server_hello))) => server_hello,
-        Some(message) => return Err(TLSError::UnexpectedMessage(message.name())),
-        None => return Err(TLSError::UnexpectedEOF),
-    };
-
-    let ciphers = Ciphers::from_server_hello(&server_hello)?;
-    let mut transcript = Transcript::new(initial_transcript, ciphers.hash_alg);
-    let henc = get_handshake_encryption(&ciphers, &transcript, &server_hello, private_key)?;
-    let prk = henc.prk;
+    let initial_transcript: Vec<u8> = Vec::new();
+    let plaintext_stream = PlaintextStream::new(transport, BytesMut::new());
 
 
-    let encryption = Encryption {
-        traffic_secrets: henc.traffic_secrets,
-        ciphers,
-    };
+    Ok(ECState::BeforeSendClientHello(BeforeSendClientHello {
+        config: config,
+        private_key: private_key,
+        client_hello_handshake: client_hello_handshake,
+        initial_transcript: initial_transcript,
+        plaintext_stream: plaintext_stream,
+    }))
+}
 
-    let mut enc_stream = EncryptedStream::new(plaintext_stream, encryption);
-    let sm = receive_server_messages(&mut transcript, &mut enc_stream).await?;
+struct BeforeSendClientHello {
+    config: ClientConfig,
+    private_key: EphemeralPrivateKey,
+    client_hello_handshake: Handshake,
+    initial_transcript: Vec<u8>,
+    plaintext_stream: PlaintextStream,
+}
 
-    // Compute the new traffic secrets for application data, but don't use them yet.
-    let application_secrets = compute_application_secrets(
-        &transcript, &config,
-        &prk, &sm, &enc_stream.encryption)?;
-
-    // Send the client certificate and Finished messages, using the handshake traffic secrets
-    if let ClientAuth::Certificate { cert, key } = &config.client_auth {
-        send_client_certificate(&mut transcript, cert, key, &mut enc_stream).await?;
+impl BeforeSendClientHello {
+    async fn do_step(mut self) -> ECState {
+        match write_plaintext_handshake(
+            &mut self.plaintext_stream.inner,
+            &self.client_hello_handshake,
+            &mut self.initial_transcript,
+        ).await {
+            Ok(()) => self.on_data_sent(),
+            Err(e) => self.on_error(e),
+        }
     }
 
-    send_finished(enc_stream.encryption.ciphers.hash_alg, &transcript.get_hash(), &mut enc_stream).await?;
+    fn on_error(self, e: TLSError) -> ECState {
+        ECState::Error(e)
+    }
 
-    // Reset the encryption state for the stream to use the new traffic secrets
-    enc_stream.client_sequence_no = 0;
-    enc_stream.server_sequence_no = 0;
-    enc_stream.encryption.traffic_secrets = application_secrets;
+    fn on_data_sent(self) -> ECState {
+        ECState::BeforeReceiveServerHello(BeforeReceiveServerHello {
+            config: self.config,
+            private_key: self.private_key,
+            initial_transcript: self.initial_transcript,
+            plaintext_stream: self.plaintext_stream,
+        })
+    }
+}
 
-    Ok(EstablishedConnection::new(enc_stream))
+struct BeforeReceiveServerHello {
+    config: ClientConfig,
+    private_key: EphemeralPrivateKey,
+    initial_transcript: Vec<u8>,
+    plaintext_stream: PlaintextStream,
+}
+
+impl BeforeReceiveServerHello {
+    async fn do_step(mut self) -> ECState {
+        match self.plaintext_stream.receive_plaintext_message(
+            &mut self.initial_transcript,
+        ).await {
+            Ok(opt_message) => self.on_opt_message(opt_message),
+            Err(e) => self.on_error(e),
+        }
+    }
+
+    fn on_error(self, e: TLSError) -> ECState {
+        ECState::Error(e)
+    }
+
+    fn on_opt_message(self, message: Option<Message>) -> ECState {
+        let server_hello: ServerHello = match message {
+            Some(Message::Handshake(Handshake::ServerHello(server_hello))) => server_hello,
+            Some(message) => return ECState::Error(TLSError::UnexpectedMessage(message.name())),
+            None => return ECState::Error(TLSError::UnexpectedEOF),
+        };
+
+        let ciphers: Ciphers = match Ciphers::from_server_hello(&server_hello) {
+            Ok(r) => r,
+            Err(e) => return ECState::Error(e),
+        };
+        let transcript: Transcript = Transcript::new(self.initial_transcript, ciphers.hash_alg);
+        let henc: HandshakeEncryption = match get_handshake_encryption(
+            &ciphers,
+            &transcript,
+            &server_hello,
+            self.private_key,
+        ) {
+            Ok(r) => r,
+            Err(e) => return ECState::Error(e),
+        };
+        let prk: Vec<u8> = henc.prk;
+
+
+        let encryption: Encryption = Encryption {
+            traffic_secrets: henc.traffic_secrets,
+            ciphers,
+        };
+
+        let enc_stream: EncryptedStream = EncryptedStream::new(self.plaintext_stream, encryption);
+
+        ECState::BeforeReceiveServerMessages(BeforeReceiveServerMessages {
+            config: self.config,
+            enc_stream,
+            transcript,
+            prk,
+        })
+    }
+}
+
+struct BeforeReceiveServerMessages {
+    config: ClientConfig,
+    enc_stream: EncryptedStream,
+    transcript: Transcript,
+    prk: Vec<u8>,
+}
+
+impl BeforeReceiveServerMessages {
+    async fn do_step(mut self) -> ECState {
+        match receive_server_messages(&mut self.transcript, &mut self.enc_stream).await {
+            Ok(sm) => self.on_server_messages(sm),
+            Err(e) => self.on_error(e),
+        }
+    }
+
+    fn on_error(self, e: TLSError) -> ECState {
+        ECState::Error(e)
+    }
+
+    fn on_server_messages(self, sm: ServerMessages) -> ECState {
+        // Compute the new traffic secrets for application data, but don't use them yet.
+        let application_secrets: TrafficSecrets = match compute_application_secrets(
+            &self.transcript, &self.config,
+            &self.prk, &sm, &self.enc_stream.encryption) {
+            Ok(r) => r,
+            Err(e) => return ECState::Error(e),
+        };
+
+        // Send the client certificate and Finished messages, using the handshake traffic secrets
+        if let ClientAuth::Certificate { cert, key } = self.config.client_auth {
+            ECState::BeforeSendCertificateAndVerify(BeforeSendCertificateAndVerify {
+                enc_stream: self.enc_stream,
+                transcript: self.transcript,
+                application_secrets: application_secrets,
+                cert: cert,
+                key: key,
+            })
+        }
+        else {
+            ECState::BeforeSendFinished(BeforeSendFinished {
+                enc_stream: self.enc_stream,
+                application_secrets: application_secrets,
+                transcript: self.transcript,
+            })
+        }
+
+    }
+}
+
+struct BeforeSendCertificateAndVerify {
+    enc_stream: EncryptedStream,
+    transcript: Transcript,
+    application_secrets: TrafficSecrets,
+    cert: Vec<u8>,
+    key: ClientKey,
+}
+
+impl BeforeSendCertificateAndVerify {
+    async fn do_step(mut self) -> ECState {
+        match send_certificate(&mut self.transcript, &self.cert, &mut self.enc_stream).await {
+            Ok(()) => (),
+            Err(e) => return ECState::Error(e),
+        };
+        match send_verify(&mut self.transcript, &self.key, &mut self.enc_stream).await {
+            Ok(()) => (),
+            Err(e) => return ECState::Error(e),
+        };
+        ECState::BeforeSendFinished(BeforeSendFinished {
+            enc_stream: self.enc_stream,
+            application_secrets: self.application_secrets,
+            transcript: self.transcript,
+        })
+    }
+}
+
+struct BeforeSendFinished {
+    enc_stream: EncryptedStream,
+    application_secrets: TrafficSecrets,
+    transcript: Transcript,
+}
+
+impl BeforeSendFinished {
+    async fn do_step(mut self) -> ECState {
+        match send_finished(
+            self.enc_stream.encryption.ciphers.hash_alg,
+            &self.transcript.get_hash(),
+            &mut self.enc_stream,
+        ).await {
+            Ok(()) => self.on_data_sent(),
+            Err(e) => self.on_error(e),
+        }
+    }
+
+    fn on_error(self, e: TLSError) -> ECState {
+        ECState::Error(e)
+    }
+
+    fn on_data_sent(mut self) -> ECState {
+        // Reset the encryption state for the stream to use the new traffic secrets
+        self.enc_stream.client_sequence_no = 0;
+        self.enc_stream.server_sequence_no = 0;
+        self.enc_stream.encryption.traffic_secrets = self.application_secrets;
+
+        ECState::Done(ECStateDone { conn: EstablishedConnection::new(self.enc_stream) })
+    }
+}
+
+struct ECStateDone {
+    conn: EstablishedConnection,
 }
 
 struct HandshakeEncryption {
