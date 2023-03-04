@@ -8,6 +8,7 @@ use ring::rand::{SystemRandom, SecureRandom};
 use super::stream::{
     Encryption,
     encrypt_record,
+    RecordReceiver,
     PlaintextStream,
     EncryptedStream,
 };
@@ -431,7 +432,7 @@ fn make_initial_state<T: 'static>(
     let client_hello_handshake: Handshake = Handshake::ClientHello(client_hello);
 
     let initial_transcript: Vec<u8> = Vec::new();
-    let plaintext_stream = PlaintextStream::new(transport, BytesMut::new());
+    let plaintext_stream = PlaintextStream::new(transport, RecordReceiver::new());
 
 
     Ok(ECState::BeforeSendClientHello(BeforeSendClientHello {

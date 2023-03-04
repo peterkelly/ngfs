@@ -1,3 +1,5 @@
+const READ_SIZE: usize = 1024;
+
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -11,7 +13,6 @@ use super::super::types::record::{
     MAX_PLAINTEXT_RECORD_SIZE,
     MAX_CIPHERTEXT_RECORD_SIZE,
 };
-use crate::util::util::{vec_with_len};
 use super::super::error::TLSError;
 use super::super::helpers::{
     Transcript,
@@ -60,96 +61,155 @@ pub fn encrypt_record(
     Ok(())
 }
 
-fn poll_receive_record(
-    cx: &mut Context<'_>,
-    reader: &mut Pin<Box<dyn AsyncStream>>,
-    incoming_data: &mut BytesMut,
-) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
-    if incoming_data.remaining() >= 5 {
-        let content_type = ContentType::from_raw(incoming_data[0]);
+pub struct RecordReceiver {
+    incoming_data: BytesMut,
+    closed: bool,
+}
+
+impl RecordReceiver {
+    pub fn new() -> Self {
+        RecordReceiver {
+            incoming_data: BytesMut::new(),
+            closed: false,
+        }
+    }
+
+    fn pop_record(&mut self) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
+        if self.incoming_data.remaining() < 5 {
+            if self.closed {
+                return Poll::Ready(Ok(None));
+            }
+            else {
+                return Poll::Pending;
+            }
+        }
+
+        let content_type = ContentType::from_raw(self.incoming_data[0]);
 
         let mut legacy_record_version_bytes: [u8; 2] = Default::default();
-        legacy_record_version_bytes.copy_from_slice(&incoming_data[1..3]);
+        legacy_record_version_bytes.copy_from_slice(&self.incoming_data[1..3]);
         let legacy_record_version = u16::from_be_bytes(legacy_record_version_bytes);
 
 
         let mut length_bytes: [u8; 2] = Default::default();
-        length_bytes.copy_from_slice(&incoming_data[3..5]);
+        length_bytes.copy_from_slice(&self.incoming_data[3..5]);
         let length = u16::from_be_bytes(length_bytes) as usize;
 
         if length > MAX_CIPHERTEXT_RECORD_SIZE {
             return Poll::Ready(Err(TLSError::InvalidPlaintextRecord));
         }
 
-
-        if incoming_data.remaining() >= 5 + length {
-            let header: [u8; 5] = [
-                incoming_data[0],
-                incoming_data[1],
-                incoming_data[2],
-                incoming_data[3],
-                incoming_data[4],
-            ];
-
-            let mut fragment: Vec<u8> = Vec::new();
-            fragment.extend_from_slice(&incoming_data[5..5 + length]);
-
-            let mut raw: Vec<u8> = Vec::new();
-            raw.extend_from_slice(&incoming_data[0..5 + length]);
-
-            let record = TLSOwnedPlaintext {
-                content_type,
-                legacy_record_version,
-                header,
-                fragment,
-                raw,
-            };
-
-            incoming_data.advance(5 + (length as usize));
-
-            return Poll::Ready(Ok(Some(record)));
+        if self.incoming_data.remaining() < 5 + length {
+            if self.closed {
+                return Poll::Ready(Err(TLSError::InvalidPlaintextRecord));
+            }
+            else {
+                return Poll::Pending;
+            }
         }
+
+        let header: [u8; 5] = [
+            self.incoming_data[0],
+            self.incoming_data[1],
+            self.incoming_data[2],
+            self.incoming_data[3],
+            self.incoming_data[4],
+        ];
+
+        let mut fragment: Vec<u8> = Vec::new();
+        fragment.extend_from_slice(&self.incoming_data[5..5 + length]);
+
+        let mut raw: Vec<u8> = Vec::new();
+        raw.extend_from_slice(&self.incoming_data[0..5 + length]);
+
+        let record = TLSOwnedPlaintext {
+            content_type,
+            legacy_record_version,
+            header,
+            fragment,
+            raw,
+        };
+
+        self.incoming_data.advance(5 + (length as usize));
+
+        return Poll::Ready(Ok(Some(record)));
     }
 
-    let amt = 1024 * 1024;
-    let mut recv_data = vec_with_len(amt);
+    fn append_data(&mut self, data: &[u8]) {
+        self.incoming_data.extend_from_slice(data);
+    }
+
+    fn close(&mut self) {
+        self.closed = true;
+    }
+}
+
+fn poll_receive_record(
+    receiver: &mut RecordReceiver,
+    cx: &mut Context<'_>,
+    reader: &mut Pin<Box<dyn AsyncStream>>,
+) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
+    loop {
+        match receiver.pop_record() {
+            Poll::Ready(r) => return Poll::Ready(r),
+            Poll::Pending => (),
+        };
+
+        match poll_receive_data(cx, reader) {
+            Poll::Ready(Ok(Some(data))) => {
+                receiver.append_data(&data);
+            }
+            Poll::Ready(Ok(None)) => {
+                receiver.close();
+            }
+            Poll::Ready(Err(e)) => {
+                return Poll::Ready(Err(e));
+            }
+            Poll::Pending => {
+                return Poll::Pending;
+            }
+        }
+    }
+}
+
+fn poll_receive_data(
+    cx: &mut Context<'_>,
+    reader: &mut Pin<Box<dyn AsyncStream>>,
+) -> Poll<Result<Option<Vec<u8>>, TLSError>> {
+    let mut recv_data = vec![0; READ_SIZE];
     let mut recv_buf = ReadBuf::new(&mut recv_data);
-    let old_filled = recv_buf.filled().len();
+    assert!(recv_buf.filled().len() == 0);
 
     match AsyncRead::poll_read(Pin::new(reader), cx, &mut recv_buf) {
         Poll::Ready(Err(e)) => {
             Poll::Ready(Err(TLSError::IOError(e.kind())))
         }
         Poll::Ready(Ok(())) => {
-            let new_filled = recv_buf.filled().len();
-            let extra = new_filled - old_filled;
-            // If extra is 0, either we have unexpected end of data or the connection
+            // If len is 0, either we have unexpected end of data or the connection
             // has been closed.
-            if extra == 0 {
+            if recv_buf.filled().len() == 0 {
                 Poll::Ready(Ok(None))
             }
             else {
-                incoming_data.extend_from_slice(recv_buf.filled());
-
                 cx.waker().wake_by_ref();
-                Poll::Pending
+
+                let v: Vec<u8> = Vec::from(recv_buf.filled());
+                return Poll::Ready(Ok(Some(v)));
             }
         }
         Poll::Pending => {
             Poll::Pending
         }
     }
-    // let x: () = reader.read(&mut self_buf);
-    // unimplemented!()
 }
 
 fn poll_receive_record_ignore_cc(
     cx: &mut Context<'_>,
     reader: &mut Pin<Box<dyn AsyncStream>>,
-    incoming_data: &mut BytesMut,
+    receiver: &mut RecordReceiver,
 ) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
     loop {
-        match poll_receive_record(cx, reader, incoming_data) {
+        match poll_receive_record(receiver, cx, reader) {
             Poll::Ready(Ok(Some(record))) => {
                 if record.content_type != ContentType::ChangeCipherSpec {
                     return Poll::Ready(Ok(Some(record)));
@@ -176,12 +236,12 @@ fn poll_receive_record_ignore_cc(
 
 pub struct PlaintextStream {
     pub inner: Pin<Box<dyn AsyncStream>>,
-    pub incoming_data: BytesMut,
+    pub receiver: RecordReceiver,
 }
 
 impl PlaintextStream {
-    pub fn new(inner: Pin<Box<dyn AsyncStream>>, incoming_data: BytesMut) -> Self {
-        PlaintextStream { inner, incoming_data }
+    pub fn new(inner: Pin<Box<dyn AsyncStream>>, receiver: RecordReceiver) -> Self {
+        PlaintextStream { inner, receiver }
     }
 
     pub fn receive_plaintext_message<'a, 'b>(
@@ -190,7 +250,7 @@ impl PlaintextStream {
     ) -> ReceivePlaintextMessage<'a, 'b> {
         ReceivePlaintextMessage {
             reader: &mut self.inner,
-            incoming_data: &mut self.incoming_data,
+            receiver: &mut self.receiver,
             transcript,
         }
     }
@@ -198,7 +258,7 @@ impl PlaintextStream {
 
 pub struct ReceivePlaintextMessage<'a, 'b> {
     reader: &'a mut Pin<Box<dyn AsyncStream>>,
-    incoming_data: &'a mut BytesMut,
+    receiver: &'a mut RecordReceiver,
     transcript: &'b mut Vec<u8>,
 }
 
@@ -207,17 +267,17 @@ impl<'a, 'b> Future for ReceivePlaintextMessage<'a, 'b> {
     type Output = Result<Option<Message>, TLSError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let direct = Pin::into_inner(self);
-        poll_receive_plaintext_message(cx, direct.reader, direct.incoming_data, direct.transcript)
+        poll_receive_plaintext_message(cx, direct.reader, direct.receiver, direct.transcript)
     }
 }
 
 fn poll_receive_plaintext_message(
     cx: &mut Context<'_>,
     reader: &mut Pin<Box<dyn AsyncStream>>,
-    incoming_data: &mut BytesMut,
+    receiver: &mut RecordReceiver,
     transcript: &mut Vec<u8>,
 ) -> Poll<Result<Option<Message>, TLSError>> {
-    match poll_receive_record_ignore_cc(cx, reader, incoming_data) {
+    match poll_receive_record_ignore_cc(cx, reader, receiver) {
         Poll::Ready(Ok(Some(plaintext))) => {
             // TODO: Support records containing multiple handshake messages
             transcript.extend_from_slice(&plaintext.fragment);
@@ -274,7 +334,7 @@ impl EncryptedStream {
     ) -> ReceiveEncryptedMessage<'a, 'b> {
         ReceiveEncryptedMessage::new(
             &mut self.plaintext.inner,
-            &mut self.plaintext.incoming_data,
+            &mut self.plaintext.receiver,
             &mut self.server_sequence_no,
             &self.encryption,
             transcript)
@@ -288,7 +348,7 @@ impl EncryptedStream {
         poll_receive_encrypted_message(
             cx,
             &mut self.plaintext.inner,
-            &mut self.plaintext.incoming_data,
+            &mut self.plaintext.receiver,
             &mut self.server_sequence_no,
             &self.encryption,
             transcript)
@@ -297,7 +357,7 @@ impl EncryptedStream {
 
 pub struct ReceiveEncryptedMessage<'a, 'b> {
     reader: &'a mut Pin<Box<dyn AsyncStream>>,
-    incoming_data: &'a mut BytesMut,
+    receiver: &'a mut RecordReceiver,
     server_sequence_no: &'a mut u64,
     encryption: &'a Encryption,
     transcript: Option<&'b mut Transcript>
@@ -306,14 +366,14 @@ pub struct ReceiveEncryptedMessage<'a, 'b> {
 impl ReceiveEncryptedMessage<'_, '_> {
     pub fn new<'a, 'b>(
         reader: &'a mut Pin<Box<dyn AsyncStream>>,
-        incoming_data: &'a mut BytesMut,
+        receiver: &'a mut RecordReceiver,
         server_sequence_no: &'a mut u64,
         encryption: &'a Encryption,
         transcript: Option<&'b mut Transcript>
     ) -> ReceiveEncryptedMessage<'a, 'b> {
         ReceiveEncryptedMessage {
             reader,
-            incoming_data,
+            receiver,
             server_sequence_no,
             encryption,
             transcript,
@@ -332,7 +392,7 @@ impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
         poll_receive_encrypted_message(
             cx,
             direct.reader,
-            direct.incoming_data,
+            direct.receiver,
             direct.server_sequence_no,
             direct.encryption,
             transcript)
@@ -342,12 +402,12 @@ impl<'a, 'b> Future for ReceiveEncryptedMessage<'a, 'b> {
 fn poll_receive_encrypted_message(
     cx: &mut Context<'_>,
     reader: &mut Pin<Box<dyn AsyncStream>>,
-    incoming_data: &mut BytesMut,
+    receiver: &mut RecordReceiver,
     server_sequence_no: &mut u64,
     encryption: &Encryption,
     transcript: Option<&mut Transcript>
 ) -> Poll<Result<Option<Message>, TLSError>> {
-    match poll_receive_record_ignore_cc(cx, reader, incoming_data) {
+    match poll_receive_record_ignore_cc(cx, reader, receiver) {
         Poll::Pending => Poll::Pending,
         Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
         Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
