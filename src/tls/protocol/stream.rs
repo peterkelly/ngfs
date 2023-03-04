@@ -65,7 +65,6 @@ fn poll_receive_record(
     reader: &mut Pin<Box<dyn AsyncStream>>,
     incoming_data: &mut BytesMut,
 ) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
-    let mut want: usize = 5;
     if incoming_data.remaining() >= 5 {
         let content_type = ContentType::from_raw(incoming_data[0]);
 
@@ -110,10 +109,9 @@ fn poll_receive_record(
 
             return Poll::Ready(Ok(Some(record)));
         }
-        want = 5 + length;
     }
 
-    let amt = want - incoming_data.remaining();
+    let amt = 1024 * 1024;
     let mut recv_data = vec_with_len(amt);
     let mut recv_buf = ReadBuf::new(&mut recv_data);
     let old_filled = recv_buf.filled().len();
