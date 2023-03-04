@@ -93,10 +93,10 @@ fn poll_receive_record(
             ];
 
             let mut fragment: Vec<u8> = Vec::new();
-            fragment.extend_from_slice(&incoming_data[5..]);
+            fragment.extend_from_slice(&incoming_data[5..5 + length]);
 
             let mut raw: Vec<u8> = Vec::new();
-            raw.extend_from_slice(incoming_data);
+            raw.extend_from_slice(&incoming_data[0..5 + length]);
 
             let record = TLSOwnedPlaintext {
                 content_type,
@@ -106,7 +106,6 @@ fn poll_receive_record(
                 raw,
             };
 
-            assert!(incoming_data.remaining() == 5 + (length as usize)); // TODO: remove
             incoming_data.advance(5 + (length as usize));
 
             return Poll::Ready(Ok(Some(record)));
