@@ -2,7 +2,7 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::fmt;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use bytes::{BytesMut, Buf};
 use ring::agreement::{EphemeralPrivateKey, PublicKey, X25519};
 use ring::rand::{SystemRandom, SecureRandom};
@@ -12,6 +12,8 @@ use super::stream::{
     RecordReceiver,
     PlaintextStream,
     EncryptedStream,
+    ReadState,
+    WriteState,
 };
 use super::super::helpers::{
     Transcript,
@@ -173,7 +175,7 @@ enum Endpoint {
     Server,
 }
 
-async fn send_finished(
+fn send_finished_noflush(
     hash_alg: HashAlgorithm,
     new_transcript_hash: &[u8],
     stream: &mut EncryptedStream,
@@ -184,11 +186,11 @@ async fn send_finished(
         b"finished", &[])?;
     let verify_data = hash_alg.hmac_sign(&finished_key, new_transcript_hash)?;
     let client_finished = Handshake::Finished(Finished { verify_data });
-    send_handshake(&client_finished, None, stream).await?;
+    send_handshake_noflush(&client_finished, None, stream)?;
     Ok(())
 }
 
-async fn send_certificate(
+fn send_certificate_noflush(
     transcript: &mut Transcript,
     client_cert_data: &[u8],
     stream: &mut EncryptedStream,
@@ -205,11 +207,11 @@ async fn send_certificate(
             }
         ],
     });
-    send_handshake(&handshake, Some(transcript), stream).await?;
+    send_handshake_noflush(&handshake, Some(transcript), stream)?;
     Ok(())
 }
 
-async fn send_verify(
+fn send_verify_noflush(
     transcript: &mut Transcript,
     client_key: &ClientKey,
     stream: &mut EncryptedStream,
@@ -232,23 +234,20 @@ async fn send_verify(
         }
     };
     let handshake = Handshake::CertificateVerify(certificate_verify);
-    send_handshake(&handshake, Some(transcript), stream).await?;
+    send_handshake_noflush(&handshake, Some(transcript), stream)?;
     Ok(())
 }
 
-async fn send_handshake(
+fn send_handshake_noflush(
     handshake: &Handshake,
     transcript: Option<&mut Transcript>,
     stream: &mut EncryptedStream,
 ) -> Result<(), TLSError> {
-    let mut conn_to_send = BytesMut::new();
-
-
     let mut writer = BinaryWriter::new();
     writer.write_item(handshake).map_err(|_| TLSError::MessageEncodingFailed)?;
     let finished_bytes: Vec<u8> = Vec::from(writer);
     encrypt_record(
-        &mut conn_to_send,
+        &mut stream.plaintext.outgoing_encrypted,
         &finished_bytes,         // to_encrypt
         ContentType::Handshake, // content_type
         &stream.encryption.traffic_secrets.client,        // traffic_secret
@@ -257,7 +256,6 @@ async fn send_handshake(
     )?;
 
     stream.client_sequence_no += 1;
-    stream.send_direct(&conn_to_send).await.map_err(|e| TLSError::IOError(e.kind()))?;
 
     Ok(())
 }
@@ -337,8 +335,8 @@ fn verify_transcript(
     )
 }
 
-async fn write_plaintext_handshake(
-    writer: &mut (impl AsyncWrite + Unpin),
+fn append_plaintext_handshake(
+    stream: &mut PlaintextStream,
     handshake: &Handshake,
     transcript: &mut Vec<u8>,
 ) -> Result<(), TLSError> {
@@ -353,9 +351,7 @@ async fn write_plaintext_handshake(
     };
 
     transcript.extend_from_slice(record.fragment);
-    let mut encoded = BytesMut::new();
-    record.encode(&mut encoded);
-    writer.write_all(&encoded).await.map_err(|e| TLSError::IOError(e.kind()))?;
+    record.encode(&mut stream.outgoing_encrypted);
     Ok(())
 }
 
@@ -381,7 +377,6 @@ enum ECState {
     BeforeSendClientHello(BeforeSendClientHello),
     BeforeReceiveServerHello(BeforeReceiveServerHello),
     BeforeReceiveServerMessages(BeforeReceiveServerMessages),
-    BeforeSendCertificateAndVerify(BeforeSendCertificateAndVerify),
     BeforeSendFinished(BeforeSendFinished),
     Done(ECStateDone),
     Error(TLSError),
@@ -393,7 +388,6 @@ impl fmt::Display for ECState {
             ECState::BeforeSendClientHello(_) => write!(f, "BeforeSendClientHello"),
             ECState::BeforeReceiveServerHello(_) => write!(f, "BeforeReceiveServerHello"),
             ECState::BeforeReceiveServerMessages(_) => write!(f, "BeforeReceiveServerMessages"),
-            ECState::BeforeSendCertificateAndVerify(_) => write!(f, "BeforeSendCertificateAndVerify"),
             ECState::BeforeSendFinished(_) => write!(f, "BeforeSendFinished"),
             ECState::Done(_) => write!(f, "Done"),
             ECState::Error(_) => write!(f, "Error"),
@@ -411,9 +405,6 @@ impl ECState {
                 s.do_step().await
             }
             ECState::BeforeReceiveServerMessages(s) => {
-                s.do_step().await
-            }
-            ECState::BeforeSendCertificateAndVerify(s) => {
                 s.do_step().await
             }
             ECState::BeforeSendFinished(s) => {
@@ -447,14 +438,18 @@ fn make_initial_state<T: 'static>(
     )?;
     let client_hello_handshake: Handshake = Handshake::ClientHello(client_hello);
 
-    let initial_transcript: Vec<u8> = Vec::new();
-    let plaintext_stream = PlaintextStream::new(transport, RecordReceiver::new());
+    let mut initial_transcript: Vec<u8> = Vec::new();
+    let mut plaintext_stream = PlaintextStream::new(transport, RecordReceiver::new());
 
+    append_plaintext_handshake(
+        &mut plaintext_stream,
+        &client_hello_handshake,
+        &mut initial_transcript,
+    )?;
 
     Ok(ECState::BeforeSendClientHello(BeforeSendClientHello {
         config: config,
         private_key: private_key,
-        client_hello_handshake: client_hello_handshake,
         initial_transcript: initial_transcript,
         plaintext_stream: plaintext_stream,
     }))
@@ -463,21 +458,18 @@ fn make_initial_state<T: 'static>(
 struct BeforeSendClientHello {
     config: ClientConfig,
     private_key: EphemeralPrivateKey,
-    client_hello_handshake: Handshake,
     initial_transcript: Vec<u8>,
     plaintext_stream: PlaintextStream,
 }
 
 impl BeforeSendClientHello {
     async fn do_step(mut self) -> ECState {
-        match write_plaintext_handshake(
-            &mut self.plaintext_stream.inner,
-            &self.client_hello_handshake,
-            &mut self.initial_transcript,
-        ).await {
-            Ok(()) => self.on_data_sent(),
-            Err(e) => self.on_error(e),
-        }
+        match self.plaintext_stream.flush().await {
+            Ok(()) => (),
+            Err(e) => return self.on_error(e),
+        };
+
+        self.on_data_sent()
     }
 
     fn on_error(self, e: TLSError) -> ECState {
@@ -574,7 +566,7 @@ impl BeforeReceiveServerMessages {
         ECState::Error(e)
     }
 
-    fn on_server_messages(self, sm: ServerMessages) -> ECState {
+    fn on_server_messages(mut self, sm: ServerMessages) -> ECState {
         // Compute the new traffic secrets for application data, but don't use them yet.
         let application_secrets: TrafficSecrets = match compute_application_secrets(
             &self.transcript, &self.config,
@@ -584,47 +576,20 @@ impl BeforeReceiveServerMessages {
         };
 
         // Send the client certificate and Finished messages, using the handshake traffic secrets
-        if let ClientAuth::Certificate { cert, key } = self.config.client_auth {
-            ECState::BeforeSendCertificateAndVerify(BeforeSendCertificateAndVerify {
-                enc_stream: self.enc_stream,
-                transcript: self.transcript,
-                application_secrets: application_secrets,
-                cert: cert,
-                key: key,
-            })
-        }
-        else {
-            ECState::BeforeSendFinished(BeforeSendFinished {
-                enc_stream: self.enc_stream,
-                application_secrets: application_secrets,
-                transcript: self.transcript,
-            })
+        if let ClientAuth::Certificate { cert, key } = &self.config.client_auth {
+            match send_certificate_noflush(&mut self.transcript, cert, &mut self.enc_stream) {
+                Ok(()) => (),
+                Err(e) => return ECState::Error(e),
+            };
+            match send_verify_noflush(&mut self.transcript, key, &mut self.enc_stream) {
+                Ok(()) => (),
+                Err(e) => return ECState::Error(e),
+            };
         }
 
-    }
-}
-
-struct BeforeSendCertificateAndVerify {
-    enc_stream: EncryptedStream,
-    transcript: Transcript,
-    application_secrets: TrafficSecrets,
-    cert: Vec<u8>,
-    key: ClientKey,
-}
-
-impl BeforeSendCertificateAndVerify {
-    async fn do_step(mut self) -> ECState {
-        match send_certificate(&mut self.transcript, &self.cert, &mut self.enc_stream).await {
-            Ok(()) => (),
-            Err(e) => return ECState::Error(e),
-        };
-        match send_verify(&mut self.transcript, &self.key, &mut self.enc_stream).await {
-            Ok(()) => (),
-            Err(e) => return ECState::Error(e),
-        };
         ECState::BeforeSendFinished(BeforeSendFinished {
             enc_stream: self.enc_stream,
-            application_secrets: self.application_secrets,
+            application_secrets: application_secrets,
             transcript: self.transcript,
         })
     }
@@ -638,14 +603,21 @@ struct BeforeSendFinished {
 
 impl BeforeSendFinished {
     async fn do_step(mut self) -> ECState {
-        match send_finished(
+        match send_finished_noflush(
             self.enc_stream.encryption.ciphers.hash_alg,
             &self.transcript.get_hash(),
             &mut self.enc_stream,
-        ).await {
-            Ok(()) => self.on_data_sent(),
-            Err(e) => self.on_error(e),
-        }
+        ) {
+            Ok(()) => (),
+            Err(e) => return self.on_error(e),
+        };
+
+        match self.enc_stream.plaintext.flush().await {
+            Ok(()) => (),
+            Err(e) => return self.on_error(e),
+        };
+
+        self.on_data_sent()
     }
 
     fn on_error(self, e: TLSError) -> ECState {
@@ -790,24 +762,10 @@ fn compute_application_secrets(
     Ok(application_secrets)
 }
 
-enum ReadState {
-    Active,
-    Eof,
-    Error(TLSError),
-}
-
-enum WriteState {
-    Active,
-    InShutdown,
-    Error(TLSError),
-}
-
 pub struct EstablishedConnection {
     stream: EncryptedStream,
     incoming_decrypted: BytesMut,
-    outgoing_encrypted: BytesMut,
     read_state: ReadState,
-    write_state: WriteState,
 }
 
 impl EstablishedConnection {
@@ -815,15 +773,13 @@ impl EstablishedConnection {
         EstablishedConnection {
             stream,
             incoming_decrypted: BytesMut::new(),
-            outgoing_encrypted: BytesMut::new(),
             read_state: ReadState::Active,
-            write_state: WriteState::Active,
         }
     }
 
     fn append_record(&mut self, data: &[u8], content_type: ContentType) -> Result<(), TLSError> {
         match encrypt_record(
-            &mut self.outgoing_encrypted,
+            &mut self.stream.plaintext.outgoing_encrypted,
             data,
             content_type,
             &self.stream.encryption.traffic_secrets.client,
@@ -835,7 +791,7 @@ impl EstablishedConnection {
                 Ok(())
             }
             Err(e) => {
-                self.write_state = WriteState::Error(e.clone());
+                self.stream.plaintext.write_state = WriteState::Error(e.clone());
                 Err(e)
             }
         }
@@ -861,27 +817,7 @@ impl EstablishedConnection {
 
 
     fn poll_drain_encrypted(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
-        while !self.outgoing_encrypted.is_empty() {
-            match AsyncWrite::poll_write(Pin::new(&mut self.stream.plaintext.inner), cx, &self.outgoing_encrypted) {
-                Poll::Ready(Ok(w)) => {
-                    self.outgoing_encrypted.advance(w);
-                }
-                Poll::Ready(Err(e)) => {
-                    let tls_e: TLSError = TLSError::IOError(e.kind());
-                    self.write_state = WriteState::Error(tls_e.clone());
-                    return Poll::Ready(Err(tls_e));
-                }
-                Poll::Pending => {
-                    return Poll::Pending;
-                }
-            }
-        }
-
-        match AsyncWrite::poll_flush(Pin::new(&mut self.stream.plaintext.inner), cx) {
-            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(TLSError::IOError(e.kind()))),
-            Poll::Pending => Poll::Pending,
-        }
+        self.stream.plaintext.poll_drain(cx)
     }
 
     fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
@@ -956,7 +892,7 @@ impl AsyncWrite for EstablishedConnection {
         buf: &[u8]
     ) -> Poll<Result<usize, io::Error>> {
         // Check for existing error condition
-        match &self.write_state {
+        match &self.stream.plaintext.write_state {
             WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
             WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
             WriteState::Active => (), // ok, continue
@@ -984,7 +920,7 @@ impl AsyncWrite for EstablishedConnection {
         cx: &mut Context<'_>
     ) -> Poll<Result<(), io::Error>> {
         // Check for existing error condition
-        match &self.write_state {
+        match &self.stream.plaintext.write_state {
             WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
             WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
             WriteState::Active => (), // ok, continue
@@ -1005,7 +941,7 @@ impl AsyncWrite for EstablishedConnection {
         let mut direct = Pin::into_inner(self);
 
         // Check for existing error condition
-        match &direct.write_state {
+        match &direct.stream.plaintext.write_state {
             WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
             WriteState::InShutdown => (), // ok, continue
             WriteState::Active => {
@@ -1016,7 +952,7 @@ impl AsyncWrite for EstablishedConnection {
                     Ok(()) => {
                         // Record the fact that shutdown() has been requested. This will cause
                         // future calls to write() or flush() will fail.
-                        direct.write_state = WriteState::InShutdown;
+                        direct.stream.plaintext.write_state = WriteState::InShutdown;
                     }
                 }
             }
@@ -1039,7 +975,7 @@ impl AsyncWrite for EstablishedConnection {
 
         // Shutdown is now complete. Cause any future calls to shutdown() to fail. Note that
         // read() and write() will already fail since we transitioned to the InShutdown state.
-        direct.write_state = WriteState::Error(TLSError::IOError(io::ErrorKind::BrokenPipe));
+        direct.stream.plaintext.write_state = WriteState::Error(TLSError::IOError(io::ErrorKind::BrokenPipe));
         Poll::Ready(Ok(()))
     }
 }

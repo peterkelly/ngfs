@@ -3,7 +3,7 @@ const READ_SIZE: usize = 1024;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use bytes::{BytesMut, Buf};
 use super::super::types::record::{
     Message,
@@ -23,6 +23,18 @@ use super::super::helpers::{
     decrypt_message,
 };
 use crate::util::io::{AsyncStream};
+
+pub enum ReadState {
+    Active,
+    Eof,
+    Error(TLSError),
+}
+
+pub enum WriteState {
+    Active,
+    InShutdown,
+    Error(TLSError),
+}
 
 pub struct Encryption {
     pub traffic_secrets: TrafficSecrets,
@@ -237,11 +249,18 @@ fn poll_receive_record_ignore_cc(
 pub struct PlaintextStream {
     pub inner: Pin<Box<dyn AsyncStream>>,
     pub receiver: RecordReceiver,
+    pub outgoing_encrypted: BytesMut,
+    pub write_state: WriteState,
 }
 
 impl PlaintextStream {
     pub fn new(inner: Pin<Box<dyn AsyncStream>>, receiver: RecordReceiver) -> Self {
-        PlaintextStream { inner, receiver }
+        PlaintextStream {
+            inner,
+            receiver,
+            outgoing_encrypted: BytesMut::new(),
+            write_state: WriteState::Active,
+        }
     }
 
     pub fn receive_plaintext_message<'a, 'b>(
@@ -253,6 +272,51 @@ impl PlaintextStream {
             receiver: &mut self.receiver,
             transcript,
         }
+    }
+
+    pub fn poll_drain(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
+        while !self.outgoing_encrypted.is_empty() {
+            match AsyncWrite::poll_write(
+                Pin::new(&mut self.inner),
+                cx,
+                &self.outgoing_encrypted,
+            ) {
+                Poll::Ready(Ok(w)) => {
+                    self.outgoing_encrypted.advance(w);
+                }
+                Poll::Ready(Err(e)) => {
+                    let tls_e: TLSError = TLSError::IOError(e.kind());
+                    self.write_state = WriteState::Error(tls_e.clone());
+                    return Poll::Ready(Err(tls_e));
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
+        }
+
+        match AsyncWrite::poll_flush(Pin::new(&mut self.inner), cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(TLSError::IOError(e.kind()))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    pub fn flush(&mut self) -> PlaintextStreamFlush {
+        PlaintextStreamFlush {
+            stream: self,
+        }
+    }
+}
+
+pub struct PlaintextStreamFlush<'a> {
+    stream: &'a mut PlaintextStream,
+}
+
+impl<'a> Future for PlaintextStreamFlush<'a> {
+    type Output = Result<(), TLSError>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::into_inner(self).stream.poll_drain(cx)
     }
 }
 
@@ -321,11 +385,6 @@ impl EncryptedStream {
             server_sequence_no: 0,
             encryption,
         }
-    }
-
-    // formerly encode EncryptedToSend
-    pub async fn send_direct(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
-        self.plaintext.inner.write_all(data).await
     }
 
     pub fn receive_message<'a, 'b>(
