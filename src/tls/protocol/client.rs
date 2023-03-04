@@ -1,6 +1,7 @@
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::fmt;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use bytes::{BytesMut, Buf};
 use ring::agreement::{EphemeralPrivateKey, PublicKey, X25519};
@@ -367,6 +368,7 @@ pub async fn establish_connection<T: 'static>(
 {
     let mut state = make_initial_state(transport, config, protocol_names)?;
     loop {
+        println!("establish_connection: state = {}", state);
         match state {
             ECState::Done(s) => return Ok(s.conn),
             ECState::Error(e) => return Err(e),
@@ -383,6 +385,20 @@ enum ECState {
     BeforeSendFinished(BeforeSendFinished),
     Done(ECStateDone),
     Error(TLSError),
+}
+
+impl fmt::Display for ECState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            ECState::BeforeSendClientHello(_) => write!(f, "BeforeSendClientHello"),
+            ECState::BeforeReceiveServerHello(_) => write!(f, "BeforeReceiveServerHello"),
+            ECState::BeforeReceiveServerMessages(_) => write!(f, "BeforeReceiveServerMessages"),
+            ECState::BeforeSendCertificateAndVerify(_) => write!(f, "BeforeSendCertificateAndVerify"),
+            ECState::BeforeSendFinished(_) => write!(f, "BeforeSendFinished"),
+            ECState::Done(_) => write!(f, "Done"),
+            ECState::Error(_) => write!(f, "Error"),
+        }
+    }
 }
 
 impl ECState {
