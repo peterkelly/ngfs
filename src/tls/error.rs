@@ -35,6 +35,7 @@ pub enum TLSError {
     CACertificateUnavailable,
     InvalidKey,
     IOError(std::io::ErrorKind),
+    ReceiveInWrongPlace,
 }
 
 impl From<TLSError> for std::io::Error {

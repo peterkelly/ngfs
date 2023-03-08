@@ -384,7 +384,15 @@ impl Future for EstablishConnection {
             match xself.state.take().unwrap() {
                 ECState::Done(s) => return Poll::Ready(Ok(s.conn)),
                 ECState::Error(e) => return Poll::Ready(Err(e)),
-                s => {
+                mut s => {
+                    if s.want_recv() {
+                        match s.do_poll_recv(cx) {
+                            Poll::Ready(Ok(())) => (),
+                            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                            Poll::Pending => (),
+                        }
+                    }
+
                     let (p, s) = s.poll_step(cx);
                     xself.state = Some(s);
                     match p {
@@ -427,10 +435,10 @@ impl ECState {
                 s.poll_step(cx)
             }
             ECState::BeforeReceiveServerHello(s) => {
-                s.poll_step(cx)
+                s.poll_step()
             }
             ECState::BeforeReceiveServerMessages(s) => {
-                s.poll_step(cx)
+                s.poll_step()
             }
             ECState::BeforeSendFinished(s) => {
                 s.poll_step(cx)
@@ -440,6 +448,40 @@ impl ECState {
             }
             ECState::Error(e) => {
                 (Poll::Ready(()), ECState::Error(e))
+            }
+        }
+    }
+
+    fn want_recv(&self) -> bool {
+        match self {
+            ECState::BeforeSendClientHello(_) => false,
+            ECState::BeforeReceiveServerHello(_) => true,
+            ECState::BeforeReceiveServerMessages(_) => true,
+            ECState::BeforeSendFinished(_) => false,
+            ECState::Done(_) => false,
+            ECState::Error(_) => false,
+        }
+    }
+
+    fn do_poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
+        match self {
+            ECState::BeforeSendClientHello(_) => {
+                Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
+            }
+            ECState::BeforeReceiveServerHello(s) => {
+                s.plaintext_stream.poll_recv(cx)
+            }
+            ECState::BeforeReceiveServerMessages(s) => {
+                s.stream.plaintext.poll_recv(cx)
+            }
+            ECState::BeforeSendFinished(_) => {
+                Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
+            }
+            ECState::Done(_) => {
+                Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
+            }
+            ECState::Error(_) => {
+                Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
             }
         }
     }
@@ -518,8 +560,8 @@ struct BeforeReceiveServerHello {
 }
 
 impl BeforeReceiveServerHello {
-    fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
-        match self.plaintext_stream.poll_receive_plaintext_message(&mut self.initial_transcript, cx) {
+    fn poll_step(mut self) -> (Poll<()>, ECState) {
+        match self.plaintext_stream.poll_receive_plaintext_message(&mut self.initial_transcript) {
             Poll::Ready(Ok(opt_message)) => (Poll::Ready(()), self.on_opt_message(opt_message)),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
             Poll::Pending => (Poll::Pending, ECState::BeforeReceiveServerHello(self))
@@ -580,13 +622,13 @@ struct BeforeReceiveServerMessages {
 }
 
 impl BeforeReceiveServerMessages {
-    fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
+    fn poll_step(mut self) -> (Poll<()>, ECState) {
         let mut rsm = ReceiveServerMessages {
             transcript: &mut self.transcript,
             stream: &mut self.stream,
             cstate: Some(self.cstate.take().unwrap()),
         };
-        match ReceiveServerMessages::poll(Pin::new(&mut rsm), cx) {
+        match ReceiveServerMessages::poll(Pin::new(&mut rsm)) {
             Poll::Ready(Ok(sm)) => {
                 (
                     Poll::Ready(()),
@@ -720,10 +762,8 @@ struct ReceiveServerMessages<'a> {
     cstate: Option<ClientState>,
 }
 
-impl<'a> Future for ReceiveServerMessages<'a> {
-    type Output = Result<ServerMessages, TLSError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+impl<'a> ReceiveServerMessages<'a> {
+    fn poll(self: Pin<&mut Self>) -> Poll<Result<ServerMessages, TLSError>> {
         let mut xself = Pin::into_inner(self);
 
         loop {
@@ -749,7 +789,7 @@ impl<'a> Future for ReceiveServerMessages<'a> {
             }
 
             let hash = xself.transcript.get_hash();
-            let message = match xself.stream.poll_receive_encrypted_message(cx, Some(xself.transcript)) {
+            let message = match xself.stream.poll_receive_encrypted_message(Some(xself.transcript)) {
                 Poll::Ready(Ok(r)) => r,
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending => return Poll::Pending,
@@ -895,8 +935,23 @@ impl EstablishedConnection {
             return Poll::Ready(Ok(()));
         }
         loop {
-            match self.stream.poll_receive_encrypted_message(cx, None) {
-                Poll::Pending => return Poll::Pending,
+            match self.stream.plaintext.poll_recv(cx) {
+                Poll::Ready(Ok(())) => (),
+                Poll::Ready(Err(e)) => {
+                    self.read_state = ReadState::Error(e.clone());
+                    return Poll::Ready(Err(e));
+                }
+                Poll::Pending => {
+                    cx.waker().wake_by_ref(); // TODO: Is this needed?
+                    return Poll::Pending;
+                }
+            }
+
+            match self.stream.poll_receive_encrypted_message(None) {
+                Poll::Pending => {
+                    cx.waker().wake_by_ref(); // TODO: Is this needed?
+                    return Poll::Pending;
+                }
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Ready(Ok(Some(Message::Handshake(Handshake::NewSessionTicket(_))))) => {
                     // ignore; repeat loop
