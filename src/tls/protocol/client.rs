@@ -489,7 +489,7 @@ struct BeforeSendClientHello {
 
 impl BeforeSendClientHello {
     fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
-        match self.plaintext_stream.poll_drain(cx) {
+        match self.plaintext_stream.poll_flush(cx) {
             Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
             Poll::Pending => (Poll::Pending, ECState::BeforeSendClientHello(self)),
@@ -661,7 +661,7 @@ struct BeforeSendFinished {
 
 impl BeforeSendFinished {
     fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
-        match self.stream.plaintext.poll_drain(cx) {
+        match self.stream.plaintext.poll_flush(cx) {
             Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
             Poll::Pending => (Poll::Pending, ECState::BeforeSendFinished(self)),
@@ -886,8 +886,8 @@ impl EstablishedConnection {
     }
 
 
-    fn poll_drain_encrypted(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
-        self.stream.plaintext.poll_drain(cx)
+    fn poll_flush_encrypted(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
+        self.stream.plaintext.poll_flush(cx)
     }
 
     fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
@@ -970,7 +970,7 @@ impl AsyncWrite for EstablishedConnection {
 
 
         let direct = Pin::into_inner(self);
-        match direct.poll_drain_encrypted(cx) {
+        match direct.poll_flush_encrypted(cx) {
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Ok(())) => (),
@@ -997,7 +997,7 @@ impl AsyncWrite for EstablishedConnection {
         }
 
         let direct = Pin::into_inner(self);
-        match direct.poll_drain_encrypted(cx) {
+        match direct.poll_flush_encrypted(cx) {
             Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
@@ -1030,7 +1030,7 @@ impl AsyncWrite for EstablishedConnection {
 
         // Wait until any remaining data has been sent; we don't want to shut down the connection
         // until this has been sent.
-        match direct.poll_drain_encrypted(cx) {
+        match direct.poll_flush_encrypted(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
             Poll::Ready(Ok(())) => (),

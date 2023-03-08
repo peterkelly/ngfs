@@ -317,7 +317,7 @@ impl PlaintextStream {
         }
     }
 
-    pub fn poll_drain(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
+    pub fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
         while !self.outgoing.is_empty() {
             match AsyncWrite::poll_write(
                 Pin::new(&mut self.inner),
@@ -359,7 +359,7 @@ pub struct PlaintextStreamFlush<'a> {
 impl<'a> Future for PlaintextStreamFlush<'a> {
     type Output = Result<(), TLSError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::into_inner(self).stream.poll_drain(cx)
+        Pin::into_inner(self).stream.poll_flush(cx)
     }
 }
 
