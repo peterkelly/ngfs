@@ -65,7 +65,7 @@ use super::super::types::alert::{
 use super::super::error::{
     TLSError,
 };
-use super::client_state::ClientState;
+use super::client_state::{ClientState, ReceivedFinished};
 use crate::util::util::vec_with_len;
 use crate::util::binary::{BinaryReader, BinaryWriter};
 use crate::formats::asn1;
@@ -664,13 +664,13 @@ async fn receive_server_messages(
     let mut cstate = ClientState::ReceivedServerHello;
 
     loop {
-        if let ClientState::ReceivedFinished {
+        if let ClientState::ReceivedFinished(ReceivedFinished {
                 encrypted_extensions,
                 certificate_request,
                 certificate,
                 certificate_verify,
                 finished,
-        } = cstate {
+        }) = cstate {
             return Ok(ServerMessages {
                 encrypted_extensions,
                 certificate_request,
