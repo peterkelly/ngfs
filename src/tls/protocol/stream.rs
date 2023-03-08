@@ -75,24 +75,23 @@ pub fn encrypt_record(
 
 pub struct RecordReceiver {
     incoming_data: BytesMut,
-    closed: bool,
+    read_state: ReadState,
 }
 
 impl RecordReceiver {
     pub fn new() -> Self {
         RecordReceiver {
             incoming_data: BytesMut::new(),
-            closed: false,
+            read_state: ReadState::Active,
         }
     }
 
     fn pop_record(&mut self) -> Poll<Result<Option<TLSOwnedPlaintext>, TLSError>> {
         if self.incoming_data.remaining() < 5 {
-            if self.closed {
-                return Poll::Ready(Ok(None));
-            }
-            else {
-                return Poll::Pending;
+            match &self.read_state {
+                ReadState::Active => return Poll::Pending,
+                ReadState::Eof => return Poll::Ready(Ok(None)),
+                ReadState::Error(e) => return Poll::Ready(Err(e.clone())),
             }
         }
 
@@ -112,11 +111,14 @@ impl RecordReceiver {
         }
 
         if self.incoming_data.remaining() < 5 + length {
-            if self.closed {
-                return Poll::Ready(Err(TLSError::InvalidPlaintextRecord));
-            }
-            else {
-                return Poll::Pending;
+            match &self.read_state {
+                ReadState::Active => return Poll::Pending,
+                ReadState::Eof => {
+                    let e = TLSError::InvalidPlaintextRecord;
+                    self.read_state = ReadState::Error(e.clone());
+                    return Poll::Ready(Err(e));
+                }
+                ReadState::Error(e) => return Poll::Ready(Err(e.clone())),
             }
         }
 
@@ -152,7 +154,9 @@ impl RecordReceiver {
     }
 
     fn close(&mut self) {
-        self.closed = true;
+        if let ReadState::Active = self.read_state {
+            self.read_state = ReadState::Eof;
+        }
     }
 }
 
@@ -167,19 +171,34 @@ fn poll_receive_record(
             Poll::Pending => (),
         };
 
-        match poll_receive_data(cx, reader) {
-            Poll::Ready(Ok(Some(data))) => {
-                receiver.append_data(&data);
-            }
-            Poll::Ready(Ok(None)) => {
-                receiver.close();
-            }
-            Poll::Ready(Err(e)) => {
-                return Poll::Ready(Err(e));
-            }
-            Poll::Pending => {
-                return Poll::Pending;
-            }
+        match poll_receive_and_add_data(receiver, cx, reader) {
+            Poll::Ready(Ok(())) => (),
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => return Poll::Pending,
+        };
+    }
+}
+
+fn poll_receive_and_add_data(
+    receiver: &mut RecordReceiver,
+    cx: &mut Context<'_>,
+    reader: &mut Pin<Box<dyn AsyncStream>>,
+) -> Poll<Result<(), TLSError>> {
+    match poll_receive_data(cx, reader) {
+        Poll::Ready(Ok(Some(data))) => {
+            receiver.append_data(&data);
+            return Poll::Ready(Ok(()));
+        }
+        Poll::Ready(Ok(None)) => {
+            receiver.close();
+            return Poll::Ready(Ok(()));
+        }
+        Poll::Ready(Err(e)) => {
+            receiver.read_state = ReadState::Error(e.clone());
+            return Poll::Ready(Err(e));
+        }
+        Poll::Pending => {
+            return Poll::Pending;
         }
     }
 }
@@ -268,9 +287,33 @@ impl PlaintextStream {
         transcript: &'b mut Vec<u8>,
     ) -> ReceivePlaintextMessage<'a, 'b> {
         ReceivePlaintextMessage {
-            reader: &mut self.inner,
-            receiver: &mut self.receiver,
+            plaintext: self,
             transcript,
+        }
+    }
+
+    pub fn poll_receive_plaintext_message(
+        &mut self,
+        transcript: &mut Vec<u8>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<Message>, TLSError>> {
+        match poll_receive_record_ignore_cc(cx, &mut self.inner, &mut self.receiver) {
+            Poll::Ready(Ok(Some(plaintext))) => {
+                // TODO: Support records containing multiple handshake messages
+                transcript.extend_from_slice(&plaintext.fragment);
+                let message = Message::from_raw(&plaintext.fragment, plaintext.content_type)
+                    .map_err(|_| TLSError::InvalidMessageRecord)?;
+                Poll::Ready(Ok(Some(message)))
+            }
+            Poll::Ready(Ok(None)) => {
+                Poll::Ready(Ok(None))
+            }
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(e))
+            }
+            Poll::Pending => {
+                Poll::Pending
+            }
         }
     }
 
@@ -321,8 +364,7 @@ impl<'a> Future for PlaintextStreamFlush<'a> {
 }
 
 pub struct ReceivePlaintextMessage<'a, 'b> {
-    reader: &'a mut Pin<Box<dyn AsyncStream>>,
-    receiver: &'a mut RecordReceiver,
+    plaintext: &'a mut PlaintextStream,
     transcript: &'b mut Vec<u8>,
 }
 
@@ -330,34 +372,8 @@ pub struct ReceivePlaintextMessage<'a, 'b> {
 impl<'a, 'b> Future for ReceivePlaintextMessage<'a, 'b> {
     type Output = Result<Option<Message>, TLSError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let direct = Pin::into_inner(self);
-        poll_receive_plaintext_message(cx, direct.reader, direct.receiver, direct.transcript)
-    }
-}
-
-fn poll_receive_plaintext_message(
-    cx: &mut Context<'_>,
-    reader: &mut Pin<Box<dyn AsyncStream>>,
-    receiver: &mut RecordReceiver,
-    transcript: &mut Vec<u8>,
-) -> Poll<Result<Option<Message>, TLSError>> {
-    match poll_receive_record_ignore_cc(cx, reader, receiver) {
-        Poll::Ready(Ok(Some(plaintext))) => {
-            // TODO: Support records containing multiple handshake messages
-            transcript.extend_from_slice(&plaintext.fragment);
-            let message = Message::from_raw(&plaintext.fragment, plaintext.content_type)
-                .map_err(|_| TLSError::InvalidMessageRecord)?;
-            Poll::Ready(Ok(Some(message)))
-        }
-        Poll::Ready(Ok(None)) => {
-            Poll::Ready(Ok(None))
-        }
-        Poll::Ready(Err(e)) => {
-            Poll::Ready(Err(e))
-        }
-        Poll::Pending => {
-            Poll::Pending
-        }
+        let inner = Pin::into_inner(self);
+        inner.plaintext.poll_receive_plaintext_message(inner.transcript, cx)
     }
 }
 

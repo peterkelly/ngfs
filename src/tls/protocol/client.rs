@@ -1,5 +1,6 @@
 use std::io;
 use std::pin::Pin;
+use std::future::Future;
 use std::task::{Context, Poll};
 use std::fmt;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -354,21 +355,46 @@ fn append_plaintext_handshake(
     Ok(())
 }
 
-pub async fn establish_connection<T: 'static>(
+pub fn establish_connection<T: 'static>(
     transport: Pin<Box<T>>,
     config: ClientConfig,
     protocol_names: &[&str],
-) -> Result<EstablishedConnection, TLSError>
+) -> EstablishConnection
     where T : AsyncRead + AsyncWrite + Send
 {
-    let mut state = make_initial_state(transport, config, protocol_names)?;
-    loop {
-        println!("establish_connection: state = {}", state);
-        match state {
-            ECState::Done(s) => return Ok(s.conn),
-            ECState::Error(e) => return Err(e),
-            _ => state = state.step().await,
+    let state = match make_initial_state(transport, config, protocol_names) {
+        Ok(r) => r,
+        Err(e) => ECState::Error(e),
+    };
+    EstablishConnection {
+        state: Some(state),
+    }
+}
+
+pub struct EstablishConnection {
+    state: Option<ECState>,
+}
+
+impl Future for EstablishConnection {
+    type Output = Result<EstablishedConnection, TLSError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut xself = Pin::into_inner(self);
+        loop {
+            match xself.state.take().unwrap() {
+                ECState::Done(s) => return Poll::Ready(Ok(s.conn)),
+                ECState::Error(e) => return Poll::Ready(Err(e)),
+                s => {
+                    let (p, s) = s.poll_step(cx);
+                    xself.state = Some(s);
+                    match p {
+                        Poll::Ready(()) => continue,
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+            }
         }
+
     }
 }
 
@@ -395,25 +421,25 @@ impl fmt::Display for ECState {
 }
 
 impl ECState {
-    async fn step(self) -> ECState {
+    fn poll_step(self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
         match self {
             ECState::BeforeSendClientHello(s) => {
-                s.do_step().await
+                s.poll_step(cx)
             }
             ECState::BeforeReceiveServerHello(s) => {
-                s.do_step().await
+                s.poll_step(cx)
             }
             ECState::BeforeReceiveServerMessages(s) => {
-                s.do_step().await
+                s.poll_step(cx)
             }
             ECState::BeforeSendFinished(s) => {
-                s.do_step().await
+                s.poll_step(cx)
             }
             ECState::Done(sdone) => {
-                ECState::Done(sdone)
+                (Poll::Ready(()), ECState::Done(sdone))
             }
             ECState::Error(e) => {
-                ECState::Error(e)
+                (Poll::Ready(()), ECState::Error(e))
             }
         }
     }
@@ -462,13 +488,12 @@ struct BeforeSendClientHello {
 }
 
 impl BeforeSendClientHello {
-    async fn do_step(mut self) -> ECState {
-        match self.plaintext_stream.flush().await {
-            Ok(()) => (),
-            Err(e) => return self.on_error(e),
-        };
-
-        self.on_data_sent()
+    fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
+        match self.plaintext_stream.poll_drain(cx) {
+            Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
+            Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
+            Poll::Pending => (Poll::Pending, ECState::BeforeSendClientHello(self)),
+        }
     }
 
     fn on_error(self, e: TLSError) -> ECState {
@@ -493,10 +518,11 @@ struct BeforeReceiveServerHello {
 }
 
 impl BeforeReceiveServerHello {
-    async fn do_step(mut self) -> ECState {
-        match self.plaintext_stream.receive_plaintext_message(&mut self.initial_transcript).await {
-            Ok(opt_message) => self.on_opt_message(opt_message),
-            Err(e) => self.on_error(e),
+    fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
+        match self.plaintext_stream.poll_receive_plaintext_message(&mut self.initial_transcript, cx) {
+            Poll::Ready(Ok(opt_message)) => (Poll::Ready(()), self.on_opt_message(opt_message)),
+            Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
+            Poll::Pending => (Poll::Pending, ECState::BeforeReceiveServerHello(self))
         }
     }
 
@@ -540,6 +566,7 @@ impl BeforeReceiveServerHello {
             stream: enc_stream,
             transcript: transcript,
             prk: prk,
+            cstate: Some(ClientState::ReceivedServerHello),
         })
     }
 }
@@ -549,13 +576,44 @@ struct BeforeReceiveServerMessages {
     stream: EncryptedStream,
     transcript: Transcript,
     prk: Vec<u8>,
+    cstate: Option<ClientState>,
 }
 
 impl BeforeReceiveServerMessages {
-    async fn do_step(mut self) -> ECState {
-        match receive_server_messages(&mut self.transcript, &mut self.stream).await {
-            Ok(sm) => self.on_server_messages(sm),
-            Err(e) => self.on_error(e),
+    fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
+        let mut rsm = ReceiveServerMessages {
+            transcript: &mut self.transcript,
+            stream: &mut self.stream,
+            cstate: Some(self.cstate.take().unwrap()),
+        };
+        match ReceiveServerMessages::poll(Pin::new(&mut rsm), cx) {
+            Poll::Ready(Ok(sm)) => {
+                (
+                    Poll::Ready(()),
+                    self.on_server_messages(sm),
+                )
+            }
+            Poll::Ready(Err(e)) => {
+                (
+                    Poll::Ready(()),
+                    self.on_error(e),
+                )
+            }
+            Poll::Pending => {
+                let cstate = Some(rsm.cstate.take().unwrap());
+                (
+                    Poll::Pending,
+                    ECState::BeforeReceiveServerMessages(
+                        BeforeReceiveServerMessages {
+                            config: self.config,
+                            stream: self.stream,
+                            transcript: self.transcript,
+                            prk: self.prk,
+                            cstate: cstate,
+                        }
+                    ),
+                )
+            }
         }
     }
 
@@ -602,13 +660,12 @@ struct BeforeSendFinished {
 }
 
 impl BeforeSendFinished {
-    async fn do_step(mut self) -> ECState {
-        match self.stream.plaintext.flush().await {
-            Ok(()) => (),
-            Err(e) => return self.on_error(e),
-        };
-
-        self.on_data_sent()
+    fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
+        match self.stream.plaintext.poll_drain(cx) {
+            Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
+            Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
+            Poll::Pending => (Poll::Pending, ECState::BeforeSendFinished(self)),
+        }
     }
 
     fn on_error(self, e: TLSError) -> ECState {
@@ -657,37 +714,59 @@ pub struct ServerMessages {
     pub finished: (Finished, Vec<u8>),
 }
 
-async fn receive_server_messages(
-    transcript: &mut Transcript,
-    stream: &mut EncryptedStream,
-) -> Result<ServerMessages, TLSError> {
-    let mut cstate = ClientState::ReceivedServerHello;
+struct ReceiveServerMessages<'a> {
+    transcript: &'a mut Transcript,
+    stream: &'a mut EncryptedStream,
+    cstate: Option<ClientState>,
+}
 
-    loop {
-        if let ClientState::ReceivedFinished(ReceivedFinished {
-                encrypted_extensions,
-                certificate_request,
-                certificate,
-                certificate_verify,
-                finished,
-        }) = cstate {
-            return Ok(ServerMessages {
-                encrypted_extensions,
-                certificate_request,
-                certificate,
-                certificate_verify,
-                finished,
-            })
-        }
+impl<'a> Future for ReceiveServerMessages<'a> {
+    type Output = Result<ServerMessages, TLSError>;
 
-        let hash = transcript.get_hash();
-        let message = stream.receive_message(Some(transcript)).await?;
-        match message {
-            Some(Message::Handshake(handshake)) => {
-                cstate = cstate.on_hash_and_handshake(hash, handshake)?;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut xself = Pin::into_inner(self);
+
+        loop {
+            match xself.cstate.take().unwrap() {
+                ClientState::ReceivedFinished(ReceivedFinished {
+                        encrypted_extensions,
+                        certificate_request,
+                        certificate,
+                        certificate_verify,
+                        finished,
+                }) => {
+                    return Poll::Ready(Ok(ServerMessages {
+                        encrypted_extensions,
+                        certificate_request,
+                        certificate,
+                        certificate_verify,
+                        finished,
+                    }));
+                }
+                other => {
+                    xself.cstate = Some(other);
+                }
             }
-            Some(message) => return Err(TLSError::UnexpectedMessage(message.name())),
-            None => return Err(TLSError::UnexpectedEOF),
+
+            let hash = xself.transcript.get_hash();
+            let message = match xself.stream.poll_receive_encrypted_message(cx, Some(xself.transcript)) {
+                Poll::Ready(Ok(r)) => r,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            };
+            match message {
+                Some(Message::Handshake(handshake)) => {
+                    xself.cstate = match xself.cstate.take().unwrap().on_hash_and_handshake(hash, handshake) {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            // ClientState::ReceivedServerHello
+                            return Poll::Ready(Err(e));
+                        }
+                    };
+                }
+                Some(message) => return Poll::Ready(Err(TLSError::UnexpectedMessage(message.name()))),
+                None => return Poll::Ready(Err(TLSError::UnexpectedEOF)),
+            }
         }
     }
 }
