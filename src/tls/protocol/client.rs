@@ -12,9 +12,10 @@ use super::stream::{
     encrypt_record,
     RecordReceiver,
     PlaintextStream,
-    EncryptedStream,
+    SequenceEncryption,
     ReadState,
     WriteState,
+    poll_receive_encrypted_message,
 };
 use super::super::helpers::{
     Transcript,
@@ -177,23 +178,25 @@ enum Endpoint {
 
 fn send_finished_noflush(
     transcript: &Transcript,
-    stream: &mut EncryptedStream,
+    plaintext: &mut PlaintextStream,
+    seqenc: &mut SequenceEncryption,
 ) -> Result<(), TLSError> {
-    let encryption = &stream.encryption;
+    let encryption = &seqenc.encryption;
     let finished_key = derive_secret(
         encryption.ciphers.hash_alg,
         &encryption.traffic_secrets.client.raw,
         b"finished", &[])?;
     let verify_data = encryption.ciphers.hash_alg.hmac_sign(&finished_key, &transcript.get_hash())?;
     let client_finished = Handshake::Finished(Finished { verify_data });
-    append_handshake(&client_finished, None, stream)?;
+    append_handshake(&client_finished, None, plaintext, seqenc)?;
     Ok(())
 }
 
 fn append_certificate(
     transcript: &mut Transcript,
     client_cert_data: &[u8],
-    stream: &mut EncryptedStream,
+    plaintext: &mut PlaintextStream,
+    seqenc: &mut SequenceEncryption,
 ) -> Result<(), TLSError> {
     let client_cert = x509::Certificate::from_bytes(client_cert_data)
         .map_err(|_| TLSError::InvalidCertificate)?;
@@ -207,14 +210,15 @@ fn append_certificate(
             }
         ],
     });
-    append_handshake(&handshake, Some(transcript), stream)?;
+    append_handshake(&handshake, Some(transcript), plaintext, seqenc)?;
     Ok(())
 }
 
 fn append_verify(
     transcript: &mut Transcript,
     client_key: &ClientKey,
-    stream: &mut EncryptedStream,
+    plaintext: &mut PlaintextStream,
+    seqenc: &mut SequenceEncryption,
 ) -> Result<(), TLSError> {
     let thash = transcript.get_hash();
     let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
@@ -234,28 +238,29 @@ fn append_verify(
         }
     };
     let handshake = Handshake::CertificateVerify(certificate_verify);
-    append_handshake(&handshake, Some(transcript), stream)?;
+    append_handshake(&handshake, Some(transcript), plaintext, seqenc)?;
     Ok(())
 }
 
 fn append_handshake(
     handshake: &Handshake,
     transcript: Option<&mut Transcript>,
-    stream: &mut EncryptedStream,
+    plaintext: &mut PlaintextStream,
+    seqenc: &mut SequenceEncryption,
 ) -> Result<(), TLSError> {
     let mut writer = BinaryWriter::new();
     writer.write_item(handshake).map_err(|_| TLSError::MessageEncodingFailed)?;
     let finished_bytes: Vec<u8> = Vec::from(writer);
     encrypt_record(
-        &mut stream.plaintext.outgoing,
+        &mut plaintext.outgoing,
         &finished_bytes,         // to_encrypt
         ContentType::Handshake, // content_type
-        &stream.encryption.traffic_secrets.client,        // traffic_secret
-        stream.client_sequence_no, // sequence_no
+        &seqenc.encryption.traffic_secrets.client,        // traffic_secret
+        seqenc.client_sequence_no, // sequence_no
         transcript,
     )?;
 
-    stream.client_sequence_no += 1;
+    seqenc.client_sequence_no += 1;
 
     Ok(())
 }
@@ -471,10 +476,10 @@ impl ECState {
                 Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
             }
             ECState::AfterSendClientHello(s) => {
-                s.plaintext_stream.poll_recv(cx)
+                s.plaintext.poll_recv(cx)
             }
             ECState::AfterReceiveServerHello(s) => {
-                s.stream.plaintext.poll_recv(cx)
+                s.plaintext.poll_recv(cx)
             }
             ECState::AfterReceiveServerMessages(_) => {
                 Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
@@ -520,7 +525,7 @@ fn make_initial_state<T: 'static>(
         config: config,
         private_key: private_key,
         initial_transcript: initial_transcript,
-        plaintext_stream: plaintext_stream,
+        plaintext: plaintext_stream,
     }))
 }
 
@@ -528,12 +533,12 @@ struct ECStateBegin {
     config: ClientConfig,
     private_key: EphemeralPrivateKey,
     initial_transcript: Vec<u8>,
-    plaintext_stream: PlaintextStream,
+    plaintext: PlaintextStream,
 }
 
 impl ECStateBegin {
     fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
-        match self.plaintext_stream.poll_flush(cx) {
+        match self.plaintext.poll_flush(cx) {
             Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
             Poll::Pending => (Poll::Pending, ECState::Begin(self)),
@@ -549,7 +554,7 @@ impl ECStateBegin {
             config: self.config,
             private_key: self.private_key,
             initial_transcript: self.initial_transcript,
-            plaintext_stream: self.plaintext_stream,
+            plaintext: self.plaintext,
         })
     }
 }
@@ -558,12 +563,12 @@ struct AfterSendClientHello {
     config: ClientConfig,
     private_key: EphemeralPrivateKey,
     initial_transcript: Vec<u8>,
-    plaintext_stream: PlaintextStream,
+    plaintext: PlaintextStream,
 }
 
 impl AfterSendClientHello {
     fn poll_step(mut self) -> (Poll<()>, ECState) {
-        match self.plaintext_stream.poll_receive_plaintext_message(&mut self.initial_transcript) {
+        match self.plaintext.poll_receive_plaintext_message(&mut self.initial_transcript) {
             Poll::Ready(Ok(opt_message)) => (Poll::Ready(()), self.on_opt_message(opt_message)),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
             Poll::Pending => (Poll::Pending, ECState::AfterSendClientHello(self))
@@ -603,11 +608,14 @@ impl AfterSendClientHello {
             ciphers,
         };
 
-        let enc_stream: EncryptedStream = EncryptedStream::new(self.plaintext_stream, encryption);
-
         ECState::AfterReceiveServerHello(AfterReceiveServerHello {
             config: self.config,
-            stream: enc_stream,
+            plaintext: self.plaintext,
+            seqenc: SequenceEncryption {
+                client_sequence_no: 0,
+                server_sequence_no: 0,
+                encryption,
+            },
             transcript: transcript,
             prk: prk,
             cstate: Some(ClientState::ReceivedServerHello),
@@ -617,7 +625,8 @@ impl AfterSendClientHello {
 
 struct AfterReceiveServerHello {
     config: ClientConfig,
-    stream: EncryptedStream,
+    plaintext: PlaintextStream,
+    seqenc: SequenceEncryption,
     transcript: Transcript,
     prk: Vec<u8>,
     cstate: Option<ClientState>,
@@ -627,7 +636,8 @@ impl AfterReceiveServerHello {
     fn poll_step(mut self) -> (Poll<()>, ECState) {
         let mut rsm = ReceiveServerMessages {
             transcript: &mut self.transcript,
-            stream: &mut self.stream,
+            plaintext: &mut self.plaintext,
+            seqenc: &mut self.seqenc,
             cstate: Some(self.cstate.take().unwrap()),
         };
         match ReceiveServerMessages::poll(Pin::new(&mut rsm)) {
@@ -650,7 +660,8 @@ impl AfterReceiveServerHello {
                     ECState::AfterReceiveServerHello(
                         AfterReceiveServerHello {
                             config: self.config,
-                            stream: self.stream,
+                            plaintext: self.plaintext,
+                            seqenc: self.seqenc,
                             transcript: self.transcript,
                             prk: self.prk,
                             cstate: cstate,
@@ -669,43 +680,45 @@ impl AfterReceiveServerHello {
         // Compute the new traffic secrets for application data, but don't use them yet.
         let application_secrets: TrafficSecrets = match compute_application_secrets(
             &self.transcript, &self.config,
-            &self.prk, &sm, &self.stream.encryption) {
+            &self.prk, &sm, &self.seqenc.encryption) {
             Ok(r) => r,
             Err(e) => return ECState::Error(e),
         };
 
         // Send the client certificate and Finished messages, using the handshake traffic secrets
         if let ClientAuth::Certificate { cert, key } = &self.config.client_auth {
-            match append_certificate(&mut self.transcript, cert, &mut self.stream) {
+            match append_certificate(&mut self.transcript, cert, &mut self.plaintext, &mut self.seqenc) {
                 Ok(()) => (),
                 Err(e) => return ECState::Error(e),
             };
-            match append_verify(&mut self.transcript, key, &mut self.stream) {
+            match append_verify(&mut self.transcript, key, &mut self.plaintext, &mut self.seqenc) {
                 Ok(()) => (),
                 Err(e) => return ECState::Error(e),
             };
         }
 
-        match send_finished_noflush(&self.transcript, &mut self.stream) {
+        match send_finished_noflush(&self.transcript, &mut self.plaintext, &mut self.seqenc) {
             Ok(()) => (),
             Err(e) => return self.on_error(e),
         };
 
         ECState::AfterReceiveServerMessages(AfterReceiveServerMessages {
-            stream: self.stream,
+            plaintext: self.plaintext,
+            seqenc: self.seqenc,
             application_secrets: application_secrets,
         })
     }
 }
 
 struct AfterReceiveServerMessages {
-    stream: EncryptedStream,
+    plaintext: PlaintextStream,
+    seqenc: SequenceEncryption,
     application_secrets: TrafficSecrets,
 }
 
 impl AfterReceiveServerMessages {
     fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
-        match self.stream.plaintext.poll_flush(cx) {
+        match self.plaintext.poll_flush(cx) {
             Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
             Poll::Pending => (Poll::Pending, ECState::AfterReceiveServerMessages(self)),
@@ -718,11 +731,17 @@ impl AfterReceiveServerMessages {
 
     fn on_data_sent(mut self) -> ECState {
         // Reset the encryption state for the stream to use the new traffic secrets
-        self.stream.client_sequence_no = 0;
-        self.stream.server_sequence_no = 0;
-        self.stream.encryption.traffic_secrets = self.application_secrets;
-
-        ECState::Done(ECStateDone { conn: EstablishedConnection::new(self.stream) })
+        self.seqenc = SequenceEncryption {
+            client_sequence_no: 0,
+            server_sequence_no: 0,
+            encryption: Encryption {
+                traffic_secrets: self.application_secrets,
+                ciphers: self.seqenc.encryption.ciphers,
+            }
+        };
+        ECState::Done(ECStateDone {
+            conn: EstablishedConnection::new(self.plaintext, self.seqenc)
+        })
     }
 }
 
@@ -760,7 +779,8 @@ pub struct ServerMessages {
 
 struct ReceiveServerMessages<'a> {
     transcript: &'a mut Transcript,
-    stream: &'a mut EncryptedStream,
+    plaintext: &'a mut PlaintextStream,
+    seqenc: &'a mut SequenceEncryption,
     cstate: Option<ClientState>,
 }
 
@@ -791,7 +811,13 @@ impl<'a> ReceiveServerMessages<'a> {
             }
 
             let hash = xself.transcript.get_hash();
-            let message = match xself.stream.poll_receive_encrypted_message(Some(xself.transcript)) {
+
+            let message = match poll_receive_encrypted_message(
+                &mut xself.plaintext.receiver,
+                &mut xself.seqenc.server_sequence_no,
+                &xself.seqenc.encryption,
+                Some(xself.transcript)
+            ) {
                 Poll::Ready(Ok(r)) => r,
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending => return Poll::Pending,
@@ -875,15 +901,17 @@ fn compute_application_secrets(
 }
 
 pub struct EstablishedConnection {
-    stream: EncryptedStream,
+    plaintext: PlaintextStream,
+    seqenc: SequenceEncryption,
     incoming_decrypted: BytesMut,
     read_state: ReadState,
 }
 
 impl EstablishedConnection {
-    fn new(stream: EncryptedStream) -> Self {
+    fn new(plaintext: PlaintextStream, seqenc: SequenceEncryption) -> Self {
         EstablishedConnection {
-            stream,
+            plaintext: plaintext,
+            seqenc: seqenc,
             incoming_decrypted: BytesMut::new(),
             read_state: ReadState::Active,
         }
@@ -891,19 +919,19 @@ impl EstablishedConnection {
 
     fn append_record(&mut self, data: &[u8], content_type: ContentType) -> Result<(), TLSError> {
         match encrypt_record(
-            &mut self.stream.plaintext.outgoing,
+            &mut self.plaintext.outgoing,
             data,
             content_type,
-            &self.stream.encryption.traffic_secrets.client,
-            self.stream.client_sequence_no,
+            &self.seqenc.encryption.traffic_secrets.client,
+            self.seqenc.client_sequence_no,
             None,
         ) {
             Ok(()) => {
-                self.stream.client_sequence_no += 1;
+                self.seqenc.client_sequence_no += 1;
                 Ok(())
             }
             Err(e) => {
-                self.stream.plaintext.write_state = WriteState::Error(e.clone());
+                self.plaintext.write_state = WriteState::Error(e.clone());
                 Err(e)
             }
         }
@@ -929,7 +957,7 @@ impl EstablishedConnection {
 
 
     fn poll_flush_encrypted(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
-        self.stream.plaintext.poll_flush(cx)
+        self.plaintext.poll_flush(cx)
     }
 
     fn poll_fill_incoming(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
@@ -937,7 +965,7 @@ impl EstablishedConnection {
             return Poll::Ready(Ok(()));
         }
         loop {
-            match self.stream.plaintext.poll_recv(cx) {
+            match self.plaintext.poll_recv(cx) {
                 Poll::Ready(Ok(())) => (),
                 Poll::Ready(Err(e)) => {
                     self.read_state = ReadState::Error(e.clone());
@@ -949,7 +977,12 @@ impl EstablishedConnection {
                 }
             }
 
-            match self.stream.poll_receive_encrypted_message(None) {
+            match poll_receive_encrypted_message(
+                &mut self.plaintext.receiver,
+                &mut self.seqenc.server_sequence_no,
+                &self.seqenc.encryption,
+                None,
+            ) {
                 Poll::Pending => {
                     cx.waker().wake_by_ref(); // TODO: Is this needed?
                     return Poll::Pending;
@@ -1019,7 +1052,7 @@ impl AsyncWrite for EstablishedConnection {
         buf: &[u8]
     ) -> Poll<Result<usize, io::Error>> {
         // Check for existing error condition
-        match &self.stream.plaintext.write_state {
+        match &self.plaintext.write_state {
             WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
             WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
             WriteState::Active => (), // ok, continue
@@ -1047,7 +1080,7 @@ impl AsyncWrite for EstablishedConnection {
         cx: &mut Context<'_>
     ) -> Poll<Result<(), io::Error>> {
         // Check for existing error condition
-        match &self.stream.plaintext.write_state {
+        match &self.plaintext.write_state {
             WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
             WriteState::InShutdown => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
             WriteState::Active => (), // ok, continue
@@ -1068,7 +1101,7 @@ impl AsyncWrite for EstablishedConnection {
         let mut direct = Pin::into_inner(self);
 
         // Check for existing error condition
-        match &direct.stream.plaintext.write_state {
+        match &direct.plaintext.write_state {
             WriteState::Error(e) => return Poll::Ready(Err(e.clone().into())),
             WriteState::InShutdown => (), // ok, continue
             WriteState::Active => {
@@ -1079,7 +1112,7 @@ impl AsyncWrite for EstablishedConnection {
                     Ok(()) => {
                         // Record the fact that shutdown() has been requested. This will cause
                         // future calls to write() or flush() will fail.
-                        direct.stream.plaintext.write_state = WriteState::InShutdown;
+                        direct.plaintext.write_state = WriteState::InShutdown;
                     }
                 }
             }
@@ -1094,7 +1127,7 @@ impl AsyncWrite for EstablishedConnection {
         };
 
         // There is no remaining data to be sent. Perform the actual shutdown.
-        match Pin::new(&mut direct.stream.plaintext.inner).poll_shutdown(cx) {
+        match Pin::new(&mut direct.plaintext.inner).poll_shutdown(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             Poll::Ready(Ok(())) => (),
@@ -1102,7 +1135,7 @@ impl AsyncWrite for EstablishedConnection {
 
         // Shutdown is now complete. Cause any future calls to shutdown() to fail. Note that
         // read() and write() will already fail since we transitioned to the InShutdown state.
-        direct.stream.plaintext.write_state = WriteState::Error(TLSError::IOError(io::ErrorKind::BrokenPipe));
+        direct.plaintext.write_state = WriteState::Error(TLSError::IOError(io::ErrorKind::BrokenPipe));
         Poll::Ready(Ok(()))
     }
 }

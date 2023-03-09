@@ -335,45 +335,13 @@ impl<'a> Future for PlaintextStreamFlush<'a> {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
-//                                                                                                //
-//                                         EncryptedStream                                        //
-//                                                                                                //
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-pub struct EncryptedStream {
-    pub plaintext: PlaintextStream,
+pub struct SequenceEncryption {
     pub client_sequence_no: u64,
     pub server_sequence_no: u64,
     pub encryption: Encryption,
 }
 
-impl EncryptedStream {
-    pub fn new(
-        plaintext: PlaintextStream,
-        encryption: Encryption,
-    ) -> Self {
-        EncryptedStream {
-            plaintext,
-            client_sequence_no: 0,
-            server_sequence_no: 0,
-            encryption,
-        }
-    }
-
-    pub fn poll_receive_encrypted_message(
-        &mut self,
-        transcript: Option<&mut Transcript>,
-    ) -> Poll<Result<Option<Message>, TLSError>> {
-        poll_receive_encrypted_message(
-            &mut self.plaintext.receiver,
-            &mut self.server_sequence_no,
-            &self.encryption,
-            transcript)
-    }
-}
-
-fn poll_receive_encrypted_message(
+pub fn poll_receive_encrypted_message(
     receiver: &mut RecordReceiver,
     server_sequence_no: &mut u64,
     encryption: &Encryption,
