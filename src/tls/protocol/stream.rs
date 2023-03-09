@@ -47,17 +47,12 @@ pub fn encrypt_record(
     content_type: ContentType,
     traffic_secret: &EncryptionKey,
     client_sequence_no: u64,
-    transcript: Option<&mut Transcript>,
 ) -> Result<(), TLSError> {
     if data_ref.len() > MAX_PLAINTEXT_RECORD_SIZE {
         return Err(TLSError::InvalidPlaintextRecord);
     }
 
     let mut data = data_ref.to_vec();
-
-    if let Some(transcript) = transcript {
-        transcript.update(&data);
-    }
     data.push(content_type.to_raw());
     encrypt_traffic(
         traffic_secret,

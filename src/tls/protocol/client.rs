@@ -176,27 +176,25 @@ enum Endpoint {
     Server,
 }
 
-fn send_finished_noflush(
+fn append_finished(
     transcript: &Transcript,
-    plaintext: &mut PlaintextStream,
-    seqenc: &mut SequenceEncryption,
+    encryption: &Encryption,
+    outbuf: &mut Vec<u8>,
 ) -> Result<(), TLSError> {
-    let encryption = &seqenc.encryption;
     let finished_key = derive_secret(
         encryption.ciphers.hash_alg,
         &encryption.traffic_secrets.client.raw,
         b"finished", &[])?;
     let verify_data = encryption.ciphers.hash_alg.hmac_sign(&finished_key, &transcript.get_hash())?;
     let client_finished = Handshake::Finished(Finished { verify_data });
-    append_handshake(&client_finished, None, plaintext, seqenc)?;
+    append_handshake(&client_finished, None, outbuf)?;
     Ok(())
 }
 
 fn append_certificate(
     transcript: &mut Transcript,
     client_cert_data: &[u8],
-    plaintext: &mut PlaintextStream,
-    seqenc: &mut SequenceEncryption,
+    outbuf: &mut Vec<u8>,
 ) -> Result<(), TLSError> {
     let client_cert = x509::Certificate::from_bytes(client_cert_data)
         .map_err(|_| TLSError::InvalidCertificate)?;
@@ -210,15 +208,14 @@ fn append_certificate(
             }
         ],
     });
-    append_handshake(&handshake, Some(transcript), plaintext, seqenc)?;
+    append_handshake(&handshake, Some(transcript), outbuf)?;
     Ok(())
 }
 
 fn append_verify(
     transcript: &mut Transcript,
     client_key: &ClientKey,
-    plaintext: &mut PlaintextStream,
-    seqenc: &mut SequenceEncryption,
+    outbuf: &mut Vec<u8>,
 ) -> Result<(), TLSError> {
     let thash = transcript.get_hash();
     let verify_input = make_verify_transcript_input(Endpoint::Client, &thash);
@@ -238,30 +235,22 @@ fn append_verify(
         }
     };
     let handshake = Handshake::CertificateVerify(certificate_verify);
-    append_handshake(&handshake, Some(transcript), plaintext, seqenc)?;
+    append_handshake(&handshake, Some(transcript), outbuf)?;
     Ok(())
 }
 
 fn append_handshake(
     handshake: &Handshake,
     transcript: Option<&mut Transcript>,
-    plaintext: &mut PlaintextStream,
-    seqenc: &mut SequenceEncryption,
+    outbuf: &mut Vec<u8>,
 ) -> Result<(), TLSError> {
     let mut writer = BinaryWriter::new();
     writer.write_item(handshake).map_err(|_| TLSError::MessageEncodingFailed)?;
     let finished_bytes: Vec<u8> = Vec::from(writer);
-    encrypt_record(
-        &mut plaintext.outgoing,
-        &finished_bytes,         // to_encrypt
-        ContentType::Handshake, // content_type
-        &seqenc.encryption.traffic_secrets.client,        // traffic_secret
-        seqenc.client_sequence_no, // sequence_no
-        transcript,
-    )?;
-
-    seqenc.client_sequence_no += 1;
-
+    if let Some(transcript) = transcript {
+        transcript.update(&finished_bytes);
+    }
+    outbuf.extend_from_slice(&finished_bytes);
     Ok(())
 }
 
@@ -685,22 +674,38 @@ impl AfterReceiveServerHello {
             Err(e) => return ECState::Error(e),
         };
 
+        let mut outbuf: Vec<u8> = Vec::new();
+
         // Send the client certificate and Finished messages, using the handshake traffic secrets
         if let ClientAuth::Certificate { cert, key } = &self.config.client_auth {
-            match append_certificate(&mut self.transcript, cert, &mut self.plaintext, &mut self.seqenc) {
+            match append_certificate(&mut self.transcript, cert, &mut outbuf) {
                 Ok(()) => (),
                 Err(e) => return ECState::Error(e),
             };
-            match append_verify(&mut self.transcript, key, &mut self.plaintext, &mut self.seqenc) {
+            match append_verify(&mut self.transcript, key, &mut outbuf) {
                 Ok(()) => (),
                 Err(e) => return ECState::Error(e),
             };
         }
 
-        match send_finished_noflush(&self.transcript, &mut self.plaintext, &mut self.seqenc) {
+        match append_finished(&self.transcript, &self.seqenc.encryption, &mut outbuf) {
             Ok(()) => (),
             Err(e) => return self.on_error(e),
         };
+
+        // TODO: Add this to a buffer, because it might be more than can fit in a single record
+        match encrypt_record(
+            &mut self.plaintext.outgoing,
+            &outbuf,         // to_encrypt
+            ContentType::Handshake, // content_type
+            &self.seqenc.encryption.traffic_secrets.client, // traffic_secret
+            self.seqenc.client_sequence_no, // sequence_no
+        ) {
+            Ok(()) => (),
+            Err(e) => return self.on_error(e),
+        };
+
+        self.seqenc.client_sequence_no += 1;
 
         ECState::AfterReceiveServerMessages(AfterReceiveServerMessages {
             plaintext: self.plaintext,
@@ -924,7 +929,6 @@ impl EstablishedConnection {
             content_type,
             &self.seqenc.encryption.traffic_secrets.client,
             self.seqenc.client_sequence_no,
-            None,
         ) {
             Ok(()) => {
                 self.seqenc.client_sequence_no += 1;
