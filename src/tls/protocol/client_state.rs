@@ -1,3 +1,4 @@
+use std::fmt;
 use super::super::types::handshake::{
     Handshake,
     EncryptedExtensions,
@@ -15,6 +16,19 @@ pub enum ClientState {
     ReceivedCertificate(ReceivedCertificate),
     ReceivedCertificateVerify(ReceivedCertificateVerify),
     ReceivedFinished(ReceivedFinished),
+}
+
+impl fmt::Display for ClientState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            ClientState::ReceivedServerHello => write!(f, "ReceivedServerHello"),
+            ClientState::ReceivedEncryptedExtensions(_) => write!(f, "ReceivedEncryptedExtensions"),
+            ClientState::ReceivedCertificateRequest(_) => write!(f, "ReceivedCertificateRequest"),
+            ClientState::ReceivedCertificate(_) => write!(f, "ReceivedCertificate"),
+            ClientState::ReceivedCertificateVerify(_) => write!(f, "ReceivedCertificateVerify"),
+            ClientState::ReceivedFinished(_) => write!(f, "ReceivedFinished"),
+        }
+    }
 }
 
 pub struct ReceivedEncryptedExtensions {

@@ -381,6 +381,7 @@ impl Future for EstablishConnection {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut xself = Pin::into_inner(self);
         loop {
+            println!("EstablishConnection: state = {}", xself.state.as_ref().unwrap());
             match xself.state.take().unwrap() {
                 ECState::Done(s) => return Poll::Ready(Ok(s.conn)),
                 ECState::Error(e) => return Poll::Ready(Err(e)),
@@ -407,10 +408,10 @@ impl Future for EstablishConnection {
 }
 
 enum ECState {
-    BeforeSendClientHello(BeforeSendClientHello),
-    BeforeReceiveServerHello(BeforeReceiveServerHello),
-    BeforeReceiveServerMessages(BeforeReceiveServerMessages),
-    BeforeSendFinished(BeforeSendFinished),
+    Begin(ECStateBegin),
+    AfterSendClientHello(AfterSendClientHello),
+    AfterReceiveServerHello(AfterReceiveServerHello),
+    AfterReceiveServerMessages(AfterReceiveServerMessages),
     Done(ECStateDone),
     Error(TLSError),
 }
@@ -418,10 +419,11 @@ enum ECState {
 impl fmt::Display for ECState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            ECState::BeforeSendClientHello(_) => write!(f, "BeforeSendClientHello"),
-            ECState::BeforeReceiveServerHello(_) => write!(f, "BeforeReceiveServerHello"),
-            ECState::BeforeReceiveServerMessages(_) => write!(f, "BeforeReceiveServerMessages"),
-            ECState::BeforeSendFinished(_) => write!(f, "BeforeSendFinished"),
+            ECState::Begin(_) => write!(f, "ECStateBegin"),
+            ECState::AfterSendClientHello(_) => write!(f, "AfterSendClientHello"),
+            ECState::AfterReceiveServerHello(s) => write!(f, "AfterReceiveServerHello {}",
+                s.cstate.as_ref().unwrap()),
+            ECState::AfterReceiveServerMessages(_) => write!(f, "AfterReceiveServerMessages"),
             ECState::Done(_) => write!(f, "Done"),
             ECState::Error(_) => write!(f, "Error"),
         }
@@ -431,16 +433,16 @@ impl fmt::Display for ECState {
 impl ECState {
     fn poll_step(self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
         match self {
-            ECState::BeforeSendClientHello(s) => {
+            ECState::Begin(s) => {
                 s.poll_step(cx)
             }
-            ECState::BeforeReceiveServerHello(s) => {
+            ECState::AfterSendClientHello(s) => {
                 s.poll_step()
             }
-            ECState::BeforeReceiveServerMessages(s) => {
+            ECState::AfterReceiveServerHello(s) => {
                 s.poll_step()
             }
-            ECState::BeforeSendFinished(s) => {
+            ECState::AfterReceiveServerMessages(s) => {
                 s.poll_step(cx)
             }
             ECState::Done(sdone) => {
@@ -454,10 +456,10 @@ impl ECState {
 
     fn want_recv(&self) -> bool {
         match self {
-            ECState::BeforeSendClientHello(_) => false,
-            ECState::BeforeReceiveServerHello(_) => true,
-            ECState::BeforeReceiveServerMessages(_) => true,
-            ECState::BeforeSendFinished(_) => false,
+            ECState::Begin(_) => false,
+            ECState::AfterSendClientHello(_) => true,
+            ECState::AfterReceiveServerHello(_) => true,
+            ECState::AfterReceiveServerMessages(_) => false,
             ECState::Done(_) => false,
             ECState::Error(_) => false,
         }
@@ -465,16 +467,16 @@ impl ECState {
 
     fn do_poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), TLSError>> {
         match self {
-            ECState::BeforeSendClientHello(_) => {
+            ECState::Begin(_) => {
                 Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
             }
-            ECState::BeforeReceiveServerHello(s) => {
+            ECState::AfterSendClientHello(s) => {
                 s.plaintext_stream.poll_recv(cx)
             }
-            ECState::BeforeReceiveServerMessages(s) => {
+            ECState::AfterReceiveServerHello(s) => {
                 s.stream.plaintext.poll_recv(cx)
             }
-            ECState::BeforeSendFinished(_) => {
+            ECState::AfterReceiveServerMessages(_) => {
                 Poll::Ready(Err(TLSError::ReceiveInWrongPlace))
             }
             ECState::Done(_) => {
@@ -514,7 +516,7 @@ fn make_initial_state<T: 'static>(
         &mut initial_transcript,
     )?;
 
-    Ok(ECState::BeforeSendClientHello(BeforeSendClientHello {
+    Ok(ECState::Begin(ECStateBegin {
         config: config,
         private_key: private_key,
         initial_transcript: initial_transcript,
@@ -522,19 +524,19 @@ fn make_initial_state<T: 'static>(
     }))
 }
 
-struct BeforeSendClientHello {
+struct ECStateBegin {
     config: ClientConfig,
     private_key: EphemeralPrivateKey,
     initial_transcript: Vec<u8>,
     plaintext_stream: PlaintextStream,
 }
 
-impl BeforeSendClientHello {
+impl ECStateBegin {
     fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
         match self.plaintext_stream.poll_flush(cx) {
             Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
-            Poll::Pending => (Poll::Pending, ECState::BeforeSendClientHello(self)),
+            Poll::Pending => (Poll::Pending, ECState::Begin(self)),
         }
     }
 
@@ -543,7 +545,7 @@ impl BeforeSendClientHello {
     }
 
     fn on_data_sent(self) -> ECState {
-        ECState::BeforeReceiveServerHello(BeforeReceiveServerHello {
+        ECState::AfterSendClientHello(AfterSendClientHello {
             config: self.config,
             private_key: self.private_key,
             initial_transcript: self.initial_transcript,
@@ -552,19 +554,19 @@ impl BeforeSendClientHello {
     }
 }
 
-struct BeforeReceiveServerHello {
+struct AfterSendClientHello {
     config: ClientConfig,
     private_key: EphemeralPrivateKey,
     initial_transcript: Vec<u8>,
     plaintext_stream: PlaintextStream,
 }
 
-impl BeforeReceiveServerHello {
+impl AfterSendClientHello {
     fn poll_step(mut self) -> (Poll<()>, ECState) {
         match self.plaintext_stream.poll_receive_plaintext_message(&mut self.initial_transcript) {
             Poll::Ready(Ok(opt_message)) => (Poll::Ready(()), self.on_opt_message(opt_message)),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
-            Poll::Pending => (Poll::Pending, ECState::BeforeReceiveServerHello(self))
+            Poll::Pending => (Poll::Pending, ECState::AfterSendClientHello(self))
         }
     }
 
@@ -603,7 +605,7 @@ impl BeforeReceiveServerHello {
 
         let enc_stream: EncryptedStream = EncryptedStream::new(self.plaintext_stream, encryption);
 
-        ECState::BeforeReceiveServerMessages(BeforeReceiveServerMessages {
+        ECState::AfterReceiveServerHello(AfterReceiveServerHello {
             config: self.config,
             stream: enc_stream,
             transcript: transcript,
@@ -613,7 +615,7 @@ impl BeforeReceiveServerHello {
     }
 }
 
-struct BeforeReceiveServerMessages {
+struct AfterReceiveServerHello {
     config: ClientConfig,
     stream: EncryptedStream,
     transcript: Transcript,
@@ -621,7 +623,7 @@ struct BeforeReceiveServerMessages {
     cstate: Option<ClientState>,
 }
 
-impl BeforeReceiveServerMessages {
+impl AfterReceiveServerHello {
     fn poll_step(mut self) -> (Poll<()>, ECState) {
         let mut rsm = ReceiveServerMessages {
             transcript: &mut self.transcript,
@@ -645,8 +647,8 @@ impl BeforeReceiveServerMessages {
                 let cstate = Some(rsm.cstate.take().unwrap());
                 (
                     Poll::Pending,
-                    ECState::BeforeReceiveServerMessages(
-                        BeforeReceiveServerMessages {
+                    ECState::AfterReceiveServerHello(
+                        AfterReceiveServerHello {
                             config: self.config,
                             stream: self.stream,
                             transcript: self.transcript,
@@ -689,24 +691,24 @@ impl BeforeReceiveServerMessages {
             Err(e) => return self.on_error(e),
         };
 
-        ECState::BeforeSendFinished(BeforeSendFinished {
+        ECState::AfterReceiveServerMessages(AfterReceiveServerMessages {
             stream: self.stream,
             application_secrets: application_secrets,
         })
     }
 }
 
-struct BeforeSendFinished {
+struct AfterReceiveServerMessages {
     stream: EncryptedStream,
     application_secrets: TrafficSecrets,
 }
 
-impl BeforeSendFinished {
+impl AfterReceiveServerMessages {
     fn poll_step(mut self, cx: &mut Context<'_>) -> (Poll<()>, ECState) {
         match self.stream.plaintext.poll_flush(cx) {
             Poll::Ready(Ok(())) => (Poll::Ready(()), self.on_data_sent()),
             Poll::Ready(Err(e)) => (Poll::Ready(()), self.on_error(e)),
-            Poll::Pending => (Poll::Pending, ECState::BeforeSendFinished(self)),
+            Poll::Pending => (Poll::Pending, ECState::AfterReceiveServerMessages(self)),
         }
     }
 
