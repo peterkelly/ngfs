@@ -76,7 +76,7 @@ impl<'a> BinaryReader<'a> {
         BinaryReader { buf, offset: 0 }
     }
 
-    fn new_at(buf: &[u8], offset: usize) -> BinaryReader {
+    pub fn new_at(buf: &[u8], offset: usize) -> BinaryReader {
         BinaryReader { buf, offset }
     }
 
@@ -122,6 +122,24 @@ impl<'a> BinaryReader<'a> {
         let res = &self.buf[self.offset..end];
         self.offset = end;
         Ok(res)
+    }
+
+    pub fn read_quic_varint(&mut self) -> Result<u64, BinaryError> {
+        // https://www.rfc-editor.org/rfc/rfc9000.html#sample-varint
+        //
+        // The length of variable-length integers is encoded in the
+        // first two bits of the first byte.
+        let v = self.read_u8()?;
+        let prefix = v >> 6;
+        let length = 1 << prefix;
+
+        // Once the length is known, remove these bits and read any
+        // remaining bytes.
+        let mut v = v as u64 & 0x3f;
+        for _ in 0..length - 1 {
+            v = (v << 8) + self.read_u8()? as u64;
+        }
+        Ok(v)
     }
 
     pub fn read_u8(&mut self) -> Result<u8, BinaryError> {
@@ -226,6 +244,10 @@ impl BinaryWriter {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
     pub fn write_u8(&mut self, value: u8) {
         self.data.push(value);
     }
@@ -244,6 +266,26 @@ impl BinaryWriter {
 
     pub fn write_u64(&mut self, value: u64) {
         self.data.extend_from_slice(&value.to_be_bytes());
+    }
+
+    pub fn write_quic_varint(&mut self, value: u64) {
+        let mut value_bytes = value.to_be_bytes();
+        // https://www.rfc-editor.org/rfc/rfc9000.html#name-variable-length-integer-enc
+        if value <= 63 {
+            self.data.extend_from_slice(&value_bytes[7..8]);
+        }
+        else if value <= 16383 {
+            value_bytes[6] |= 0x40;
+            self.data.extend_from_slice(&value_bytes[6..8]);
+        }
+        else if value <= 1073741823 {
+            value_bytes[4] |= 0x80;
+            self.data.extend_from_slice(&value_bytes[4..8]);
+        }
+        else {
+            value_bytes[0] |= 0xc0;
+            self.data.extend_from_slice(&value_bytes[0..8]);
+        }
     }
 
     pub fn write_raw(&mut self, data: &[u8]) {
@@ -396,5 +438,11 @@ impl Default for BinaryWriter {
 impl From<BinaryWriter> for Vec<u8> {
     fn from(writer: BinaryWriter) -> Vec<u8> {
         writer.data
+    }
+}
+
+impl AsRef<[u8]> for BinaryWriter {
+    fn as_ref(&self) -> &[u8] {
+        self.data.as_ref()
     }
 }

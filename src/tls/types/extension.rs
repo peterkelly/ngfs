@@ -503,8 +503,30 @@ impl FromBinary for DistinguishedName {
     }
 }
 
+
+pub struct TransportParameters(pub Vec<u8>);
+
+impl fmt::Debug for TransportParameters {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", BinaryData(&self.0))
+    }
+}
+
+impl ToBinary for TransportParameters {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_raw(&self.0);
+        Ok(())
+    }
+}
+
+impl FromBinary for TransportParameters {
+    type Output = TransportParameters;
+    fn from_binary(reader: &mut BinaryReader) -> Result<Self, BinaryError> {
+        Ok(TransportParameters(Vec::from(reader.remaining_data())))
+    }
+}
+
 // https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
-#[derive(Debug)]
 pub enum Extension {
     ApplicationLayerProtocolNegotiation(Vec<ProtocolName>),
     SignatureAlgorithms(Vec<SignatureScheme>),
@@ -521,6 +543,32 @@ pub enum Extension {
     CertificateAuthorities(Vec<DistinguishedName>), // (47)  rfc8446
     KeyShareClientHello(Vec<KeyShareEntry>), // (51), rfc8446
     KeyShareServerHello(KeyShareEntry), // (51), rfc8446
+    TransportParameters(TransportParameters), // (57), rfc9001
+}
+
+impl fmt::Debug for Extension {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // write!(f, "{}", BinaryData(&self.0))
+        use Extension::*;
+        match self {
+            ApplicationLayerProtocolNegotiation(v) => write!(f, "ApplicationLayerProtocolNegotiation {:?}", v),
+            SignatureAlgorithms(v) => write!(f, "SignatureAlgorithms {:?}", v),
+            ServerName(v) => write!(f, "ServerName {:?}", v),
+            SupportedGroups(v) => write!(f, "SupportedGroups {:?}", v),
+            ECPointFormats(v) => write!(f, "ECPointFormats {:?}", v),
+            Unknown(id, data) => write!(f, "Unknown({}) {}", id, BinaryData(data)),
+            EncryptThenMac => write!(f, "EncryptThenMac"),
+            ExtendedMasterSecret => write!(f, "ExtendedMasterSecret"),
+            NextProtocolNegotiation(v) => write!(f, "NextProtocolNegotiation {:?}", v),
+            PostHandshakeAuth => write!(f, "PostHandshakeAuth"),
+            SupportedVersions(v) => write!(f, "SupportedVersions {:?}", v),
+            PskKeyExchangeModes(v) => write!(f, "PskKeyExchangeModes {:?}", v),
+            CertificateAuthorities(v) => write!(f, "CertificateAuthorities {:?}", v),
+            KeyShareClientHello(v) => write!(f, "KeyShareClientHello {:?}", v),
+            KeyShareServerHello(v) => write!(f, "KeyShareServerHello {:?}", v),
+            TransportParameters(v) => write!(f, "TransportParameters {:?}", v),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -623,6 +671,9 @@ impl Extension {
                     }
                 }
             }
+            57 => {
+                Ok(Extension::TransportParameters(nested_reader.read_item::<TransportParameters>()?))
+            }
             _ => {
                 Ok(Extension::Unknown(extension_type, nested_reader.remaining_data().to_vec()))
             }
@@ -692,6 +743,10 @@ impl ToBinary for Extension {
             Extension::KeyShareServerHello(key_share) => {
                 writer.write_u16(51);
                 writer.write_u16_nested(|w| w.write_item(key_share))
+            }
+            Extension::TransportParameters(params) => {
+                writer.write_u16(57);
+                writer.write_u16_nested(|w| w.write_item(params))
             }
         }
     }

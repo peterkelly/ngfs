@@ -68,9 +68,18 @@ impl Handshake {
                 client_hello.to_binary(temp_writer)?;
                 Ok(1)
             }
-            Handshake::Finished(finished) => {
-                finished.to_binary(temp_writer)?;
-                Ok(20)
+            Handshake::ServerHello(server_hello) => {
+                server_hello.to_binary(temp_writer)?;
+                Ok(2)
+            }
+            Handshake::EndOfEarlyData(_) => {
+                unimplemented!("Handshake::EndOfEarlyData");
+            }
+            Handshake::EncryptedExtensions(_) => {
+                unimplemented!("Handshake::EncryptedExtensions");
+            }
+            Handshake::CertificateRequest(_) => {
+                unimplemented!("Handshake::CertificateRequest");
             }
             Handshake::Certificate(certificate) => {
                 certificate.to_binary(temp_writer)?;
@@ -80,7 +89,19 @@ impl Handshake {
                 certificate_verify.to_binary(temp_writer)?;
                 Ok(15)
             }
-            _ => unimplemented!(), // TODO
+            Handshake::Finished(finished) => {
+                finished.to_binary(temp_writer)?;
+                Ok(20)
+            }
+            Handshake::NewSessionTicket(_) => {
+                unimplemented!("Handshake::NewSessionTicket");
+            }
+            Handshake::KeyUpdate(_) => {
+                unimplemented!("Handshake::KeyUpdate");
+            }
+            Handshake::Unknown(_, _) => {
+                unimplemented!("Handshake::Unknown");
+            }
         }
     }
 }
@@ -283,6 +304,18 @@ impl FromBinary for ServerHello {
             legacy_compression_method,
             extensions,
         })
+    }
+}
+
+impl ToBinary for ServerHello {
+    fn to_binary(&self, writer: &mut BinaryWriter) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_u16(self.legacy_version);
+        writer.write_raw(&self.random);
+        writer.write_len8_bytes(&self.legacy_session_id_echo)?;
+        writer.write_item(&self.cipher_suite)?;
+        writer.write_u8(self.legacy_compression_method);
+        writer.write_len16_list(&self.extensions)?;
+        Ok(())
     }
 }
 

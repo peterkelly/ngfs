@@ -11,18 +11,65 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
+use crate::util::util::BinaryData;
 
-struct Address {
+pub struct Address {
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ConnectionId {
+pub enum ConnectionIdError {
+    Invalid,
 }
 
-struct StreamId(u64); // 62-bit integer
+impl std::error::Error for ConnectionIdError {
+}
+
+impl fmt::Display for ConnectionIdError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Invalid connection id")
+    }
+}
+
+impl fmt::Debug for ConnectionIdError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ConnectionId(pub Vec<u8>);
+
+impl ConnectionId {
+    pub fn from_raw(data: &[u8]) -> Result<ConnectionId, ConnectionIdError> {
+        if data.len() <= 20 {
+            Ok(ConnectionId(Vec::from(data)))
+        }
+        else {
+            Err(ConnectionIdError::Invalid)
+        }
+    }
+}
+
+impl fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.0.len() == 0 {
+            write!(f, ".")
+        }
+        else {
+            write!(f, "{}", BinaryData(&self.0))
+        }
+    }
+}
+
+impl fmt::Debug for ConnectionId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+pub struct StreamId(pub u64); // 62-bit integer
 
 impl StreamId {
-    fn initiator(&self) -> Initiator {
+    pub fn initiator(&self) -> Initiator {
 
         // Section 2.1: "The least significant bit (0x01) of the stream ID identifies the
         // initiator of the stream. Client-initiated streams have even-numbered stream IDs (with
@@ -36,7 +83,7 @@ impl StreamId {
         }
     }
 
-    fn directionality(&self) -> Directionality {
+    pub fn directionality(&self) -> Directionality {
         // Section 2.1: "The second least significant bit (0x02) of the stream ID distinguishes
         // between bidirectional streams (with the bit set to 0) and unidirectional streams (with
         // the bit set to 1)."
@@ -48,7 +95,7 @@ impl StreamId {
         }
     }
 
-    fn stream_type(&self) -> StreamType {
+    pub fn stream_type(&self) -> StreamType {
         match self.0 & 0x03 {
             0x00 => StreamType::ClientInitiatedBidirectional,
             0x01 => StreamType::ServerInitiatedBidirectional,
@@ -58,18 +105,18 @@ impl StreamId {
     }
 }
 
-struct StreamIdAllocator {
+pub struct StreamIdAllocator {
     next: u64,
 }
 
 impl StreamIdAllocator {
-    fn new() -> Self {
+    pub fn new() -> Self {
         StreamIdAllocator {
             next: 0,
         }
     }
 
-    fn allocate(stream_type: StreamType) -> StreamId {
+    pub fn allocate(stream_type: StreamType) -> StreamId {
         // Section 2.1: "The stream space for each type begins at the minimum value (0x00 through
         // 0x03, respectively); successive streams of each type are created with numerically
         // increasing stream IDs. A stream ID that is used out of order results in all streams of
@@ -78,17 +125,17 @@ impl StreamIdAllocator {
     }
 }
 
-enum Initiator {
+pub enum Initiator {
     Client,
     Server,
 }
 
-enum Directionality {
+pub enum Directionality {
     Bidirectional,
     Unidirectional,
 }
 
-enum StreamType {
+pub enum StreamType {
     ClientInitiatedBidirectional,  // 0x00
     ServerInitiatedBidirectional,  // 0x01
     ClientInitiatedUnidirectional, // 0x02
@@ -96,27 +143,27 @@ enum StreamType {
 }
 
 
-struct Datagram {
+pub struct Datagram {
     packets: Vec<Packet>,
 }
 
 #[derive(Clone, Debug)]
-struct Packet {
-    frames: Vec<Frame>,
-    src_connection_id: ConnectionId,
-    dst_connection_id: ConnectionId,
-    packet_no: u64,
-    packet_type: PacketType,
+pub struct Packet {
+    pub frames: Vec<Frame>,
+    pub src_connection_id: ConnectionId,
+    pub dst_connection_id: ConnectionId,
+    pub packet_no: u64,
+    pub packet_type: PacketType,
 }
 
 impl Packet {
-    fn is_ack_eliciting(&self) -> bool {
+    pub fn is_ack_eliciting(&self) -> bool {
         todo!()
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum PacketType {
+pub enum PacketType {
     Initial,
     ZeroRTT,
     Handshake,
@@ -127,7 +174,7 @@ enum PacketType {
 }
 
 #[derive(Clone, Debug)]
-enum Frame {
+pub enum Frame {
     Padding,            // 0x00
     Ping,               // 0x01
     Ack,                // 0x02-0x03
@@ -146,13 +193,13 @@ enum Frame {
     RetireConnectionId, // 0x19
     PathChallenge,      // 0x1a
     PathResponse,       // 0x1b
-    ConnectionClose,    // 0x1c-0x1d
+    ConnectionClose(ConnectionCloseFrame),    // 0x1c-0x1d
     HandshakeDone,      // 0x1e
 }
 
 
 
-struct StreamFrame {
+pub struct StreamFrame {
     fin: bool, // type is in encoding only, we just need to represent fin
     stream_id: StreamId,
     offset: u64,
@@ -161,13 +208,13 @@ struct StreamFrame {
 }
 
 
-struct Stream {
+pub struct Stream {
     recv_bytes: u64,
     recv_limit: u64,
     recv_final_size: Option<u64>,
 }
 
-struct Connection {
+pub struct Connection {
     recv_bytes: u64,
     recv_limit: u64,
     streams: BTreeMap<StreamId, Stream>,
@@ -177,7 +224,7 @@ struct Connection {
 }
 
 impl Connection {
-    fn new(our_connection_id: ConnectionId, their_connection_id: ConnectionId) -> Self {
+    pub fn new(our_connection_id: ConnectionId, their_connection_id: ConnectionId) -> Self {
         Connection {
             recv_bytes: 0,
             recv_limit: 0,
@@ -188,16 +235,16 @@ impl Connection {
     }
 }
 
-enum EndpointType {
+pub enum EndpointType {
     Client,
     Server,
 }
 
-fn generate_connection_id() -> ConnectionId {
+pub fn generate_connection_id() -> ConnectionId {
     todo!()
 }
 
-struct QUIC {
+pub struct QUIC {
     connections: Vec<Rc<RefCell<Connection>>>,
     endpoint_type: EndpointType,
 }
@@ -270,9 +317,16 @@ impl Environment {
 }
 
 #[derive(Clone, Debug)]
-struct CryptoFrame {
-    start_offset: u64,
-    data: Vec<u8>,
+pub struct CryptoFrame {
+    pub start_offset: u64,
+    pub data: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConnectionCloseFrame {
+    pub error_code: u64,
+    pub frame_type: Option<u64>,
+    pub reason: String,
 }
 
 struct Buffer(Vec<u8>);

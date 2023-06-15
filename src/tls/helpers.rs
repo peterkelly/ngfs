@@ -123,7 +123,19 @@ impl TrafficSecrets {
     }
 }
 
-fn hkdf_expand_label(
+pub fn hkdf_expand_label2(
+    alg: HashAlgorithm,
+    prk: &[u8],
+    label_suffix: &[u8],
+    context: &[u8],
+    len: usize,
+) -> Result<Vec<u8>, CryptError> {
+    let mut okm = vec![0; len];
+    hkdf_expand_label(alg, prk, label_suffix, context, &mut okm)?;
+    Ok(okm)
+}
+
+pub fn hkdf_expand_label(
     alg: HashAlgorithm,
     prk: &[u8],
     label_suffix: &[u8],
