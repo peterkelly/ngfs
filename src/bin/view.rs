@@ -119,6 +119,7 @@ fn info(args: &[String]) -> Result<(), Box<dyn Error>> {
     println!("Piece length: {}", torrent.piece_length);
     println!("Pieces: {}", torrent.pieces.len());
     println!("Files: {}", torrent.files.len());
+    println!("Total length: {}", torrent.total_length);
 
     Ok(())
 }

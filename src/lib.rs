@@ -9,3 +9,5 @@ pub mod formats;
 pub mod util;
 pub mod crypto;
 pub mod bittorrent;
+
+pub use util::id::Id;

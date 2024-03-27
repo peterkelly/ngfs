@@ -84,9 +84,21 @@ pub struct Torrent {
     pub files: Vec<TorrentFile>,
     pub piece_length: usize,
     pub pieces: Vec<PieceHash>,
+    pub total_length: usize,
 }
 
 impl Torrent {
+    pub fn last_piece_length(&self) -> usize {
+        if self.pieces.len() == 0 {
+            // This case should never happen
+            self.total_length
+        }
+        else {
+            let all_but_last = self.piece_length * (self.pieces.len() - 1);
+            self.total_length - all_but_last
+        }
+    }
+
     fn parse_announce_list(be_announce_list_value: &Value) -> Result<Vec<TrackerGroup>, TorrentError> {
         let mut groups: Vec<TrackerGroup> = Vec::new();
         let be_announce_list = be_announce_list_value.as_list()?;
@@ -158,6 +170,15 @@ impl Torrent {
         let hashdata: [u8; 20] = hasher.finalize().into();
 
         let info_hash = InfoHash { data: hashdata };
+        let mut total_length: usize = 0;
+        for file in files.iter() {
+            total_length += file.length;
+        }
+
+        if total_length > piece_length * pieces.len() {
+            return Err(TorrentError::String(format!("Not enough pieces")));
+        }
+
         Ok(Torrent {
             data: Vec::from(data),
             root: value,
@@ -167,6 +188,7 @@ impl Torrent {
             files,
             piece_length,
             pieces,
+            total_length,
         })
     }
 }
