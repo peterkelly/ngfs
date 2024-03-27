@@ -20,7 +20,7 @@ impl<'a, T> Future for ReadOptVarInt<'a, T>
 {
     type Output = Result<Option<u64>, io::Error>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut iself = Pin::into_inner(self);
+        let iself = Pin::into_inner(self);
 
         loop {
             let mut raw_buf: [u8; 1] = [0; 1];

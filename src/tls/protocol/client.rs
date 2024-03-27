@@ -373,7 +373,7 @@ impl Future for EstablishConnection {
     type Output = Result<EstablishedConnection, TLSError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut xself = Pin::into_inner(self);
+        let xself = Pin::into_inner(self);
         loop {
             println!("EstablishConnection: state = {}", xself.state.as_ref().unwrap());
             match xself.state.take().unwrap() {
@@ -791,7 +791,7 @@ struct ReceiveServerMessages<'a> {
 
 impl<'a> ReceiveServerMessages<'a> {
     fn poll(self: Pin<&mut Self>) -> Poll<Result<ServerMessages, TLSError>> {
-        let mut xself = Pin::into_inner(self);
+        let xself = Pin::into_inner(self);
 
         loop {
             match xself.cstate.take().unwrap() {
@@ -1102,7 +1102,7 @@ impl AsyncWrite for EstablishedConnection {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>
     ) -> Poll<Result<(), io::Error>> {
-        let mut direct = Pin::into_inner(self);
+        let direct = Pin::into_inner(self);
 
         // Check for existing error condition
         match &direct.plaintext.write_state {

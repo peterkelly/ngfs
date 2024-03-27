@@ -309,7 +309,7 @@ impl<'a> Future for Connect<'a> {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>
     ) -> Poll<Self::Output> {
-        let mut iself = Pin::into_inner(self);
+        let iself = Pin::into_inner(self);
         let stream_id = match &iself.stream_id {
             None => {
                 let stream_id = iself.connector.shared.lock().unwrap().append_new(iself.name.clone());

@@ -5,7 +5,7 @@ use crate::util::util::BinaryData;
 use crate::formats::protobuf::protobuf::VarInt;
 use crate::formats::protobuf::varint;
 
-enum DecodeVarintError {
+pub enum DecodeVarintError {
     UnexpectedEof,
     Other(varint::DecodeError),
 }
