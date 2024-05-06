@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
-use torrent::util::detrand::Generator;
+use ngfs::util::detrand::Generator;
 
 fn main() {
     let mut gen = Generator::new(12345);

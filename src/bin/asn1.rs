@@ -8,11 +8,11 @@
 
 use std::error::Error;
 use clap::{Parser, ValueHint};
-use torrent::util::binary::BinaryReader;
-use torrent::formats::asn1;
-use torrent::formats::asn1::writer::encode_item;
-use torrent::crypto::x509;
-use torrent::crypto::pem::decode_pem;
+use ngfs::util::binary::BinaryReader;
+use ngfs::formats::asn1;
+use ngfs::formats::asn1::writer::encode_item;
+use ngfs::crypto::x509;
+use ngfs::crypto::pem::decode_pem;
 
 #[derive(Parser, Debug)]
 #[command(name = "asn1: Test for reading/writing ASN.1 DER files")]

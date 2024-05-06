@@ -6,8 +6,8 @@
 // #![allow(unused_macros)]
 
 use std::error::Error;
-use torrent::formats::bencoding;
-use torrent::bittorrent::torrent::{Torrent};
+use ngfs::formats::bencoding;
+use ngfs::bittorrent::torrent::{Torrent};
 
 fn decode(data: &[u8]) -> Result<bencoding::Value, Box<dyn Error>> {
     match bencoding::parse(data) {

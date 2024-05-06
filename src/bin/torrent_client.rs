@@ -20,10 +20,10 @@ use clap::Parser;
 use url::Url;
 use bytes::{Bytes, BytesMut, Buf, BufMut};
 use ring::rand::{SystemRandom, SecureRandom};
-use torrent::util::util::{BinaryData, DebugHexDump, Indent};
-use torrent::bittorrent::torrent::{Torrent};
-use torrent::bittorrent::data::{BitField};
-use torrent::bittorrent::protocol::{Message, Handshake, Request, ProtocolError};
+use ngfs::util::util::{BinaryData, DebugHexDump, Indent};
+use ngfs::bittorrent::torrent::{Torrent};
+use ngfs::bittorrent::data::{BitField};
+use ngfs::bittorrent::protocol::{Message, Handshake, Request, ProtocolError};
 
 const LISTEN_PORT: u16 = 6681;
 
@@ -1014,7 +1014,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 // use std::collections::BTreeMap;
-// use torrent::Id;
+// use ngfs::Id;
 
 // fn main() -> Result<(), Box<dyn Error>> {
 //     let mut ids: Vec<Id> = Vec::new();

@@ -17,7 +17,7 @@ use quinn::Endpoint;
 use tokio::net::UdpSocket;
 use aes::Aes128;
 use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
-use torrent::ipfs::types::multibase::{
+use ngfs::ipfs::types::multibase::{
     DecodeError,
     Base,
     encode,
@@ -25,16 +25,16 @@ use torrent::ipfs::types::multibase::{
     decode,
     decode_noprefix,
 };
-use torrent::crypto::aead::AeadAlgorithm;
-use torrent::crypto::crypt::{HashAlgorithm, Hasher};
-use torrent::crypto::error::CryptError;
-use torrent::quic::encryption::{
+use ngfs::crypto::aead::AeadAlgorithm;
+use ngfs::crypto::crypt::{HashAlgorithm, Hasher};
+use ngfs::crypto::error::CryptError;
+use ngfs::quic::encryption::{
     add_header_protection,
     remove_header_protection,
     encrypt_payload,
     decrypt_payload,
 };
-use torrent::quic::spec::{
+use ngfs::quic::spec::{
     Frame,
     CryptoFrame,
     ConnectionCloseFrame,
@@ -43,11 +43,11 @@ use torrent::quic::spec::{
     ConnectionId,
     EndpointType,
 };
-use torrent::quic::wire::{ConnectionSecrets, EndpointSecrets};
-use torrent::quic::parameters::TransportParameter;
-use torrent::tls::helpers::hkdf_expand_label2;
-use torrent::tls::types::handshake::{Handshake, CipherSuite, ClientHello};
-use torrent::tls::types::extension::{
+use ngfs::quic::wire::{ConnectionSecrets, EndpointSecrets};
+use ngfs::quic::parameters::TransportParameter;
+use ngfs::tls::helpers::hkdf_expand_label2;
+use ngfs::tls::types::handshake::{Handshake, CipherSuite, ClientHello};
+use ngfs::tls::types::extension::{
     Extension,
     TransportParameters,
     ECPointFormat,
@@ -58,8 +58,8 @@ use torrent::tls::types::extension::{
     PskKeyExchangeMode,
     ProtocolName,
 };
-use torrent::util::binary::{BinaryReader, BinaryWriter, ToBinary, BinaryError};
-use torrent::util::util::{BinaryData, DebugHexDump, Indent};
+use ngfs::util::binary::{BinaryReader, BinaryWriter, ToBinary, BinaryError};
+use ngfs::util::util::{BinaryData, DebugHexDump, Indent};
 
 const raw_crypto_frame_str: &str = "
 060040f1010000ed0303ebf8fa56f129 39b9584a3896472ec40bb863cfd3e868

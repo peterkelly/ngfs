@@ -8,13 +8,13 @@
 
 use std::error::Error;
 use clap::{Parser, Subcommand, ValueHint};
-use torrent::util::util::from_hex;
-use torrent::util::binary::BinaryReader;
-use torrent::formats::asn1;
-use torrent::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
-use torrent::formats::asn1::writer::encode_item;
-use torrent::crypto::pem::{decode_pem_with_label, encode_pem};
-use torrent::crypto::x509::{
+use ngfs::util::util::from_hex;
+use ngfs::util::binary::BinaryReader;
+use ngfs::formats::asn1;
+use ngfs::formats::asn1::value::{Integer, ObjectIdentifier, BitString, Value, Item};
+use ngfs::formats::asn1::writer::encode_item;
+use ngfs::crypto::pem::{decode_pem_with_label, encode_pem};
+use ngfs::crypto::x509::{
     Certificate,
     TBSCertificate,
     Version,

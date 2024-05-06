@@ -7,7 +7,7 @@ use std::pin::{Pin};
 use std::task::{Context, Poll};
 use tokio::net::UdpSocket;
 
-use torrent::util::util::escape_string;
+use ngfs::util::util::escape_string;
 
 struct Receiver<A, B> {
     a: Pin<Box<dyn Future<Output = A>>>,

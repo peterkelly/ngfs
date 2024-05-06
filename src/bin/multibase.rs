@@ -7,7 +7,7 @@
 
 use std::error::Error;
 use clap::{Parser, Subcommand};
-use torrent::ipfs::types::multibase::{
+use ngfs::ipfs::types::multibase::{
     DecodeError,
     Base,
     encode,

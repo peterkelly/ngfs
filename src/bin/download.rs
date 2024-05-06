@@ -20,8 +20,8 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 
-use torrent::util::util::BinaryData;
-use torrent::bittorrent::torrent::{Torrent};
+use ngfs::util::util::BinaryData;
+use ngfs::bittorrent::torrent::{Torrent};
 
 #[derive(Debug)]
 // enum WriterCommand {

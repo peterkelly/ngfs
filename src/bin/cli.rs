@@ -6,11 +6,11 @@
 // #![allow(unused_macros)]
 
 use std::error::Error;
-use torrent::util::util::{BinaryData};
-use torrent::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPB};
-use torrent::formats::protobuf::varint;
-use torrent::ipfs::types::cid::CID;
-use torrent::libp2p::peer_id::PrivateKey;
+use ngfs::util::util::{BinaryData};
+use ngfs::formats::protobuf::protobuf::{PBufReader, PBufWriter, VarInt, FromPB};
+use ngfs::formats::protobuf::varint;
+use ngfs::ipfs::types::cid::CID;
+use ngfs::libp2p::peer_id::PrivateKey;
 use rand::distributions::{Distribution, Uniform};
 
 fn get_argument<'a>(args: &'a [String], index: usize, name: &str) -> Result<&'a String, Box<dyn Error>> {

@@ -1,8 +1,12 @@
 [package]
-name = "torrent"
+name = "ngfs"
 version = "0.1.0"
 authors = ["Peter Kelly <peter@pmkelly.net>"]
-edition = "2018"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/peterkelly/ngfs"
+keywords = ["networking", "p2p", "bittorrent", "ipfs"]
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

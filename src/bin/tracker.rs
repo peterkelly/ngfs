@@ -13,8 +13,8 @@ use tokio::net::{UdpSocket, lookup_host};
 use std::net::SocketAddr;
 use rand::prelude::Rng;
 
-use torrent::util::util::BinaryData;
-use torrent::bittorrent::torrent::{Torrent};
+use ngfs::util::util::BinaryData;
+use ngfs::bittorrent::torrent::{Torrent};
 
 // struct ConnectRequest {
 // }

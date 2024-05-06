@@ -5,8 +5,8 @@
 // #![allow(unused_imports)]
 // #![allow(unused_macros)]
 
-use torrent::util::util::{from_hex, BinaryData};
-use torrent::ipfs::types::multibase::{Base, encode, decode};
+use ngfs::util::util::{from_hex, BinaryData};
+use ngfs::ipfs::types::multibase::{Base, encode, decode};
 use std::error::Error;
 
 fn main_result() -> Result<(), Box<dyn Error>> {

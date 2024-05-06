@@ -13,9 +13,9 @@ use tokio::net::{TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::sleep;
 use std::time::Duration;
-use torrent::crypto::pem::{decode_pem, decode_pem_with_label};
-use torrent::util::util::{vec_with_len, DebugHexDump, Indent};
-use torrent::tls::protocol::client::{
+use ngfs::crypto::pem::{decode_pem, decode_pem_with_label};
+use ngfs::util::util::{vec_with_len, DebugHexDump, Indent};
+use ngfs::tls::protocol::client::{
     EstablishedConnection,
     ServerAuth,
     ClientAuth,

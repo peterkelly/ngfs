@@ -11,18 +11,18 @@ use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 use rustls::{Certificate, PrivateKey};
-use torrent::libp2p::multistream::{
+use ngfs::libp2p::multistream::{
     multistream_handshake,
     multistream_list,
     multistream_select,
     SelectResponse,
 };
-use torrent::libp2p::tls::generate_certificate;
+use ngfs::libp2p::tls::generate_certificate;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use torrent::ipfs::node::{IPFSNode, ServiceRegistry};
-use torrent::ipfs::bitswap::handler::{bitswap_handler, bitswap_handler_show};
+use ngfs::ipfs::node::{IPFSNode, ServiceRegistry};
+use ngfs::ipfs::bitswap::handler::{bitswap_handler, bitswap_handler_show};
 
 const ID_PROTOCOL: &[u8] = b"/ipfs/id/1.0.0\n";
 const ID_PROTOCOL_STR: &str = "/ipfs/id/1.0.0";

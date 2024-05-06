@@ -8,8 +8,8 @@
 use std::error::Error;
 use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::rand::SystemRandom;
-use torrent::util::util::{from_hex, BinaryData, DebugHexDump, Indent};
-use torrent::crypto::crypt::HashAlgorithm;
+use ngfs::util::util::{from_hex, BinaryData, DebugHexDump, Indent};
+use ngfs::crypto::crypt::HashAlgorithm;
 
 fn test_hexdump() -> Result<(), Box<dyn Error>> {
     let len_str: String = match std::env::args().nth(2) {

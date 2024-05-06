@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::cmp::Ordering;
 use rand::rngs::StdRng;
 use rand::{SeedableRng, RngCore};
-use torrent::sim::{
+use ngfs::sim::{
     ChannelParameters,
     Endpoint,
     ChannelMessage,
